@@ -1,7 +1,20 @@
 <!DOCTYPE html>
 <html>
-  <head></head>
+  <head>
+    <meta charset="UTF-8">
+    <title>NAA Analysis - WIP</title>
+  </head>
   <body>
-    Hello! This is a placeholder text used to ensure the proper functionality of the CICD of this repo.
+    <form id="userForm">
+        <label for="userInput">Enter text:</label>
+        <input type="text" id="userInput" placeholder="Type something...">
+        <button type="button" onclick="displayValue()">Print Back</button>
+    </form>
+
+    <h3>Output:</h3>
+    <div id="displayArea"></div>
+
+    <!-- Link to external JavaScript file -->
+    <script src="script.js"></script>
   </body>
 </html>
