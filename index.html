@@ -1,28 +1,46 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="UTF-8">
-    <title>NAA Analysis - WIP</title>
-  </head>
-  <body>
-    <p>This is a work in progress. Current functionality:</p>
-    <ul>
-      <li>
-        Adding a printback, so whatever the user enters gets returned.
-      </li>
-    </ul>
-    <form id="userForm">
-        <label for="userInput">Enter text:</label>
-        <input type="text" id="userInput" placeholder="Type something...">
-        <br/>
-        <br/>
-        <button type="button" onclick="displayValue()">Print Back</button>
-    </form>
 
-    <h3>Output:</h3>
-    <div id="displayArea"></div>
+<head>
+  <meta charset="UTF-8">
+  <title>NAA Analysis - WIP</title>
+</head>
 
-    <!-- Link to external JavaScript file -->
-    <script src="script.js"></script>
-  </body>
+<body>
+  <p>This is a work in progress. Current functionality:</p>
+  <ul>
+    <li>
+      Adding a printback, so whatever the user enters gets returned.
+    </li>
+  </ul>
+  <form id="userForm">
+    <label for="elementName">
+      Element Name:
+    </label>
+    <input type="text" id="elementName" placeholder="Iron"
+      title="What is the name of the element you would like to use?">
+    <br />
+    <br />
+    <label for="isotope">Isotope Name: </label>
+    <input type="text" id="isotope" placeholder="ex. Fe-59" title="What isotope would you like to use?">
+    <br />
+    <br />
+    <label for="energy">Energy (KeV): </label>
+    <input type="number" id="energy" placeholder="123.456" title="What energy are you using? Units are KeV">
+    <br />
+    <br />
+    <!-- <label for="userInput">Enter text:</label>
+    <input type="text" id="userInput" placeholder="Type something...">
+    <br />
+    <br /> -->
+    <button type="button" onclick="computeDecayConstant()">Submit</button>
+  </form>
+
+  <h3>Output:</h3>
+  <div id="displayArea"></div>
+
+  <!-- Link to external JavaScript file -->
+  <script src="script.js"></script>
+</body>
+
 </html>
