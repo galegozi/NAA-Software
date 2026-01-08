@@ -79,6 +79,7 @@
 			<br />
 			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
 			<ul class="list-inside list-disc">
+				<li>Uncertainity & relevant calculations</li>
 				<li>Multiple isotopes</li>
 				<li>Multiple standards</li>
 				<li>Multiple unknowns</li>
