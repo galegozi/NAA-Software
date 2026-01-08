@@ -66,7 +66,7 @@
 		}}
 	>
 		{#if step === 0}
-			<h1 class="text-3xl font-bold">NAA Analysis - Version 1.0</h1>
+			<h1 class="text-3xl font-bold">NAA Analysis - Version 2.0 PRERELEASE</h1>
 			<p>
 				This version includes a complete analysis process for a single isotope, a single standard,
 				and a single unknown sample.
@@ -84,6 +84,7 @@
 				<li>Multiple standards</li>
 				<li>Multiple unknowns</li>
 				<li>Exporting reports</li>
+				<li>Additional option: Use net count / third factor (third factor from short dead time correction) for dead time correction</li>
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
