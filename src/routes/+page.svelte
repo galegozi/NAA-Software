@@ -9,7 +9,7 @@
 	import { getAll as MMGA } from '../lib/NAAMath/MultiMaterialMath.ts';
 	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
 
-	let step = $state(1);
+	let step = $state(0);
 
 	let isoRef: IsotopeInfo | undefined = $state(undefined);
 	let matRefs = $state({
@@ -19,7 +19,14 @@
 
 	let isotopeInfo = $state({ elementName: '', isotopeName: '', energy: 0, halfLife: 0 });
 	let materials = $state({
-		reference: { NETL_code: '', sampleName: '', mass: 0, irradiationTime: 0, knownConcentration: 0, knownUncertainty: 0 },
+		reference: {
+			NETL_code: '',
+			sampleName: '',
+			mass: 0,
+			irradiationTime: 0,
+			knownConcentration: 0,
+			knownUncertainty: 0
+		},
 		unknown: { NETL_code: '', sampleName: '', mass: 0, irradiationTime: 0 }
 	});
 
@@ -52,35 +59,44 @@
 </script>
 
 <div style="padding: 5%">
-	<h1>NAA Analysis - Version 1.0</h1>
-	<p>This version includes a complete analysis process for a single isotope, a single standard, and a single unknown sample</p>
-	<h2>Future plans:</h2>
-	<ol>
-		<li>Version 2.0: Upload from Maestro</li>
-	</ol>
-	<h2>Future additions, not planned yet:</h2>
-	<ul>
-		<li>Multiple isotopes</li>
-		<li>Multiple standards</li>
-		<li>Multiple unknowns</li>
-		<li>Exporting reports</li>
-	</ul>
 	<form
 		onsubmit={(e) => {
 			e.preventDefault();
 			handleSubmit();
 		}}
 	>
-		{#if step === 1}
-			<p>Step 1: Isotope Information</p>
+		{#if step === 0}
+			<h1 class="text-3xl font-bold">NAA Analysis - Version 1.0</h1>
+			<p>
+				This version includes a complete analysis process for a single isotope, a single standard,
+				and a single unknown sample.
+			</p>
+			<br />
+			<h2 class="text-2xl font-bold">Future plans:</h2>
+			<ol class="list-inside list-decimal">
+				<li>Version 2.0: Upload from Maestro</li>
+			</ol>
+			<br />
+			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
+			<ul class="list-inside list-disc">
+				<li>Multiple isotopes</li>
+				<li>Multiple standards</li>
+				<li>Multiple unknowns</li>
+				<li>Exporting reports</li>
+			</ul>
+			<br />
+			<button type="button" onclick={next}>Get Started</button>
+		{:else if step === 1}
+			<h2 class="text-2xl font-bold">Step 1: Isotope Information</h2>
 			<p>
 				This is where you enter information about the isotope. This is used in the concentration
 				calculations.
 			</p>
+			<br /><br />
 			<IsotopeInfo bind:this={isoRef} bind:isotopeInfo />
 
 			<br />
-
+			<h3 class="text-xl font-bold">Computed Isotope Information</h3>
 			<pre>{JSON.stringify(isoComp, null, 4)}</pre>
 
 			<button
@@ -90,17 +106,18 @@
 				Next
 			</button>
 		{:else if step === 2}
-			<p>Step 2: Reference Material Information</p>
+			<h2 class="text-2xl font-bold">Step 2: Reference Material Information</h2>
 			<p>
 				This is where you enter information about the reference material. This is used when
 				comparing to the unknown material to determine concentrations.
 			</p>
+			<br /><br />
 			<RefMatInfo bind:this={matRefs.reference} bind:refMatInfo={materials.reference} />
 
 			<br />
-			<p>Reference Material Information</p>
+			<h3 class="text-xl font-bold">Reference Material Information</h3>
 			<pre>{JSON.stringify(matComp.reference, null, 4)}</pre>
-			<p>Reference and Isotope Information</p>
+			<h3 class="text-xl font-bold">Reference and Isotope Information</h3>
 			<pre>{JSON.stringify(matIsoComp.reference, null, 4)}</pre>
 
 			<button
@@ -117,16 +134,17 @@
 				Next
 			</button>
 		{:else if step === 3}
-			<p>Step 3: Unknown Material Information</p>
+			<h2 class="text-2xl font-bold">Step 3: Unknown Material Information</h2>
 			<p>
 				This is where you enter information about the unknown material you are trying to understand.
 			</p>
+			<br /><br />
 			<MaterialInfo bind:this={matRefs.unknown} bind:materialInfo={materials.unknown} />
 
 			<br />
-			<p>Unknown Material Information</p>
+			<h3 class="text-xl font-bold">Unknown Material Information</h3>
 			<pre>{JSON.stringify(matComp.unknown, null, 4)}</pre>
-			<p>Unknown and Isotope Information</p>
+			<h3 class="text-xl font-bold">Unknown and Isotope Information</h3>
 			<pre>{JSON.stringify(matIsoComp.unknown, null, 4)}</pre>
 
 			<button
@@ -143,24 +161,24 @@
 				Confirm and Review
 			</button>
 		{:else if step === 4}
-			<p>Step 4: Review and Submit</p>
-			<p>Please review your information before submitting.</p>
-			<p>Isotope Information</p>
+			<h2 class="text-2xl font-bold">Step 4: Review</h2>
+			<p>Please review all information you entered and see computed values below.</p>
+			<h3 class="text-xl font-bold">Isotope Information</h3>
 			<pre>{JSON.stringify(isotopeInfo, null, 4)}</pre>
 			<br />
-			<p>Material Information</p>
+			<h3 class="text-xl font-bold">Material Information</h3>
 			<pre>{JSON.stringify(materials, null, 4)}</pre>
 			<br /><br />
-			<p>Computed Values:</p>
-			<p>Isotope Computed Values</p>
+			<h3 class="text-xl font-bold">Computed Values:</h3>
+			<h4 class="text-lg font-semibold">Isotope Computed Values</h4>
 			<pre>{JSON.stringify(isoComp, null, 4)}</pre>
-			<p>Material Computed Values</p>
+			<h4 class="text-lg font-semibold">Material Computed Values</h4>
 			<pre>{JSON.stringify(matComp, null, 4)}</pre>
-			<p>Material and Isotope Computed Values</p>
+			<h4 class="text-lg font-semibold">Material and Isotope Computed Values</h4>
 			<pre>{JSON.stringify(matIsoComp, null, 4)}</pre>
-			<p>Multi Material Computed Values</p>
+			<h4 class="text-lg font-semibold">Multi Material Computed Values</h4>
 			<pre>{JSON.stringify(multiMatComp, null, 4)}</pre>
-			<p>Computed Values that use everything</p>
+			<h4 class="text-lg font-semibold">Computed Values that use everything</h4>
 			<pre>{JSON.stringify(everythingComp, null, 4)}</pre>
 			<br />
 			<!-- <p>Reference Material Information</p>
