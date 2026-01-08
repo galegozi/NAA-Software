@@ -7,6 +7,7 @@
 	let roiData: object[] = $state([]);
 	let parsedRealTime: number = $state(0);
 	let parsedLiveTime: number = $state(0);
+	let { onParsed } = $props();
 	// let parseCompleted: boolean = $state(false);
 
 	async function handleFileChange() {
@@ -64,6 +65,13 @@
 				roiData.push(roiEntry);
 			}
 			// parseCompleted = true;
+			if (onParsed) {
+				onParsed({
+					roiData: roiData,
+					realTime: parsedRealTime,
+					liveTime: parsedLiveTime
+				});
+			}
 		}
 	}
 </script>
@@ -80,5 +88,5 @@
 <!-- <pre>{JSON.stringify(roiData, null, 4)}</pre>
 <pre>Real Time: {parsedRealTime} seconds</pre>
 <pre>Live Time: {parsedLiveTime} seconds</pre> -->
-<pre>{fileContent}</pre>
+<!-- <pre>{fileContent}</pre> -->
 <!-- {/if} -->

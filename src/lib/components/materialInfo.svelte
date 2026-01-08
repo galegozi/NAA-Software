@@ -15,28 +15,23 @@
 			netCounts: 0,
 			countUncertainty: 0,
 			dtType: undefined
-		})
+		}),
+		getRoiIndex
 	} = $props();
 
-	export function validateMaterialInfo() {
-		return (
-			materialInfo.NETL_code !== '' &&
-			materialInfo.sampleName !== '' &&
-			materialInfo.mass !== 0 &&
-			materialInfo.irradiationTime !== 0 &&
-			materialInfo.decayTime !== 0 &&
-			materialInfo.liveTime !== 0 &&
-			materialInfo.realTime !== 0 &&
-			materialInfo.fluence !== 0 &&
-			materialInfo.grossCounts !== 0 &&
-			materialInfo.netCounts !== 0 &&
-			materialInfo.countUncertainty !== 0 &&
-			materialInfo.dtType !== undefined
-		);
+	function handleParsedMaestro(data: object) {
+		// process data as needed
+		materialInfo.liveTime = materialInfo.liveTime || (data as any).liveTime;
+		materialInfo.realTime = materialInfo.realTime || (data as any).realTime;
+		console.log(JSON.stringify(data, null, 4));
+		let roiIndex = getRoiIndex((data as any).roiData);
+		materialInfo.grossCounts = (data as any).roiData[roiIndex].grossCounts;
+		materialInfo.netCounts = (data as any).roiData[roiIndex].netCounts;
+		materialInfo.countUncertainty = (data as any).roiData[roiIndex].uncertainty;
 	}
 </script>
 
-<MaestroUpload />
+<MaestroUpload onParsed={handleParsedMaestro} />
 <br />
 
 <label class="label">

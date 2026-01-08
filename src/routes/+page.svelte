@@ -9,6 +9,23 @@
 	import { getAll as MMGA } from '../lib/NAAMath/MultiMaterialMath.ts';
 	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
 
+	function findIndex(roiData: object[]): number {
+		// for each element in roiData, check distance between centroid and isotope energy
+		// return index of closest match
+		let closestIndex = -1;
+		let closestDistance = Number.MAX_VALUE;
+		for (let i = 0; i < roiData.length; i++) {
+			const roi = roiData[i] as any;
+			const centroid = roi.centroid;
+			const distance = Math.abs(centroid - isotopeInfo.energy);
+			if (distance < closestDistance) {
+				closestDistance = distance;
+				closestIndex = i;
+			}
+		}
+		return closestIndex;
+	}
+
 	let step = $state(0);
 
 	let isoRef: IsotopeInfo | undefined = $state(undefined);
@@ -66,15 +83,15 @@
 		}}
 	>
 		{#if step === 0}
-			<h1 class="text-3xl font-bold">NAA Analysis - Version 2.0 PRERELEASE</h1>
+			<h1 class="text-3xl font-bold">NAA Analysis - Version 2.0</h1>
 			<p>
 				This version includes a complete analysis process for a single isotope, a single standard,
-				and a single unknown sample.
+				and a single unknown sample. It also includes uploading from a Maestro .rpt file to
+				auto-fill gross counts, net counts, and uncertainty.
 			</p>
 			<br />
 			<h2 class="text-2xl font-bold">Future plans:</h2>
 			<ol class="list-inside list-decimal">
-				<li>Version 2.0: Upload from Maestro</li>
 			</ol>
 			<br />
 			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
@@ -84,7 +101,12 @@
 				<li>Multiple standards</li>
 				<li>Multiple unknowns</li>
 				<li>Exporting reports</li>
-				<li>Additional option: Use net count / third factor (third factor from short dead time correction) for dead time correction</li>
+				<li>
+					Additional option: Use net count / third factor (third factor from short dead time
+					correction) for dead time correction
+				</li>
+				<li>Font size adjustment</li>
+				<li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li>
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
@@ -101,12 +123,7 @@
 			<h3 class="text-xl font-bold">Computed Isotope Information</h3>
 			<pre>{JSON.stringify(isoComp, null, 4)}</pre>
 
-			<button
-				type="button"
-				onclick={() => stepExit(next, () => isoRef?.validateIsotopeInfo() ?? false)}
-			>
-				Next
-			</button>
+			<button type="button" onclick={next}> Next </button>
 		{:else if step === 2}
 			<h2 class="text-2xl font-bold">Step 2: Reference Material Information</h2>
 			<p>
@@ -114,7 +131,7 @@
 				comparing to the unknown material to determine concentrations.
 			</p>
 			<br /><br />
-			<RefMatInfo bind:this={matRefs.reference} bind:refMatInfo={materials.reference} />
+			<RefMatInfo getRoiIndex={findIndex} bind:refMatInfo={materials.reference} />
 
 			<br />
 			<h3 class="text-xl font-bold">Reference Material Information</h3>
@@ -122,26 +139,20 @@
 			<h3 class="text-xl font-bold">Reference and Isotope Information</h3>
 			<pre>{JSON.stringify(matIsoComp.reference, null, 4)}</pre>
 
-			<button
-				type="button"
-				onclick={() => stepExit(prev, () => matRefs.reference?.validateRefMatInfo() ?? false)}
-			>
-				Back
-			</button>
+			<button type="button" onclick={prev}> Back </button>
 			&nbsp;&nbsp;
-			<button
-				type="button"
-				onclick={() => stepExit(next, () => matRefs.reference?.validateRefMatInfo() ?? false)}
-			>
-				Next
-			</button>
+			<button type="button" onclick={next}> Next </button>
 		{:else if step === 3}
 			<h2 class="text-2xl font-bold">Step 3: Unknown Material Information</h2>
 			<p>
 				This is where you enter information about the unknown material you are trying to understand.
 			</p>
 			<br /><br />
-			<MaterialInfo bind:this={matRefs.unknown} bind:materialInfo={materials.unknown} />
+			<MaterialInfo
+				getRoiIndex={findIndex}
+				bind:this={matRefs.unknown}
+				bind:materialInfo={materials.unknown}
+			/>
 
 			<br />
 			<h3 class="text-xl font-bold">Unknown Material Information</h3>
@@ -149,19 +160,9 @@
 			<h3 class="text-xl font-bold">Unknown and Isotope Information</h3>
 			<pre>{JSON.stringify(matIsoComp.unknown, null, 4)}</pre>
 
-			<button
-				type="button"
-				onclick={() => stepExit(prev, () => matRefs.unknown?.validateMaterialInfo() ?? false)}
-			>
-				Back
-			</button>
+			<button type="button" onclick={prev}> Back </button>
 			&nbsp;&nbsp;
-			<button
-				type="button"
-				onclick={() => stepExit(next, () => matRefs.unknown?.validateMaterialInfo() ?? false)}
-			>
-				Confirm and Review
-			</button>
+			<button type="button" onclick={next}> Confirm and Review </button>
 		{:else if step === 4}
 			<h2 class="text-2xl font-bold">Step 4: Review</h2>
 			<p>Please review all information you entered and see computed values below.</p>
