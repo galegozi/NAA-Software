@@ -5,8 +5,9 @@
 	let detectorInfo: string[] = $state([]);
 	let dataLines: string[] = $state([]);
 	let roiData: object[] = $state([]);
-	let realTime: number = $state(0);
-	let liveTime: number = $state(0);
+	let parsedRealTime: number = $state(0);
+	let parsedLiveTime: number = $state(0);
+	// let parseCompleted: boolean = $state(false);
 
 	async function handleFileChange() {
 		if (files && files.length > 0) {
@@ -28,13 +29,13 @@
 				if (line.includes('RT =')) {
 					let parts = line.split('RT =');
 					if (parts.length > 1) {
-						realTime = parseFloat(parts[1].trim());
+						parsedRealTime = parseFloat(parts[1].trim());
 					}
 				}
 				if (line.includes('LT =')) {
 					let parts = line.split('LT =');
 					if (parts.length > 1) {
-						liveTime = parseFloat(parts[1].trim());
+						parsedLiveTime = parseFloat(parts[1].trim());
 					}
 				}
 			}
@@ -62,20 +63,22 @@
 				};
 				roiData.push(roiEntry);
 			}
+			// parseCompleted = true;
 		}
 	}
 </script>
 
-<label for="rpt-upload">Optional: Auto-fill some details by uploading a roi file. This is a text file with a .rpt extension.</label>
+<label for="rpt-upload">
+	Optional: Auto-fill some details by uploading an roi file. This is a text file with a .rpt
+	extension.
+</label>
 <br />
 <input id="rpt-upload" type="file" accept=".rpt" bind:files onchange={handleFileChange} />
+<br />
 
-<!-- {#if fileContent}
-		<pre>{JSON.stringify(fileLines, null, 4)}</pre>
-	{/if}
-
-	<pre>{JSON.stringify(detectorInfo, null, 4)}</pre>
-	<pre>{JSON.stringify(dataLines, null, 4)}</pre> -->
-<pre>{JSON.stringify(roiData, null, 4)}</pre>
-<pre>Real Time: {realTime} seconds</pre>
-<pre>Live Time: {liveTime} seconds</pre>
+<!-- {#if parseCompleted} -->
+<!-- <pre>{JSON.stringify(roiData, null, 4)}</pre>
+<pre>Real Time: {parsedRealTime} seconds</pre>
+<pre>Live Time: {parsedLiveTime} seconds</pre> -->
+<pre>{fileContent}</pre>
+<!-- {/if} -->
