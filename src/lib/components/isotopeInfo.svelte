@@ -8,12 +8,6 @@
 		})
 	} = $props();
 
-	let decayConstant = $derived(Math.log(2) / isotopeInfo.halfLife);
-
-	export function getDecayConstant(): number {
-		return decayConstant;
-	}
-
 	export function validateIsotopeInfo(): boolean {
 		return (
 			isotopeInfo.elementName !== '' &&
@@ -40,5 +34,3 @@
 	<span>Half Life (in seconds, s)</span>
 	<input class="input w-50" type="number" bind:value={isotopeInfo.halfLife} />
 </label>
-<br /><br />
-<p>The decay constant is: {decayConstant}</p>
