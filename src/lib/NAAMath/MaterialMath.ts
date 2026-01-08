@@ -18,9 +18,7 @@ function computeBackgroundCounts(material: object): number {
     return grossCounts - netCounts;
 }
 
-function computeColumnV(material: object): number {
-    // TODO: ASK SOMEONE WHAT THIS IS???
-    // '=2.71+4.65*SQRT(Bkgd)
+function computeDetectionLimit(material: object): number {
     const backgroundCounts = computeBackgroundCounts(material);
     return 2.71 + 4.65 * Math.sqrt(backgroundCounts);
 }
@@ -30,6 +28,6 @@ export function getAll(material: object) {
         deadTime: computeDeadTime(material),
         deadTimeFraction: computeDeadTimeFraction(material),
         backgroundCounts: computeBackgroundCounts(material),
-        columnV: computeColumnV(material)
+        detectionLimit: computeDetectionLimit(material)
     };
 }

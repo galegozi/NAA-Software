@@ -52,6 +52,19 @@
 </script>
 
 <div style="padding: 5%">
+	<h1>NAA Analysis - Version 1.0</h1>
+	<p>This version includes a complete analysis process for a single isotope, a single standard, and a single unknown sample</p>
+	<h2>Future plans:</h2>
+	<ol>
+		<li>Version 2.0: Upload from Maestro</li>
+	</ol>
+	<h2>Future additions, not planned yet:</h2>
+	<ul>
+		<li>Multiple isotopes</li>
+		<li>Multiple standards</li>
+		<li>Multiple unknowns</li>
+		<li>Exporting reports</li>
+	</ul>
 	<form
 		onsubmit={(e) => {
 			e.preventDefault();

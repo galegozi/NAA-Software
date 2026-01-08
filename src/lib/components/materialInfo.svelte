@@ -81,7 +81,7 @@
 <label class="label">
 	<span>Dead Time Correction Type</span>
 	<select class="input w-50" bind:value={materialInfo.dtType}>
-		<option value={undefined} disabled selected>Select correction type</option>
+		<option value=undefined disabled selected>Select correction type</option>
 		<option value="short">Short Lived Only</option>
 		<option value="mixed">Mixed: Short Lived in presence of Long Lived</option>
 	</select>
