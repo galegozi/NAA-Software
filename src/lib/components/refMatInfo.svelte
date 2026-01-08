@@ -21,32 +21,12 @@
 			// specific to Reference Material
 			knownConcentration: 0,
 			knownUncertainty: 0
-		})
+		}),
+		getRoiIndex
 	} = $props();
-
-	export function validateRefMatInfo() {
-		return (
-			// Validate inherited MaterialInfo fields
-			refMatInfo.NETL_code !== '' &&
-			refMatInfo.sampleName !== '' &&
-			refMatInfo.mass !== 0 &&
-			refMatInfo.irradiationTime !== 0 &&
-			refMatInfo.decayTime !== 0 &&
-			refMatInfo.liveTime !== 0 &&
-			refMatInfo.realTime !== 0 &&
-			refMatInfo.fluence !== 0 &&
-			refMatInfo.grossCounts !== 0 &&
-			refMatInfo.netCounts !== 0 &&
-			refMatInfo.countUncertainty !== 0 &&
-			refMatInfo.dtType !== undefined &&
-			// Validate Reference Material specific fields
-			refMatInfo.knownConcentration !== 0 &&
-			refMatInfo.knownUncertainty !== 0
-		);
-	}
 </script>
 
-<MaterialInfo bind:materialInfo={refMatInfo} />
+<MaterialInfo bind:materialInfo={refMatInfo} getRoiIndex={getRoiIndex} />
 <label class="label">
 	<span>Known Concentration (in ug/g, as a percent)</span>
 	<input class="input w-50" type="number" bind:value={refMatInfo.knownConcentration} />
