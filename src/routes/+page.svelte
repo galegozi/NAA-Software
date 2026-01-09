@@ -10,8 +10,6 @@
 	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
 
 	function findIndex(roiData: object[]): number[] {
-		// Find the closest energy match between an isotope and the ROI centroids.
-		// Returns an array of length isotopeInfo.length with the indices of the closest ROIs.
 		let indices: number[] = [];
 		for (let i = 0; i < isotopeInfo.length; i++) {
 			let isotopeEnergy = isotopeInfo[i].energy;
@@ -33,23 +31,26 @@
 	let step = $state(0);
 
 	let isoIndex = $derived(step - 2);
-	// let { isotopeCount = $bindable() } = $props();
 	let isotopeCount = $state(0);
-	// let isoRef: IsotopeInfo | undefined = $state(undefined);
 	let isoRef: (IsotopeInfo | undefined)[] = $state([]);
-	// let isotopeInfo = $state({ elementName: '', isotopeName: '', energy: 0, halfLife: 0 });
 	let isotopeInfo: {
 		elementName: string;
 		isotopeName: string;
 		energy: number;
 		halfLife: number;
 	}[] = $state([]);
-	// let isoComp = $derived(isoGA(isotopeInfo));
 	let isoComp = $derived(isotopeInfo.map(isoGA));
 
+	//step 1 : number of isotopes
+	//step 2 to 1 + isotopeCount  : isotope information
+	//step 2 + isotopeCount : reference material information
+	//step 3 + isotope count: how many unknowns
+	//step 4 + isotope count to 3 + isotope count + unknownCount : unknown material information
+	//step 4 + isotope count + unknownCount : review
+	let unknownIdx = $derived(step - (4 + isotopeCount));
 	let matRefs = $state({
 		reference: undefined as RefMatInfo | undefined,
-		unknown: undefined as MaterialInfo | undefined
+		unknown: [] as (MaterialInfo | undefined)[]
 	});
 	let materials = $state({
 		reference: {
@@ -62,25 +63,25 @@
 			liveTime: 0,
 			realTime: 0,
 			fluence: 0,
-			counts: Array(isotopeCount).fill({ grossCounts: 0, netCounts: 0, uncertainty: 0 }),
+			counts: [] as { grossCounts: number; netCounts: number; uncertainty: number }[],
 			dtType: undefined,
 
 			// specific to Reference Material
 			knownConcentration: [],
 			knownUncertainty: []
 		},
-		unknown: {
-			NETL_code: '',
-			sampleName: '',
-			mass: 0,
-			irradiationTime: 0,
-			decayTime: 0,
-			liveTime: 0,
-			realTime: 0,
-			fluence: 0,
-			counts: Array(isotopeCount).fill({ grossCounts: 0, netCounts: 0, uncertainty: 0 }),
-			dtType: undefined
-		}
+		unknown: [] as {
+			NETL_code: string;
+			sampleName: string;
+			mass: number;
+			irradiationTime: number;
+			decayTime: number;
+			liveTime: number;
+			realTime: number;
+			fluence: number;
+			counts: { grossCounts: number; netCounts: number; uncertainty: number }[];
+			dtType: 'live' | 'real' | undefined;
+		}[]
 	});
 	let matComp = $derived({
 		reference: matGA(materials.reference),
@@ -93,7 +94,6 @@
 		}))
 	);
 	let multiMatComp = $derived(MMGA(materials.reference, materials.unknown));
-	// let everythingComp = $derived(EGA(materials.reference, materials.unknown, isotopeInfo));
 	let everythingComp = $derived(
 		isotopeInfo.map((iso, index) => EGA(materials.reference, materials.unknown, iso, index))
 	);
@@ -120,18 +120,17 @@
 		}}
 	>
 		{#if step === 0}
-			<h1 class="text-3xl font-bold">NAA Analysis - Version 3.0 PREVIEW</h1>
+			<h1 class="text-3xl font-bold">NAA Analysis - Version 4.0 ALPHA</h1>
 			<p>
 				This version includes a complete analysis process for a single isotope, a single standard,
 				and a single unknown sample. It also includes uploading from a Maestro .rpt file to
 				auto-fill gross counts, net counts, and uncertainty.
 			</p>
 			<p>Multiple isotopes are included in this release, but they are in preview.</p>
+			<p>Multiple unknowns are in ALPHA active development preview.</p>
 			<br />
 			<h2 class="text-2xl font-bold">Future plans:</h2>
-			<ol class="list-inside list-decimal">
-				<li>Version 4.0: Multiple Unknowns</li>
-			</ol>
+			<ol class="list-inside list-decimal"></ol>
 			<br />
 			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
 			<ul class="list-inside list-disc">
@@ -150,7 +149,6 @@
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
 		{:else if step === 1}
-			<!--How many isotopes do you want?-->
 			<h2 class="text-2xl font-bold">Step 1: Number of Isotopes</h2>
 			<label class="label">
 				<span>How many isotopes do you want to analyze?</span>
@@ -186,11 +184,14 @@
 							netCounts: 0,
 							uncertainty: 0
 						}));
-						materials.unknown.counts = Array.from({ length: isotopeCount }, () => ({
-							grossCounts: 0,
-							netCounts: 0,
-							uncertainty: 0
-						}));
+						// For unknowns, need to update each unknown's counts array
+						for (let i = 0; i < materials.unknown.length; i++) {
+							materials.unknown[i].counts = Array.from({ length: isotopeCount }, () => ({
+								grossCounts: 0,
+								netCounts: 0,
+								uncertainty: 0
+							}));
+						}
 					}}
 				/>
 			</label>
@@ -240,6 +241,7 @@
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> Next </button>
 		{:else if step === 3 + isotopeCount}
+			<!--Enter number of unknowns-->
 			<h2 class="text-2xl font-bold">Step {step}: Unknown Material Information</h2>
 			<p>
 				This is where you enter information about the unknown material you are trying to understand.

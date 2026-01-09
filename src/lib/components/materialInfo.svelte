@@ -29,7 +29,7 @@
 			uncertainty: (data as any).roiData[index].uncertainty
 		}));
 	}
-	materialInfo.counts = Array(isotopeCount).fill({ grossCounts: 0, netCounts: 0, uncertainty: 0 });
+	materialInfo.counts = [] as { grossCounts: number; netCounts: number; uncertainty: number }[];
 </script>
 
 <MaestroUpload onParsed={handleParsedMaestro} />
