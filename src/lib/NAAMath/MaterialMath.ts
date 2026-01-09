@@ -12,15 +12,13 @@ function computeDeadTimeFraction(material: object): number {
     return deadTime / realTime;
 }
 
-function computeBackgroundCounts(material: object): number {
-    const grossCounts = (material as any).grossCounts;
-    const netCounts = (material as any).netCounts;
-    return grossCounts - netCounts;
+function computeBackgroundCounts(material: object): number[] {
+    return (material as any).counts.map((c: any) => c.grossCounts - c.netCounts);
 }
 
-function computeDetectionLimit(material: object): number {
+function computeDetectionLimit(material: object): number[] {
     const backgroundCounts = computeBackgroundCounts(material);
-    return 2.71 + 4.65 * Math.sqrt(backgroundCounts);
+    return backgroundCounts.map(bc => 2.71 + 4.65 * Math.sqrt(bc));
 }
 
 export function getAll(material: object) {
