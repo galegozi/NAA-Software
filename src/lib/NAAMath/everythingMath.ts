@@ -6,11 +6,12 @@ import { getAll as MMGA } from './MultiMaterialMath.ts';
 function getSaturationFactorRatio(
     refMaterial: object,
     unkMaterial: object,
-    isotope: object
+    isotope: object,
+    isotopeIndex: number
 ): number {
     const isoMat = {
-        reference: matIsoGA(refMaterial, isotope),
-        unknown: matIsoGA(unkMaterial, isotope)
+        reference: matIsoGA(refMaterial, isotope, isotopeIndex),
+        unknown: matIsoGA(unkMaterial, isotope, isotopeIndex)
     };
     return (isoMat.reference as any).saturationFactor / (isoMat.unknown as any).saturationFactor;
 }
@@ -18,11 +19,12 @@ function getSaturationFactorRatio(
 function getDecayCorrectionFactorRatio(
     refMaterial: object,
     unkMaterial: object,
-    isotope: object
+    isotope: object,
+    isotopeIndex: number
 ): number {
     const isoMat = {
-        reference: matIsoGA(refMaterial, isotope),
-        unknown: matIsoGA(unkMaterial, isotope)
+        reference: matIsoGA(refMaterial, isotope, isotopeIndex),
+        unknown: matIsoGA(unkMaterial, isotope, isotopeIndex)
     };
     return (isoMat.reference as any).decayCorrectionFactor / (isoMat.unknown as any).decayCorrectionFactor;
 }
@@ -30,11 +32,12 @@ function getDecayCorrectionFactorRatio(
 function getDeadTimeCorrectionRatio(
     refMaterial: object,
     unkMaterial: object,
-    isotope: object
+    isotope: object,
+    isotopeIndex: number
 ): number {
     const isoMat = {
-        reference: matIsoGA(refMaterial, isotope),
-        unknown: matIsoGA(unkMaterial, isotope)
+        reference: matIsoGA(refMaterial, isotope, isotopeIndex),
+        unknown: matIsoGA(unkMaterial, isotope, isotopeIndex)
     };
     return (isoMat.unknown as any).funcDeadTimeCorrection / (isoMat.reference as any).funcDeadTimeCorrection;
 }
@@ -42,43 +45,53 @@ function getDeadTimeCorrectionRatio(
 function getUnknownConcentration(
     refMaterial: object,
     unkMaterial: object,
-    isotope: object
+    isotope: object,
+    isotopeIndex: number
 ): number {
     let multimaterial = MMGA(refMaterial, unkMaterial);
+    console.log(JSON.stringify(multimaterial));
     let isoMat = {
-        reference: matIsoGA(refMaterial, isotope),
-        unknown: matIsoGA(unkMaterial, isotope)
+        reference: matIsoGA(refMaterial, isotope, isotopeIndex),
+        unknown: matIsoGA(unkMaterial, isotope, isotopeIndex)
     };
-    return (refMaterial as any).knownConcentration *
-        getDeadTimeCorrectionRatio(refMaterial, unkMaterial, isotope) *
-        getSaturationFactorRatio(refMaterial, unkMaterial, isotope)
-        * getDecayCorrectionFactorRatio(refMaterial, unkMaterial, isotope)
+    console.log(JSON.stringify(isoMat));
+    console.log(`Known concentration: ${(refMaterial as any).knownConcentration}`);
+    let result = (refMaterial as any).knownConcentration[isotopeIndex] *
+        getDeadTimeCorrectionRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
+        getSaturationFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex)
+        * getDecayCorrectionFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex)
         * multimaterial.massCorrection
         // fluence correction
         ;
+    console.log(`Unknown concentration computed as: ${result}`);
+    return result;
 }
 
-export function getAll(refMaterial: object, unkMaterial: object, isotope: object): object {
+export function getAll(refMaterial: object, unkMaterial: object, isotope: object, isotopeIndex: number): object {
     return {
         saturationFactorRatio: getSaturationFactorRatio(
             refMaterial,
             unkMaterial,
-            isotope
+            isotope, 
+            isotopeIndex
         ),
         deadTimeCorrectionRatio: getDeadTimeCorrectionRatio(
             refMaterial,
             unkMaterial,
-            isotope
+            isotope,
+            isotopeIndex
         ),
         decayCorrectionFactorRatio: getDecayCorrectionFactorRatio(
             refMaterial,
             unkMaterial,
-            isotope
+            isotope,
+            isotopeIndex
         ),
         unknownConcentration: getUnknownConcentration(
             refMaterial,
             unkMaterial,
-            isotope
+            isotope,
+            isotopeIndex
         )
     };
 }

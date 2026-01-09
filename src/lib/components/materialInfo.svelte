@@ -2,6 +2,7 @@
 	import MaestroUpload from './maestroUpload.svelte';
 
 	let {
+		isotopeCount,
 		materialInfo = $bindable({
 			NETL_code: '',
 			sampleName: '',
@@ -11,9 +12,7 @@
 			liveTime: 0,
 			realTime: 0,
 			fluence: 0,
-			grossCounts: 0,
-			netCounts: 0,
-			countUncertainty: 0,
+			counts: [],
 			dtType: undefined
 		}),
 		getRoiIndex
@@ -23,12 +22,14 @@
 		// process data as needed
 		materialInfo.liveTime = materialInfo.liveTime || (data as any).liveTime;
 		materialInfo.realTime = materialInfo.realTime || (data as any).realTime;
-		console.log(JSON.stringify(data, null, 4));
 		let roiIndex = getRoiIndex((data as any).roiData);
-		materialInfo.grossCounts = (data as any).roiData[roiIndex].grossCounts;
-		materialInfo.netCounts = (data as any).roiData[roiIndex].netCounts;
-		materialInfo.countUncertainty = (data as any).roiData[roiIndex].uncertainty;
+		materialInfo.counts = roiIndex.map((index: number) => ({
+			grossCounts: (data as any).roiData[index].grossCounts,
+			netCounts: (data as any).roiData[index].netCounts,
+			uncertainty: (data as any).roiData[index].uncertainty
+		}));
 	}
+	materialInfo.counts = Array(isotopeCount).fill({ grossCounts: 0, netCounts: 0, uncertainty: 0 });
 </script>
 
 <MaestroUpload onParsed={handleParsedMaestro} />
@@ -66,18 +67,22 @@
 	<span>Fluence (in neutrons/cm²)</span>
 	<input class="input w-50" type="number" bind:value={materialInfo.fluence} />
 </label>
-<label class="label">
-	<span>Gross Counts</span>
-	<input class="input w-50" type="number" bind:value={materialInfo.grossCounts} />
-</label>
-<label class="label">
-	<span>Net Counts</span>
-	<input class="input w-50" type="number" bind:value={materialInfo.netCounts} />
-</label>
-<label class="label">
-	<span>Uncertainty (in counts)</span>
-	<input class="input w-50" type="number" bind:value={materialInfo.countUncertainty} />
-</label>
+{#each { length: isotopeCount } as _, index}
+	<h3 class="text-xl font-bold">Isotope {index + 1} Counts</h3>
+	<label class="label">
+		<span>Gross Counts</span>
+		<input class="input w-50" type="number" bind:value={materialInfo.counts[index].grossCounts} />
+	</label>
+	<label class="label">
+		<span>Net Counts</span>
+		<input class="input w-50" type="number" bind:value={materialInfo.counts[index].netCounts} />
+	</label>
+	<label class="label">
+		<span>Uncertainty (in counts)</span>
+		<input class="input w-50" type="number" bind:value={materialInfo.counts[index].uncertainty} />
+	</label>
+{/each}
+<br />
 <label class="label">
 	<span>Dead Time Correction Type</span>
 	<select class="input w-50" bind:value={materialInfo.dtType}>
