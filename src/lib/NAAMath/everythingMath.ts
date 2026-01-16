@@ -49,13 +49,13 @@ function getUnknownConcentration(
     isotopeIndex: number
 ): number {
     let multimaterial = MMGA(refMaterial, unkMaterial);
-    console.log(JSON.stringify(multimaterial));
+    // console.log(JSON.stringify(multimaterial));
     let isoMat = {
         reference: matIsoGA(refMaterial, isotope, isotopeIndex),
         unknown: matIsoGA(unkMaterial, isotope, isotopeIndex)
     };
-    console.log(JSON.stringify(isoMat));
-    console.log(`Known concentration: ${(refMaterial as any).knownConcentration}`);
+    // console.log(JSON.stringify(isoMat));
+    // console.log(`Known concentration: ${(refMaterial as any).knownConcentration}`);
     let result = (refMaterial as any).knownConcentration[isotopeIndex] *
         getDeadTimeCorrectionRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
         getSaturationFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex)
@@ -63,7 +63,7 @@ function getUnknownConcentration(
         * multimaterial.massCorrection
         // fluence correction
         ;
-    console.log(`Unknown concentration computed as: ${result}`);
+    // console.log(`Unknown concentration computed as: ${result}`);
     return result;
 }
 
