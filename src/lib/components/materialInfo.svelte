@@ -23,7 +23,6 @@
 	} = $props();
 
 	function handleParsedMaestro(data: object) {
-		// process data as needed
 		materialInfo.liveTime = materialInfo.liveTime || (data as any).liveTime;
 		materialInfo.realTime = materialInfo.realTime || (data as any).realTime;
 		let roiIndex = getRoiIndex((data as any).roiData);

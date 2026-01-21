@@ -244,7 +244,12 @@
 			</p>
 			<br /><br />
 			<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
-			<RefMatInfo {isotopeCount} getRoiIndex={findIndex} bind:refMatInfo={materials.reference} />
+			<RefMatInfo
+				{isotopeCount}
+				getRoiIndex={findIndex}
+				bind:refMatInfo={materials.reference}
+				bind:this={matRefs.reference}
+			/>
 
 			<!-- <br /> -->
 			<h3 class="text-xl font-bold">Reference Material Information</h3>

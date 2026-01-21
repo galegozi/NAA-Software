@@ -68,9 +68,9 @@
 			// parseCompleted = true;
 			if (onParsed) {
 				let parsedData = {
-					roiData,
-					parsedRealTime,
-					parsedLiveTime
+					roiData: roiData,
+					realTime: parsedRealTime,
+					liveTime: parsedLiveTime
 				};
 				onParsed(parsedData);
 			}
