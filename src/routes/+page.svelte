@@ -103,17 +103,17 @@
 		isotopeInfo.map((iso, index) =>
 			materials.unknown.map((unk) => EGA(materials.reference, unk, iso, index))
 		)
-	)
+	);
 
 	let nextButtonText = $derived(
 		step < 2 + isotopeCount
 			? 'Next'
 			: step === 2 + isotopeCount
-			? 'Next'
-			: unknownIdx < unknownCount - 1
-			? 'Next Unknown'
-			: 'Review All Information'
-	)
+				? 'Next'
+				: unknownIdx < unknownCount - 1
+					? 'Next Unknown'
+					: 'Review All Information'
+	);
 
 	// const stepExit = (exitFxn: () => void, validateStep: () => boolean) => {
 	// 	if (!validateStep()) {
@@ -250,7 +250,6 @@
 			<h3 class="text-xl font-bold">Reference Material Information</h3>
 			<pre>{JSON.stringify(matComp.reference, null, 4)}</pre>
 			<h3 class="text-xl font-bold">Reference and Isotope Information</h3>
-			 <pre>{JSON.stringify(matIsoComp.reference, null, 4)}</pre>
 			<pre>{JSON.stringify(
 					matIsoComp.map((item) => item.reference),
 					null,
@@ -302,9 +301,13 @@
 					}}
 				/>
 			</label>
+			<button type="button" onclick={prev}> Back </button>
+			&nbsp;&nbsp;
 			<button type="button" onclick={next}> Next </button>
 		{:else if unknownIdx >= 0 && unknownIdx < unknownCount}
-			<h2 class="text-2xl font-bold">Step {step}: Unknown Material Information</h2>
+			<h2 class="text-2xl font-bold">
+				Step {step}: Unknown Material Information for Unknown {unknownIdx + 1}
+			</h2>
 			<p>
 				This is where you enter information about the unknown material you are trying to understand.
 			</p>
@@ -317,9 +320,11 @@
 			/>
 
 			<br />
-			<h3 class="text-xl font-bold">Unknown Material Information</h3>
+			<h3 class="text-xl font-bold">Unknown Material Information for Unknown {unknownIdx + 1}</h3>
 			<pre>{JSON.stringify(matComp.unknown[unknownIdx], null, 4)}</pre>
-			<h3 class="text-xl font-bold">Unknown and Isotope Information</h3>
+			<h3 class="text-xl font-bold">
+				Unknown and Isotope Information for Unknown {unknownIdx + 1}
+			</h3>
 			<!-- <pre>{JSON.stringify(matIsoComp.unknown, null, 4)}</pre> -->
 			<pre>{JSON.stringify(
 					matIsoComp.map((item) => item.unknown[unknownIdx]),
