@@ -129,8 +129,13 @@
 	const handleSubmit = () => {};
 </script>
 
+<svelte:head>
+  <title>NAA Analysis</title>
+</svelte:head>
+
+
 <div style="padding: 5%">
-	<h1 class="text-3xl font-bold">NAA Analysis - Version 4.0 ALPHA</h1>
+	<h1 class="text-3xl font-bold">NAA Analysis - Version 4.0 BETA</h1>
 	<br />
 	<form
 		onsubmit={(e) => {
@@ -144,26 +149,23 @@
 				and a single unknown sample. It also includes uploading from a Maestro .rpt file to
 				auto-fill gross counts, net counts, and uncertainty.
 			</p>
-			<p>Multiple isotopes are included in this release, but they are in preview.</p>
-			<p>Multiple unknowns are in ALPHA active development preview.</p>
+			<p>Multiple isotopes and unknowns are in beta.</p>
 			<br />
 			<h2 class="text-2xl font-bold">Future plans:</h2>
-			<ol class="list-inside list-decimal"></ol>
+			<ol class="list-inside list-decimal">
+				<li>Version 4.1: Replace dead time correction (dont use mixed, use custom equation)</li>
+				<li>Version 4.2: Improved reporting with table at top. Should include units for concentration.</li>
+			</ol>
 			<br />
 			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
 			<ul class="list-inside list-disc">
+				<li>Exporting reports</li>
+				<li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li>
 				<li>Correct the matching to ensure it works with interference</li>
 				<li>Fluence correction</li>
 				<li>Uncertainty & relevant calculations</li>
 				<li>Multiple standards</li>
-				<li>Multiple unknowns</li>
-				<li>Exporting reports</li>
-				<li>
-					Additional option: Use net count / third factor (third factor from short dead time
-					correction) for dead time correction
-				</li>
 				<li>Font size adjustment</li>
-				<li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li>
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
