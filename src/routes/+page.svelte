@@ -10,8 +10,6 @@
 	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
 
 	function findIndex(roiData: object[]): number[] {
-		// Find the closest energy match between an isotope and the ROI centroids.
-		// Returns an array of length isotopeInfo.length with the indices of the closest ROIs.
 		let indices: number[] = [];
 		for (let i = 0; i < isotopeInfo.length; i++) {
 			let isotopeEnergy = isotopeInfo[i].energy;
@@ -33,23 +31,27 @@
 	let step = $state(0);
 
 	let isoIndex = $derived(step - 2);
-	// let { isotopeCount = $bindable() } = $props();
 	let isotopeCount = $state(0);
-	// let isoRef: IsotopeInfo | undefined = $state(undefined);
 	let isoRef: (IsotopeInfo | undefined)[] = $state([]);
-	// let isotopeInfo = $state({ elementName: '', isotopeName: '', energy: 0, halfLife: 0 });
 	let isotopeInfo: {
 		elementName: string;
 		isotopeName: string;
 		energy: number;
 		halfLife: number;
 	}[] = $state([]);
-	// let isoComp = $derived(isoGA(isotopeInfo));
 	let isoComp = $derived(isotopeInfo.map(isoGA));
 
+	//step 1 : number of isotopes
+	//step 2 to 1 + isotopeCount  : isotope information
+	//step 2 + isotopeCount : reference material information
+	//step 3 + isotope count: how many unknowns
+	//step 4 + isotope count to 3 + isotope count + unknownCount : unknown material information
+	//step 4 + isotope count + unknownCount : review
+	let unknownIdx = $derived(step - (4 + isotopeCount));
+	let unknownCount = $state(0);
 	let matRefs = $state({
 		reference: undefined as RefMatInfo | undefined,
-		unknown: undefined as MaterialInfo | undefined
+		unknown: [] as (MaterialInfo | undefined)[]
 	});
 	let materials = $state({
 		reference: {
@@ -62,40 +64,55 @@
 			liveTime: 0,
 			realTime: 0,
 			fluence: 0,
-			counts: Array(isotopeCount).fill({ grossCounts: 0, netCounts: 0, uncertainty: 0 }),
+			counts: [] as { grossCounts: number; netCounts: number; uncertainty: number }[],
 			dtType: undefined,
 
 			// specific to Reference Material
 			knownConcentration: [],
 			knownUncertainty: []
 		},
-		unknown: {
-			NETL_code: '',
-			sampleName: '',
-			mass: 0,
-			irradiationTime: 0,
-			decayTime: 0,
-			liveTime: 0,
-			realTime: 0,
-			fluence: 0,
-			counts: Array(isotopeCount).fill({ grossCounts: 0, netCounts: 0, uncertainty: 0 }),
-			dtType: undefined
-		}
+		unknown: [] as {
+			NETL_code: string;
+			sampleName: string;
+			mass: number;
+			irradiationTime: number;
+			decayTime: number;
+			liveTime: number;
+			realTime: number;
+			fluence: number;
+			counts: { grossCounts: number; netCounts: number; uncertainty: number }[];
+			dtType: 'live' | 'real' | undefined;
+		}[]
 	});
 	let matComp = $derived({
 		reference: matGA(materials.reference),
-		unknown: matGA(materials.unknown)
+		unknown: materials.unknown.map((unk) => matGA(unk))
 	});
 	let matIsoComp = $derived(
 		isotopeInfo.map((iso, index) => ({
 			reference: matIsoGA(materials.reference, iso, index),
-			unknown: matIsoGA(materials.unknown, iso, index)
+			unknown: materials.unknown.map((unk) => matIsoGA(unk, iso, index))
 		}))
 	);
-	let multiMatComp = $derived(MMGA(materials.reference, materials.unknown));
-	// let everythingComp = $derived(EGA(materials.reference, materials.unknown, isotopeInfo));
+	// let multiMatComp = $derived(MMGA(materials.reference, materials.unknown));
+	let multiMatComp = $derived(materials.unknown.map((unk) => MMGA(materials.reference, unk)));
+	// let everythingComp = $derived(
+	// 	isotopeInfo.map((iso, index) => EGA(materials.reference, materials.unknown, iso, index))
+	// );
 	let everythingComp = $derived(
-		isotopeInfo.map((iso, index) => EGA(materials.reference, materials.unknown, iso, index))
+		isotopeInfo.map((iso, index) =>
+			materials.unknown.map((unk) => EGA(materials.reference, unk, iso, index))
+		)
+	);
+
+	let nextButtonText = $derived(
+		step < 2 + isotopeCount
+			? 'Next'
+			: step === 2 + isotopeCount
+				? 'Next'
+				: unknownIdx < unknownCount - 1
+					? 'Next Unknown'
+					: 'Review All Information'
 	);
 
 	// const stepExit = (exitFxn: () => void, validateStep: () => boolean) => {
@@ -112,7 +129,14 @@
 	const handleSubmit = () => {};
 </script>
 
+<svelte:head>
+  <title>NAA Analysis</title>
+</svelte:head>
+
+
 <div style="padding: 5%">
+	<h1 class="text-3xl font-bold">NAA Analysis - Version 4.0 BETA</h1>
+	<br />
 	<form
 		onsubmit={(e) => {
 			e.preventDefault();
@@ -120,37 +144,32 @@
 		}}
 	>
 		{#if step === 0}
-			<h1 class="text-3xl font-bold">NAA Analysis - Version 3.0 PREVIEW</h1>
 			<p>
 				This version includes a complete analysis process for a single isotope, a single standard,
 				and a single unknown sample. It also includes uploading from a Maestro .rpt file to
 				auto-fill gross counts, net counts, and uncertainty.
 			</p>
-			<p>Multiple isotopes are included in this release, but they are in preview.</p>
+			<p>Multiple isotopes and unknowns are in beta.</p>
 			<br />
 			<h2 class="text-2xl font-bold">Future plans:</h2>
 			<ol class="list-inside list-decimal">
-				<li>Version 4.0: Multiple Unknowns</li>
+				<li>Version 4.1: Replace dead time correction (dont use mixed, use custom equation)</li>
+				<li>Version 4.2: Improved reporting with table at top. Should include units for concentration.</li>
 			</ol>
 			<br />
 			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
 			<ul class="list-inside list-disc">
+				<li>Exporting reports</li>
+				<li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li>
+				<li>Correct the matching to ensure it works with interference</li>
 				<li>Fluence correction</li>
 				<li>Uncertainty & relevant calculations</li>
 				<li>Multiple standards</li>
-				<li>Multiple unknowns</li>
-				<li>Exporting reports</li>
-				<li>
-					Additional option: Use net count / third factor (third factor from short dead time
-					correction) for dead time correction
-				</li>
 				<li>Font size adjustment</li>
-				<li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li>
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
 		{:else if step === 1}
-			<!--How many isotopes do you want?-->
 			<h2 class="text-2xl font-bold">Step 1: Number of Isotopes</h2>
 			<label class="label">
 				<span>How many isotopes do you want to analyze?</span>
@@ -186,11 +205,14 @@
 							netCounts: 0,
 							uncertainty: 0
 						}));
-						materials.unknown.counts = Array.from({ length: isotopeCount }, () => ({
-							grossCounts: 0,
-							netCounts: 0,
-							uncertainty: 0
-						}));
+						// For unknowns, need to update each unknown's counts array
+						for (let i = 0; i < materials.unknown.length; i++) {
+							materials.unknown[i].counts = Array.from({ length: isotopeCount }, () => ({
+								grossCounts: 0,
+								netCounts: 0,
+								uncertainty: 0
+							}));
+						}
 					}}
 				/>
 			</label>
@@ -223,13 +245,18 @@
 				comparing to the unknown material to determine concentrations.
 			</p>
 			<br /><br />
-			<RefMatInfo {isotopeCount} getRoiIndex={findIndex} bind:refMatInfo={materials.reference} />
+			<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
+			<RefMatInfo
+				{isotopeCount}
+				getRoiIndex={findIndex}
+				bind:refMatInfo={materials.reference}
+				bind:this={matRefs.reference}
+			/>
 
-			<br />
+			<!-- <br /> -->
 			<h3 class="text-xl font-bold">Reference Material Information</h3>
 			<pre>{JSON.stringify(matComp.reference, null, 4)}</pre>
 			<h3 class="text-xl font-bold">Reference and Isotope Information</h3>
-			<!-- <pre>{JSON.stringify(matIsoComp.reference, null, 4)}</pre> -->
 			<pre>{JSON.stringify(
 					matIsoComp.map((item) => item.reference),
 					null,
@@ -240,7 +267,54 @@
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> Next </button>
 		{:else if step === 3 + isotopeCount}
-			<h2 class="text-2xl font-bold">Step {step}: Unknown Material Information</h2>
+			<h2 class="text-2xl font-bold">Step {step}: Number of Unknown Materials</h2>
+			<label class="label">
+				<span>How many unknown materials do you want to analyze?</span>
+				<input
+					class="input w-20"
+					type="number"
+					min="1"
+					bind:value={unknownCount}
+					onchange={() => {
+						// if unknownCount is not an integer, use the floor function & alert.
+						if (!Number.isInteger(unknownCount)) {
+							alert(
+								'You did not enter an integer. Using the floor of the value. Unknown count = ' +
+									Math.floor(unknownCount)
+							);
+							unknownCount = Math.floor(unknownCount);
+						}
+						if (unknownCount < 1) {
+							alert('Please enter a positive integer for the number of unknowns. Using 1 unknown.');
+							unknownCount = 1;
+						}
+						matRefs.unknown = Array.from({ length: unknownCount }, () => undefined);
+						materials.unknown = Array.from({ length: unknownCount }, () => ({
+							NETL_code: '',
+							sampleName: '',
+							mass: 0,
+							irradiationTime: 0,
+							decayTime: 0,
+							liveTime: 0,
+							realTime: 0,
+							fluence: 0,
+							counts: Array.from({ length: isotopeCount }, () => ({
+								grossCounts: 0,
+								netCounts: 0,
+								uncertainty: 0
+							})),
+							dtType: undefined
+						}));
+					}}
+				/>
+			</label>
+			<button type="button" onclick={prev}> Back </button>
+			&nbsp;&nbsp;
+			<button type="button" onclick={next}> Next </button>
+		{:else if unknownIdx >= 0 && unknownIdx < unknownCount}
+			<h2 class="text-2xl font-bold">
+				Step {step}: Unknown Material Information for Unknown {unknownIdx + 1}
+			</h2>
 			<p>
 				This is where you enter information about the unknown material you are trying to understand.
 			</p>
@@ -248,26 +322,28 @@
 			<MaterialInfo
 				{isotopeCount}
 				getRoiIndex={findIndex}
-				bind:this={matRefs.unknown}
-				bind:materialInfo={materials.unknown}
+				bind:this={matRefs.unknown[unknownIdx]}
+				bind:materialInfo={materials.unknown[unknownIdx]}
 			/>
 
 			<br />
-			<h3 class="text-xl font-bold">Unknown Material Information</h3>
-			<pre>{JSON.stringify(matComp.unknown, null, 4)}</pre>
-			<h3 class="text-xl font-bold">Unknown and Isotope Information</h3>
+			<h3 class="text-xl font-bold">Unknown Material Information for Unknown {unknownIdx + 1}</h3>
+			<pre>{JSON.stringify(matComp.unknown[unknownIdx], null, 4)}</pre>
+			<h3 class="text-xl font-bold">
+				Unknown and Isotope Information for Unknown {unknownIdx + 1}
+			</h3>
 			<!-- <pre>{JSON.stringify(matIsoComp.unknown, null, 4)}</pre> -->
 			<pre>{JSON.stringify(
-					matIsoComp.map((item) => item.unknown),
+					matIsoComp.map((item) => item.unknown[unknownIdx]),
 					null,
 					4
 				)}</pre>
 
 			<button type="button" onclick={prev}> Back </button>
 			&nbsp;&nbsp;
-			<button type="button" onclick={next}> Confirm and Review </button>
-		{:else if step === 4 + isotopeCount}
-			<h2 class="text-2xl font-bold">Step 4: Review</h2>
+			<button type="button" onclick={next}> {nextButtonText} </button>
+		{:else if unknownIdx === unknownCount}
+			<h2 class="text-2xl font-bold">Step {step}: Review</h2>
 			<p>Please review all information you entered and see computed values below.</p>
 			<h3 class="text-xl font-bold">Isotope Information</h3>
 			<pre>{JSON.stringify(isotopeInfo, null, 4)}</pre>

@@ -12,14 +12,17 @@
 			liveTime: 0,
 			realTime: 0,
 			fluence: 0,
-			counts: [],
+			counts: Array.from({ length: isotopeCount }, () => ({
+				grossCounts: 0,
+				netCounts: 0,
+				uncertainty: 0
+			})),
 			dtType: undefined
 		}),
 		getRoiIndex
 	} = $props();
 
 	function handleParsedMaestro(data: object) {
-		// process data as needed
 		materialInfo.liveTime = materialInfo.liveTime || (data as any).liveTime;
 		materialInfo.realTime = materialInfo.realTime || (data as any).realTime;
 		let roiIndex = getRoiIndex((data as any).roiData);
@@ -29,7 +32,6 @@
 			uncertainty: (data as any).roiData[index].uncertainty
 		}));
 	}
-	materialInfo.counts = Array(isotopeCount).fill({ grossCounts: 0, netCounts: 0, uncertainty: 0 });
 </script>
 
 <MaestroUpload onParsed={handleParsedMaestro} />
@@ -67,6 +69,7 @@
 	<span>Fluence (in neutrons/cm²)</span>
 	<input class="input w-50" type="number" bind:value={materialInfo.fluence} />
 </label>
+<br />
 {#each { length: isotopeCount } as _, index}
 	<h3 class="text-xl font-bold">Isotope {index + 1} Counts</h3>
 	<label class="label">
@@ -81,6 +84,7 @@
 		<span>Uncertainty (in counts)</span>
 		<input class="input w-50" type="number" bind:value={materialInfo.counts[index].uncertainty} />
 	</label>
+	<br />
 {/each}
 <br />
 <label class="label">

@@ -37,6 +37,7 @@
 	<span>Known Uncertainty (in ug/g)</span>
 	<input class="input w-50" type="number" bind:value={refMatInfo.knownUncertainty} />
 </label> -->
+<br /><br />
 {#each {length: isotopeCount} as _, index}
 	<h3 class="text-xl font-bold">Isotope {index + 1} Known Concentration</h3>
 	<label class="label">
@@ -47,4 +48,5 @@
 		<span>Known Uncertainty (in ug/g)</span>
 		<input class="input w-50" type="number" bind:value={refMatInfo.knownUncertainty[index]} />
 	</label>
+	<br />
 {/each}

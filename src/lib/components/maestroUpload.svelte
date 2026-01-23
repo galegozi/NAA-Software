@@ -4,7 +4,7 @@
 	let fileLines: string[] = $state([]);
 	let detectorInfo: string[] = $state([]);
 	let dataLines: string[] = $state([]);
-	let roiData: object[] = $state([]);
+	// let roiData: object[] = $state([]);
 	let parsedRealTime: number = $state(0);
 	let parsedLiveTime: number = $state(0);
 	let { onParsed } = $props();
@@ -13,6 +13,7 @@
 	async function handleFileChange() {
 		if (files && files.length > 0) {
 			const file = files[0];
+			let roiData = [];
 			fileContent = await file.text(); // Read plain text content
 			fileLines = fileContent.split('\n'); // Split content into lines
 			// check for empty lines & lines with pure whitespace.
@@ -66,11 +67,12 @@
 			}
 			// parseCompleted = true;
 			if (onParsed) {
-				onParsed({
+				let parsedData = {
 					roiData: roiData,
 					realTime: parsedRealTime,
 					liveTime: parsedLiveTime
-				});
+				};
+				onParsed(parsedData);
 			}
 		}
 	}
