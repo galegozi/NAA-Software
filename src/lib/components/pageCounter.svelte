@@ -1,7 +1,7 @@
 <!--This component handles initializing the number of pages of a specific type to be used.-->
 <!--isotopes are used here, but it should be generic. It should take a string, as well as a variable that it can access in +page.svelte-->
 <script lang="ts">
-	let { pageCount = 1, updateFxn, pageType } = $props();
+	let { pageCount = $bindable(1), updateFxn, pageType } = $props();
 </script>
 
 <label class="label">
