@@ -45,6 +45,8 @@
 			netCounts: 0,
 			uncertainty: 0
 		}));
+		materials.reference.knownConcentration = Array.from({ length: isotopeCount }, () => 0);
+		materials.reference.knownUncertainty = Array.from({ length: isotopeCount }, () => 0);
 		for (let i = 0; i < materials.unknown.length; i++) {
 			materials.unknown[i].counts = Array.from({ length: isotopeCount }, () => ({
 				grossCounts: 0,
