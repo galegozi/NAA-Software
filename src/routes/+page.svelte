@@ -135,7 +135,7 @@
 
 
 <div style="padding: 5%">
-	<h1 class="text-3xl font-bold">NAA Analysis - Version 4.0 BETA</h1>
+	<h1 class="text-3xl font-bold">NAA Analysis - Version 4.1 BETA</h1>
 	<br />
 	<form
 		onsubmit={(e) => {
@@ -149,11 +149,13 @@
 				and a single unknown sample. It also includes uploading from a Maestro .rpt file to
 				auto-fill gross counts, net counts, and uncertainty.
 			</p>
+			<br />
 			<p>Multiple isotopes and unknowns are in beta.</p>
+			<br />
+			<p>The mixed dead time correction is deprecated. The simple correction option to replace it is currently in beta.</p>
 			<br />
 			<h2 class="text-2xl font-bold">Future plans:</h2>
 			<ol class="list-inside list-decimal">
-				<li>Version 4.1: Replace dead time correction (dont use mixed, use custom equation)</li>
 				<li>Version 4.2: Improved reporting with table at top. Should include units for concentration.</li>
 			</ol>
 			<br />
