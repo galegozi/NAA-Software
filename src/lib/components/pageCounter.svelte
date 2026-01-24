@@ -23,7 +23,7 @@
 				alert(`Please enter a positive integer for the number of ${pageType}. Using 1 ${pageType}.`);
 				pageCount = 1;
 			}
-            updateFxn(pageCount);
+			updateFxn(pageCount);
 		}}
 	/>
 </label>
