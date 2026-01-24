@@ -89,9 +89,22 @@
 <br />
 <label class="label">
 	<span>Dead Time Correction Type</span>
-	<select class="input w-50" bind:value={materialInfo.dtType}>
+	<select
+		class="select input w-50 bg-surface-50-950 text-surface-950-50"
+		bind:value={materialInfo.dtType}
+	>
 		<option value={undefined} disabled selected>Select correction type</option>
 		<option value="short">Short Lived Only</option>
-		<option value="mixed">Mixed: Short Lived in presence of Long Lived</option>
+		<option value="simple">Simple: Only using the net counts, decay constant, and live time</option>
+		<option value="Deprecated" disabled>Deprecated Options</option>
+		<option value="mixed">Mixed (deprecated): Short Lived in presence of Long Lived</option>
+		<!--(net counts)/(1-e^(-decay constant * live time))-->
 	</select>
 </label>
+
+{#if materialInfo.dtType === 'mixed'}
+	<p class="text-sm text-yellow-600 italic">
+		Note: The Mixed Dead Time Correction is deprecated. Please let someone know if you need this
+		feature.
+	</p>
+{/if}

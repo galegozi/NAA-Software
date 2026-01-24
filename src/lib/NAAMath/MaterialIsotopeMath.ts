@@ -42,6 +42,14 @@ function getMixedDD(material: object, isotope: object, isoIndex: number): number
     return a * b / c;
 }
 
+function getSimpleDD(material: object, isotope: object, isoIndex: number): number {
+    // (net counts)/(1-e^(-decay constant * live time))
+    let isoAll = isoGA(isotope);
+    const decayConst = (isoAll as any).decayConstant;
+    let denominator = 1 - Math.exp(-decayConst * (material as any).liveTime);
+    return (material as any).counts[isoIndex].netCounts / denominator;
+}
+
 function getFuncDD(material: object, isotope: object, isoIndex: number): number {
     // This function uses the material's dead time property to decide which dead time correction to use.
     if ((material as any).dtType === 'short') {
@@ -49,6 +57,9 @@ function getFuncDD(material: object, isotope: object, isoIndex: number): number 
     }
     else if ((material as any).dtType === 'mixed') {
         return getMixedDD(material, isotope, isoIndex);
+    }
+    else if ((material as any).dtType === 'simple') {
+        return getSimpleDD(material, isotope, isoIndex);
     }
     else if ((material as any).dtType === undefined) {
         return 0;
@@ -64,6 +75,7 @@ export function getAll(material: object, isotope: object, isoIndex: number): obj
         decayCorrectionFactor: getDecayCorrectionFactor(material, isotope, isoIndex),
         shortDeadTimeCorrection: getShortDD(material, isotope, isoIndex),
         mixedDeadTimeCorrection: getMixedDD(material, isotope, isoIndex),
+        simpleDeadTimeCorrection: getSimpleDD(material, isotope, isoIndex),
         funcDeadTimeCorrection: getFuncDD(material, isotope, isoIndex)
     };
 }
