@@ -20,7 +20,7 @@
 				pageCount = Math.floor(pageCount);
 			}
 			if (pageCount < 1) {
-				alert(`Please enter a positive integer for the number of ${pageType}. Using 1 ${pageType}.`);
+				alert(`Please enter a positive integer for the number of ${pageType}. Using 1 as the count.`);
 				pageCount = 1;
 			}
 			updateFxn(pageCount);
