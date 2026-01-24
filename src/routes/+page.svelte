@@ -81,14 +81,21 @@
 	let isoIndex = $derived(step - 2);
 	let isotopeCount = $state(1);
 	// holds the reference to each isotope info component
-	let isoRef: (IsotopeInfo | undefined)[] = $state([]);
+	let isoRef: (IsotopeInfo | undefined)[] = $state([undefined]);
 	// array of isotope information
 	let isotopeInfo: {
 		elementName: string;
 		isotopeName: string;
 		energy: number;
 		halfLife: number;
-	}[] = $state([]);
+	}[] = $state([
+		{
+			elementName: '',
+			isotopeName: '',
+			energy: 0,
+			halfLife: 0
+		}
+	]);
 	// computed isotope information
 	let isoComp = $derived(isotopeInfo.map(isoGA));
 
