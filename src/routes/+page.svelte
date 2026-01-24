@@ -77,7 +77,7 @@
 
 	let step = $state(0);
 
-	// isottope information
+	// isotope information
 	let isoIndex = $derived(step - 2);
 	let isotopeCount = $state(1);
 	// holds the reference to each isotope info component
