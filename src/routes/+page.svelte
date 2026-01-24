@@ -122,7 +122,9 @@
 			liveTime: 0,
 			realTime: 0,
 			fluence: 0,
-			counts: [] as { grossCounts: number; netCounts: number; uncertainty: number }[],
+			counts: [
+				{ grossCounts: 0, netCounts: 0, uncertainty: 0 }
+			] as { grossCounts: number; netCounts: number; uncertainty: number }[],
 			dtType: undefined as 'short' | 'simple' | 'mixed' | undefined,
 
 			// specific to Reference Material
