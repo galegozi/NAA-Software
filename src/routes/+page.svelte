@@ -165,8 +165,7 @@
 			: step >= 1 && step < 1 + isotopeCount
 				? 'Next: Isotope Information'
 				: step === 1 + isotopeCount
-					? // ? 'Next: Number of Unknowns'
-						'Next: Reference Material Information'
+					? 'Next: Reference Material Information'
 					: step === 2 + isotopeCount
 						? 'Next: Number of Unknown Materials'
 						: step > 2 + isotopeCount && step < 3 + isotopeCount + unknownCount
