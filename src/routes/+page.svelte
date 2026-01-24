@@ -109,7 +109,7 @@
 	let unknownCount = $state(1);
 	let matRefs = $state({
 		reference: undefined as RefMatInfo | undefined,
-		unknown: [] as (MaterialInfo | undefined)[]
+		unknown: [undefined] as (MaterialInfo | undefined)[]
 	});
 	let materials = $state({
 		reference: {
