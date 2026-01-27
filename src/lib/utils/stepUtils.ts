@@ -67,22 +67,22 @@ export function getUnknownIndex(step: number, isotopeCount: number): number {
 export function getStepType(step: number, isotopeCount: number, unknownCount: number): StepType {
 	if (step === STEP_CONSTANTS.WELCOME) return StepType.WELCOME;
 	if (step === STEP_CONSTANTS.ISOTOPE_COUNT) return StepType.ISOTOPE_COUNT;
-	
+
 	const refMaterialStep = getReferenceMaterialStep(isotopeCount);
 	const unknownCountStep = getUnknownCountStep(isotopeCount);
 	const reviewStep = getReviewStep(isotopeCount, unknownCount);
-	
+
 	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < refMaterialStep) {
 		return StepType.ISOTOPE_INFO;
 	}
-	
+
 	if (step === refMaterialStep) return StepType.REFERENCE_MATERIAL;
 	if (step === unknownCountStep) return StepType.UNKNOWN_COUNT;
-	
+
 	if (step > unknownCountStep && step < reviewStep) {
 		return StepType.UNKNOWN_INFO;
 	}
-	
+
 	return StepType.REVIEW;
 }
 
@@ -95,24 +95,24 @@ export function getUserFacingStepNumber(
 	unknownCount: number
 ): number {
 	if (step === STEP_CONSTANTS.WELCOME) return 0;
-	
+
 	// Step 1: Number of isotopes
 	if (step === STEP_CONSTANTS.ISOTOPE_COUNT) return 1;
-	
+
 	const refMaterialStep = getReferenceMaterialStep(isotopeCount);
 	const unknownCountStep = getUnknownCountStep(isotopeCount);
-	
+
 	// Steps 2 to 1+isotopeCount: Isotope information
 	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < refMaterialStep) {
 		return step; // Already correct: 2, 3, 4...
 	}
-	
+
 	// Step after isotopes: Reference material
 	if (step === refMaterialStep) return step;
-	
+
 	// Step after reference: Unknown count
 	if (step === unknownCountStep) return step;
-	
+
 	// Steps for unknowns and review
 	return step;
 }
@@ -120,14 +120,10 @@ export function getUserFacingStepNumber(
 /**
  * Get step title for display
  */
-export function getStepTitle(
-	step: number,
-	isotopeCount: number,
-	unknownCount: number
-): string {
+export function getStepTitle(step: number, isotopeCount: number, unknownCount: number): string {
 	const stepType = getStepType(step, isotopeCount, unknownCount);
 	const stepNum = getUserFacingStepNumber(step, isotopeCount, unknownCount);
-	
+
 	switch (stepType) {
 		case StepType.WELCOME:
 			return 'Welcome';
@@ -163,10 +159,10 @@ export function getBackButtonText(
 	if (step <= STEP_CONSTANTS.ISOTOPE_COUNT) {
 		return 'Back';
 	}
-	
+
 	const refMaterialStep = getReferenceMaterialStep(isotopeCount);
 	const unknownCountStep = getUnknownCountStep(isotopeCount);
-	
+
 	// From isotope info steps
 	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < refMaterialStep) {
 		if (step === STEP_CONSTANTS.ISOTOPE_INFO_START) {
@@ -174,17 +170,17 @@ export function getBackButtonText(
 		}
 		return 'Back: Previous Isotope';
 	}
-	
+
 	// From reference material
 	if (step === refMaterialStep) {
 		return 'Back: Last Isotope Information';
 	}
-	
+
 	// From unknown count
 	if (step === unknownCountStep) {
 		return 'Back: Reference Material';
 	}
-	
+
 	// From unknown info steps
 	if (step > unknownCountStep && step < getReviewStep(isotopeCount, unknownCount)) {
 		if (step === unknownCountStep + 1) {
@@ -192,12 +188,12 @@ export function getBackButtonText(
 		}
 		return 'Back: Previous Unknown Material';
 	}
-	
+
 	// From review
 	if (step === getReviewStep(isotopeCount, unknownCount)) {
 		return unknownCount > 0 ? 'Back: Last Unknown Material' : 'Back: Unknown Count';
 	}
-	
+
 	return 'Back';
 }
 
@@ -212,50 +208,52 @@ export function getNextButtonText(
 	if (step < STEP_CONSTANTS.ISOTOPE_COUNT) {
 		return 'Next: Number of Isotopes';
 	}
-	
+
 	const refMaterialStep = getReferenceMaterialStep(isotopeCount);
 	const unknownCountStep = getUnknownCountStep(isotopeCount);
 	const reviewStep = getReviewStep(isotopeCount, unknownCount);
-	
+
 	// From isotope count to isotope info
 	if (step === STEP_CONSTANTS.ISOTOPE_COUNT) {
 		return isotopeCount === 1 ? 'Next: Isotope Information' : 'Next: Isotope 1 Information';
 	}
-	
+
 	// From isotope info steps
 	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < refMaterialStep) {
 		const currentIsoIndex = getIsotopeIndex(step);
 		const nextIsoIndex = currentIsoIndex + 1;
-		
+
 		if (nextIsoIndex < isotopeCount) {
 			return `Next: Isotope ${nextIsoIndex + 1} Information`;
 		} else {
 			return 'Next: Reference Material';
 		}
 	}
-	
+
 	// From reference material
 	if (step === refMaterialStep) {
 		return 'Next: Number of Unknowns';
 	}
-	
+
 	// From unknown count
 	if (step === unknownCountStep) {
-		return unknownCount === 1 ? 'Next: Unknown Material Information' : 'Next: Unknown 1 Information';
+		return unknownCount === 1
+			? 'Next: Unknown Material Information'
+			: 'Next: Unknown 1 Information';
 	}
-	
+
 	// From unknown info steps
 	if (step > unknownCountStep && step < reviewStep) {
 		const currentUnknownIdx = getUnknownIndex(step, isotopeCount);
 		const nextUnknownIdx = currentUnknownIdx + 1;
-		
+
 		if (nextUnknownIdx < unknownCount) {
 			return `Next: Unknown ${nextUnknownIdx + 1} Information`;
 		} else {
 			return 'Next: Review All';
 		}
 	}
-	
+
 	return 'Review All Information';
 }
 
@@ -281,11 +279,11 @@ export function canProceedFromStep(
 ): boolean {
 	// Welcome screen can always proceed
 	if (step === STEP_CONSTANTS.WELCOME) return true;
-	
+
 	// Count steps need valid counts
 	if (step === STEP_CONSTANTS.ISOTOPE_COUNT) return isotopeCount > 0;
 	if (step === getUnknownCountStep(isotopeCount)) return unknownCount > 0;
-	
+
 	// Other steps can proceed (validation happens in components)
 	return true;
 }
