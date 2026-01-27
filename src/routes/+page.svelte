@@ -227,7 +227,10 @@
 	};
 
 	// Reusable function for getRoiIndex to avoid recreating on every render
-	const getRoiIndexFn = (roiData: { centroid: number }[]) => findRoiIndices(isotopeInfo, roiData);
+	// Using $derived to recreate only when isotopeInfo changes
+	const getRoiIndexFn = $derived((roiData: { centroid: number }[]) =>
+		findRoiIndices(isotopeInfo, roiData)
+	);
 
 	const handleSubmit = () => {};
 
