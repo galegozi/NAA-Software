@@ -30,7 +30,10 @@
 		const currentUncertainty = refMatInfo.knownUncertainty ?? [];
 
 		// If arrays are already the correct size, do nothing
-		if (currentConcentration.length === isotopeCount && currentUncertainty.length === isotopeCount) {
+		if (
+			currentConcentration.length === isotopeCount &&
+			currentUncertainty.length === isotopeCount
+		) {
 			return;
 		}
 

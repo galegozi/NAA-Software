@@ -212,6 +212,9 @@
 	}
 
 	const next = () => {
+		// Prevent navigating beyond the final review step
+		if (step >= totalSteps) return;
+
 		// Clear previous errors
 		validationErrors = [];
 
