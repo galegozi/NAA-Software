@@ -91,7 +91,7 @@
 	});
 	let materials = $state({
 		reference: createReferenceMaterial(1),
-		unknown: [] as ReturnType<typeof createUnknownMaterial>[]
+		unknown: [createUnknownMaterial(1)]
 	});
 	let matComp = $derived({
 		reference: matGA(materials.reference),
