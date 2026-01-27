@@ -155,6 +155,14 @@
 	function validateCurrentStep(): boolean {
 		validationErrors = [];
 
+		// Validate isotope count step (step 1)
+		if (step === 1) {
+			if (!Number.isInteger(isotopeCount) || isotopeCount < 1) {
+				validationErrors = ['Please enter a positive integer for the number of isotopes'];
+				return false;
+			}
+		}
+
 		// Validate isotope info steps
 		if (isoIndex >= 0 && isoIndex < isotopeCount) {
 			if (isoRef[isoIndex] && typeof isoRef[isoIndex]?.validateIsotopeInfo === 'function') {
@@ -189,6 +197,14 @@
 			}
 		}
 
+		// Validate unknown count step (step 3 + isotopeCount)
+		if (step === 3 + isotopeCount) {
+			if (!Number.isInteger(unknownCount) || unknownCount < 1) {
+				validationErrors = ['Please enter a positive integer for the number of unknown materials'];
+				return false;
+			}
+		}
+
 		// Validate unknown material steps
 		if (unknownIdx >= 0 && unknownIdx < unknownCount) {
 			if (
@@ -219,8 +235,8 @@
 		// Clear previous errors
 		validationErrors = [];
 
-		// Validate before proceeding (skip validation for welcome and count steps)
-		if (step > 1 && step < totalSteps) {
+		// Validate before proceeding (skip validation only for welcome step)
+		if (step > 0 && step < totalSteps) {
 			if (!validateCurrentStep()) {
 				// Show error message
 				alert('Please complete all required fields before proceeding.');
