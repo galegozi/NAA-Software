@@ -3,7 +3,12 @@
  * Eliminates 'any' type casting throughout the codebase
  */
 
-import type { IsotopeInfo, BaseMaterialInfo, ReferenceMaterial, UnknownMaterial } from '../types.js';
+import type {
+	IsotopeInfo,
+	BaseMaterialInfo,
+	ReferenceMaterial,
+	UnknownMaterial
+} from '../types.js';
 
 /**
  * Result from isotope computations

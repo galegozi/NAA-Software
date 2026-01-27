@@ -99,7 +99,7 @@
 	}
 </script>
 
-<MaterialInfo bind:this={matInfoRef} bind:materialInfo={refMatInfo} getRoiIndex={getRoiIndex} isotopeCount={isotopeCount} />
+<MaterialInfo bind:this={matInfoRef} bind:materialInfo={refMatInfo} {getRoiIndex} {isotopeCount} />
 <!-- <label class="label">
 	<span>Known Concentration (in ug/g, as a percent)</span>
 	<input class="input w-50" type="number" bind:value={refMatInfo.knownConcentration} />
@@ -109,18 +109,33 @@
 	<input class="input w-50" type="number" bind:value={refMatInfo.knownUncertainty} />
 </label> -->
 <br /><br />
-{#each {length: isotopeCount} as _, index}
+{#each { length: isotopeCount } as _, index}
 	<h3 class="text-xl font-bold">Isotope {index + 1} Known Concentration</h3>
 	<label class="label">
 		<span>Known Concentration</span>
-		<input class="input w-50" type="number" bind:value={refMatInfo.knownConcentration[index]} placeholder="e.g., 0.35" min="0" required />
+		<input
+			class="input w-50"
+			type="number"
+			bind:value={refMatInfo.knownConcentration[index]}
+			placeholder="e.g., 0.35"
+			min="0"
+			required
+		/>
 		{#if showErrors && refMatInfo.knownConcentration[index] <= 0}
 			<span class="field-error">Known Concentration must be greater than 0</span>
 		{/if}
 	</label>
 	<label class="label">
 		<span>Known Uncertainty</span>
-		<input class="input w-50" type="number" bind:value={refMatInfo.knownUncertainty[index]} placeholder="e.g., 0.006" min="0" step="any" required />
+		<input
+			class="input w-50"
+			type="number"
+			bind:value={refMatInfo.knownUncertainty[index]}
+			placeholder="e.g., 0.006"
+			min="0"
+			step="any"
+			required
+		/>
 		{#if showErrors && refMatInfo.knownUncertainty[index] < 0}
 			<span class="field-error">Known Uncertainty cannot be negative</span>
 		{/if}
