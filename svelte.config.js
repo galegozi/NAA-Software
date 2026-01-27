@@ -20,15 +20,15 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import adapter from '@sveltejs/adapter-static';
 
 export default {
-  preprocess: vitePreprocess(),
-  kit: {
-	appDir: 'app',
-    adapter: adapter({
-      fallback: '404.html' // Required for single-page app behavior
-    }),
-    paths: {
-      // Replace 'your-repo-name' with your actual repository name
-      base: process.env.NODE_ENV === 'production' ? '/your-repo-name' : '',
-    }
-  }
+	preprocess: vitePreprocess(),
+	kit: {
+		appDir: 'app',
+		adapter: adapter({
+			fallback: '404.html' // Required for single-page app behavior
+		}),
+		paths: {
+			// Replace 'your-repo-name' with your actual repository name
+			base: process.env.NODE_ENV === 'production' ? '/your-repo-name' : ''
+		}
+	}
 };

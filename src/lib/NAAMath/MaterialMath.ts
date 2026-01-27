@@ -1,31 +1,34 @@
 // These are computations that derive from purely material attributes.
 
-function computeDeadTime(material: object): number {
-    const liveTime = (material as any).liveTime;
-    const realTime = (material as any).realTime;
-    return realTime - liveTime;
+import type { BaseMaterialInfo } from '../types.js';
+import type { MaterialComputed } from './types.js';
+
+function computeDeadTime(material: BaseMaterialInfo): number {
+	const liveTime = material.liveTime;
+	const realTime = material.realTime;
+	return realTime - liveTime;
 }
 
-function computeDeadTimeFraction(material: object): number {
-    const deadTime = computeDeadTime(material);
-    const realTime = (material as any).realTime;
-    return deadTime / realTime;
+function computeDeadTimeFraction(material: BaseMaterialInfo): number {
+	const deadTime = computeDeadTime(material);
+	const realTime = material.realTime;
+	return deadTime / realTime;
 }
 
-function computeBackgroundCounts(material: object): number[] {
-    return (material as any).counts.map((c: any) => c.grossCounts - c.netCounts);
+function computeBackgroundCounts(material: BaseMaterialInfo): number[] {
+	return material.counts.map((c) => c.grossCounts - c.netCounts);
 }
 
-function computeDetectionLimit(material: object): number[] {
-    const backgroundCounts = computeBackgroundCounts(material);
-    return backgroundCounts.map(bc => 2.71 + 4.65 * Math.sqrt(bc));
+function computeDetectionLimit(material: BaseMaterialInfo): number[] {
+	const backgroundCounts = computeBackgroundCounts(material);
+	return backgroundCounts.map((bc) => 2.71 + 4.65 * Math.sqrt(bc));
 }
 
-export function getAll(material: object) {
-    return {
-        deadTime: computeDeadTime(material),
-        deadTimeFraction: computeDeadTimeFraction(material),
-        backgroundCounts: computeBackgroundCounts(material),
-        detectionLimit: computeDetectionLimit(material)
-    };
+export function getAll(material: BaseMaterialInfo): MaterialComputed {
+	return {
+		deadTime: computeDeadTime(material),
+		deadTimeFraction: computeDeadTimeFraction(material),
+		backgroundCounts: computeBackgroundCounts(material),
+		detectionLimit: computeDetectionLimit(material)
+	};
 }
