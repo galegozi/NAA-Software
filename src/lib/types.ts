@@ -15,6 +15,12 @@ export interface CountData {
 	uncertainty: number;
 }
 
+/**
+ * Dead time correction model type.
+ *
+ * Note: the `'mixed'` option is deprecated and kept only for backward compatibility.
+ * Avoid using `'mixed'` in new code and prefer `'short'` or `'simple'` instead.
+ */
 export type DeadTimeType = 'short' | 'simple' | 'mixed' | undefined;
 
 export interface BaseMaterialInfo {
