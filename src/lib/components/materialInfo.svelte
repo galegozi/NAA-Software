@@ -42,11 +42,11 @@
 	export function getValidationErrors(): string[] {
 		const errors: string[] = [];
 
-		if (!materialInfo.NETL_code || materialInfo.NETL_code.trim() === '') {
+		if (!materialInfo.NETL_code?.trim()) {
 			errors.push('NETL Code is required');
 		}
 
-		if (!materialInfo.sampleName || materialInfo.sampleName.trim() === '') {
+		if (!materialInfo.sampleName?.trim()) {
 			errors.push('Sample Name is required');
 		}
 
