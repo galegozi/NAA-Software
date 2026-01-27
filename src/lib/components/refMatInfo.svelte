@@ -24,10 +24,31 @@
 		getRoiIndex
 	} = $props();
 
-	// Initialize arrays reactively
+	// Initialize/rescale arrays reactively while preserving existing values
 	$effect(() => {
-		refMatInfo.knownConcentration = Array(isotopeCount).fill(0);
-		refMatInfo.knownUncertainty = Array(isotopeCount).fill(0);
+		const currentConcentration = refMatInfo.knownConcentration ?? [];
+		const currentUncertainty = refMatInfo.knownUncertainty ?? [];
+
+		// If arrays are already the correct size, do nothing
+		if (currentConcentration.length === isotopeCount && currentUncertainty.length === isotopeCount) {
+			return;
+		}
+
+		const newConcentration = Array(isotopeCount).fill(0);
+		const newUncertainty = Array(isotopeCount).fill(0);
+
+		const copyLength = Math.min(isotopeCount, currentConcentration.length);
+		for (let i = 0; i < copyLength; i++) {
+			newConcentration[i] = currentConcentration[i];
+		}
+
+		const copyUncLength = Math.min(isotopeCount, currentUncertainty.length);
+		for (let i = 0; i < copyUncLength; i++) {
+			newUncertainty[i] = currentUncertainty[i];
+		}
+
+		refMatInfo.knownConcentration = newConcentration;
+		refMatInfo.knownUncertainty = newUncertainty;
 	});
 
 	let matInfoRef: any;
