@@ -35,9 +35,20 @@
 	// Using findRoiIndices from naaUtils
 
 	function updateIsotopeData(newCount: number) {
+		const previousCount = isotopeCount;
 		isotopeCount = newCount;
-		isotopeInfo = Array.from({ length: isotopeCount }, createIsotopeInfo);
-		isoRef = Array.from({ length: isotopeCount }, () => undefined);
+		
+		// Preserve existing isotope data, only add/remove as needed
+		const existingIsotopeInfo = [...isotopeInfo];
+		isotopeInfo = Array.from({ length: isotopeCount }, (_, i) => 
+			i < existingIsotopeInfo.length ? existingIsotopeInfo[i] : createIsotopeInfo()
+		);
+		
+		// Preserve component references for existing isotopes
+		const existingIsoRef = [...isoRef];
+		isoRef = Array.from({ length: isotopeCount }, (_, i) => 
+			i < existingIsoRef.length ? existingIsoRef[i] : undefined
+		);
 
 		// Update reference material counts, preserving existing knownConcentration and knownUncertainty
 		const currentReference = materials.reference;
@@ -72,22 +83,36 @@
 		);
 
 		materials.reference = updatedReference;
-		// Update unknown materials counts
-		materials.unknown = materials.unknown.map((unk) => ({
-			...unk,
-			counts: Array.from({ length: isotopeCount }, () => ({
-				grossCounts: 0,
-				netCounts: 0,
-				uncertainty: 0
-			}))
-		}));
+		
+		// Update unknown materials counts, preserving existing count data
+		materials.unknown = materials.unknown.map((unk) => {
+			const existingCounts = unk.counts || [];
+			return {
+				...unk,
+				counts: Array.from({ length: isotopeCount }, (_, i) =>
+					i < existingCounts.length 
+						? existingCounts[i] 
+						: { grossCounts: 0, netCounts: 0, uncertainty: 0 }
+				)
+			};
+		});
 	}
 
 	function updateUnknownData(newCount: number) {
 		unknownCount = newCount;
-		matRefs.unknown = Array.from({ length: unknownCount }, () => undefined);
-		materials.unknown = Array.from({ length: unknownCount }, () =>
-			createUnknownMaterial(isotopeCount)
+		
+		// Preserve existing unknown materials, only add/remove as needed
+		const existingUnknowns = [...materials.unknown];
+		const existingRefs = [...matRefs.unknown];
+		
+		materials.unknown = Array.from({ length: unknownCount }, (_, i) =>
+			i < existingUnknowns.length 
+				? existingUnknowns[i] 
+				: createUnknownMaterial(isotopeCount)
+		);
+		
+		matRefs.unknown = Array.from({ length: unknownCount }, (_, i) =>
+			i < existingRefs.length ? existingRefs[i] : undefined
 		);
 	}
 
