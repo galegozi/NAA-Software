@@ -49,6 +49,7 @@ export function createReferenceMaterial(isotopeCount: number): ReferenceMaterial
 		fluence: 0,
 		counts: createCountDataArray(isotopeCount),
 		dtType: undefined,
+		concentrationUnits: Array.from({ length: isotopeCount }, () => undefined),
 		knownConcentration: Array.from({ length: isotopeCount }, () => 0),
 		knownUncertainty: Array.from({ length: isotopeCount }, () => 0)
 	};

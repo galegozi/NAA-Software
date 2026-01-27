@@ -60,6 +60,14 @@
 			...currentReference
 		};
 
+		// Preserve and resize the counts array for reference material
+		const existingRefCounts = currentReference.counts || [];
+		updatedReference.counts = Array.from({ length: isotopeCount }, (_, i) =>
+			i < existingRefCounts.length 
+				? existingRefCounts[i] 
+				: { grossCounts: 0, netCounts: 0, uncertainty: 0 }
+		);
+
 		// Carefully merge knownConcentration and knownUncertainty arrays so existing values are preserved
 		const existingKnownConcentration =
 			currentReference && Array.isArray(currentReference.knownConcentration)
@@ -327,11 +335,10 @@
 			<br />
 			<p>Version 4.1.1 is a refactor to improve code organization and maintainability.</p>
 			<br />
+			<p>Version 4.2 is an alpha with a reporting table and concentration units.</p>
+			<br />
 			<h2 class="text-2xl font-bold">Future plans:</h2>
 			<ol class="list-inside list-decimal">
-				<li>
-					Version 4.2: Improved reporting with table at top. Should include units for concentration.
-				</li>
 			</ol>
 			<br />
 			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
@@ -434,6 +441,47 @@
 		{:else if unknownIdx === unknownCount}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Please review all information you entered and see computed values below.</p>
+			<br /><br />
+			<!--Display table & header with unit-->
+			<h3 class="text-xl font-bold">Predicted Concentrations</h3>
+			<!--Display a table here with isotopes as the columns and materials as the rows-->
+			<table class="table-auto border-collapse border border-gray-400">
+				<thead>
+					<tr>
+						<th class="border border-gray-400 px-4 py-2"></th>
+						{#each isotopeInfo as iso, index}
+							<th class="border border-gray-400 px-4 py-2">
+								{iso.isotopeName}
+							</th>
+						{/each}
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td class="border border-gray-400 px-4 py-2 font-bold">
+							Units
+						</td>
+						{#each isotopeInfo as _, index}
+							<td class="border border-gray-400 px-4 py-2">
+								{materials.reference.concentrationUnits[index]}
+							</td>
+						{/each}
+					</tr>
+					{#each materials.unknown as unk, uIndex}
+						<tr>
+							<td class="border border-gray-400 px-4 py-2 font-bold">
+								{unk.NETL_code}
+							</td>
+							{#each isotopeInfo as _, iIndex}
+								<td class="border border-gray-400 px-4 py-2">
+									{everythingComp[iIndex][uIndex].unknownConcentration}
+								</td>
+							{/each}
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+			<br /><br />
 
 			<ComputedDisplay title="Isotope Information" data={isotopeInfo} />
 			<br />

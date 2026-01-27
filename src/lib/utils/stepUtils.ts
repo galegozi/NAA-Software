@@ -2,7 +2,7 @@
  * Enhanced step utilities with user-facing step numbers and display helpers
  */
 
-export const APP_VERSION = '4.1.1 BETA';
+export const APP_VERSION = '4.2 ALPHA';
 
 export const STEP_CONSTANTS = {
 	WELCOME: 0,

@@ -23,6 +23,16 @@
 		getRoiIndex
 	} = $props();
 
+	$effect(() => {
+		const currentCounts = materialInfo.counts ?? [];
+		if (currentCounts.length !== isotopeCount) {
+			const newCounts = Array.from({ length: isotopeCount }, (_, i) => {
+				return currentCounts[i] || { grossCounts: 0, netCounts: 0, uncertainty: 0 };
+			});
+			materialInfo.counts = newCounts;
+		}
+	});
+
 	function handleParsedMaestro(data: MaestroParsedData) {
 		materialInfo.liveTime = materialInfo.liveTime || data.liveTime;
 		materialInfo.realTime = materialInfo.realTime || data.realTime;
