@@ -4,11 +4,7 @@
  */
 
 import type { IsotopeInfo, ReferenceMaterial, UnknownMaterial } from '../types.js';
-import {
-	createIsotopeInfo,
-	createReferenceMaterial,
-	createUnknownMaterial
-} from './naaUtils.js';
+import { createIsotopeInfo, createReferenceMaterial, createUnknownMaterial } from './naaUtils.js';
 
 export interface NAAState {
 	step: number;
@@ -40,10 +36,7 @@ export function createInitialState(): NAAState {
 /**
  * Update isotope count and reinitialize related data
  */
-export function updateIsotopeCount(
-	state: NAAState,
-	newCount: number
-): Partial<NAAState> {
+export function updateIsotopeCount(state: NAAState, newCount: number): Partial<NAAState> {
 	return {
 		isotopeCount: newCount,
 		isotopeInfo: Array.from({ length: newCount }, createIsotopeInfo),
@@ -67,17 +60,12 @@ export function updateIsotopeCount(
 /**
  * Update unknown count and reinitialize related data
  */
-export function updateUnknownCount(
-	state: NAAState,
-	newCount: number
-): Partial<NAAState> {
+export function updateUnknownCount(state: NAAState, newCount: number): Partial<NAAState> {
 	return {
 		unknownCount: newCount,
 		materials: {
 			...state.materials,
-			unknown: Array.from({ length: newCount }, () =>
-				createUnknownMaterial(state.isotopeCount)
-			)
+			unknown: Array.from({ length: newCount }, () => createUnknownMaterial(state.isotopeCount))
 		}
 	};
 }
