@@ -59,20 +59,16 @@
 				? currentReference.knownUncertainty
 				: [];
 
-		updatedReference.knownConcentration = Array.from(
-			{ length: isotopeCount },
-			(_, i) =>
-				existingKnownConcentration[i] !== undefined
-					? existingKnownConcentration[i]
-					: newReferenceBase.knownConcentration[i]
+		updatedReference.knownConcentration = Array.from({ length: isotopeCount }, (_, i) =>
+			existingKnownConcentration[i] !== undefined
+				? existingKnownConcentration[i]
+				: newReferenceBase.knownConcentration[i]
 		);
 
-		updatedReference.knownUncertainty = Array.from(
-			{ length: isotopeCount },
-			(_, i) =>
-				existingKnownUncertainty[i] !== undefined
-					? existingKnownUncertainty[i]
-					: newReferenceBase.knownUncertainty[i]
+		updatedReference.knownUncertainty = Array.from({ length: isotopeCount }, (_, i) =>
+			existingKnownUncertainty[i] !== undefined
+				? existingKnownUncertainty[i]
+				: newReferenceBase.knownUncertainty[i]
 		);
 
 		materials.reference = updatedReference;
@@ -147,6 +143,11 @@
 	let progressPercentage = $derived(getProgressPercentage(step, isotopeCount, unknownCount));
 	let totalSteps = $derived(getReviewStep(isotopeCount, unknownCount));
 	let showProgress = $derived(step > 0);
+
+	// Memoized function to prevent recreation on every render
+	let getRoiIndexFn = $derived((roiData: { centroid: number }[]) =>
+		findRoiIndices(isotopeInfo, roiData)
+	);
 
 	// Validation state
 	let validationErrors: string[] = $state([]);
@@ -339,7 +340,7 @@
 			<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
 			<RefMatInfo
 				{isotopeCount}
-				getRoiIndex={(roiData: { centroid: number }[]) => findRoiIndices(isotopeInfo, roiData)}
+				getRoiIndex={getRoiIndexFn}
 				bind:refMatInfo={materials.reference}
 				bind:this={matRefs.reference}
 			/>
@@ -371,7 +372,7 @@
 			<br /><br />
 			<MaterialInfo
 				{isotopeCount}
-				getRoiIndex={(roiData: { centroid: number }[]) => findRoiIndices(isotopeInfo, roiData)}
+				getRoiIndex={getRoiIndexFn}
 				bind:this={matRefs.unknown[unknownIdx]}
 				bind:materialInfo={materials.unknown[unknownIdx]}
 			/>
