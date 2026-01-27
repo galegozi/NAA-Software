@@ -12,8 +12,15 @@
 </script>
 
 <div class="progress-container">
-	<div class="progress-bar">
-		<div class="progress-fill" style="width: {percentage}%"></div>
+	<div
+		class="progress-bar"
+		role="progressbar"
+		aria-valuenow={percentage}
+		aria-valuemin="0"
+		aria-valuemax="100"
+		aria-label="Step progress"
+	>
+		<div class="progress-fill" style="width: {percentage}%" aria-hidden="true"></div>
 	</div>
 	<div class="progress-text">
 		Step {currentStep} of {totalSteps} ({percentage}%)
