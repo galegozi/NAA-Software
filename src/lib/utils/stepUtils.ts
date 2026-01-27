@@ -268,22 +268,3 @@ export function getProgressPercentage(
 	const totalSteps = getReviewStep(isotopeCount, unknownCount);
 	return Math.round((step / totalSteps) * 100);
 }
-
-/**
- * Check if current step can proceed (has required data)
- */
-export function canProceedFromStep(
-	step: number,
-	isotopeCount: number,
-	unknownCount: number
-): boolean {
-	// Welcome screen can always proceed
-	if (step === STEP_CONSTANTS.WELCOME) return true;
-
-	// Count steps need valid counts
-	if (step === STEP_CONSTANTS.ISOTOPE_COUNT) return isotopeCount > 0;
-	if (step === getUnknownCountStep(isotopeCount)) return unknownCount > 0;
-
-	// Other steps can proceed (validation happens in components)
-	return true;
-}

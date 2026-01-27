@@ -4,7 +4,7 @@
 	 */
 	interface Props {
 		title: string;
-		data: any;
+		data: unknown;
 		level?: 3 | 4;
 	}
 
