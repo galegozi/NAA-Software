@@ -144,6 +144,11 @@
 	let totalSteps = $derived(getReviewStep(isotopeCount, unknownCount));
 	let showProgress = $derived(step > 0);
 
+	// Memoized function to prevent recreation on every render
+	let getRoiIndexFn = $derived((roiData: { centroid: number }[]) =>
+		findRoiIndices(isotopeInfo, roiData)
+	);
+
 	// Validation state
 	let validationErrors: string[] = $state([]);
 
@@ -224,6 +229,9 @@
 	}
 
 	const next = () => {
+		// Prevent navigating beyond the final review step
+		if (step >= totalSteps) return;
+
 		// Clear previous errors
 		validationErrors = [];
 
@@ -348,7 +356,7 @@
 			<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
 			<RefMatInfo
 				{isotopeCount}
-				getRoiIndex={(roiData: { centroid: number }[]) => findRoiIndices(isotopeInfo, roiData)}
+				getRoiIndex={getRoiIndexFn}
 				bind:refMatInfo={materials.reference}
 				bind:this={matRefs.reference}
 			/>
@@ -380,7 +388,7 @@
 			<br /><br />
 			<MaterialInfo
 				{isotopeCount}
-				getRoiIndex={(roiData: { centroid: number }[]) => findRoiIndices(isotopeInfo, roiData)}
+				getRoiIndex={getRoiIndexFn}
 				bind:this={matRefs.unknown[unknownIdx]}
 				bind:materialInfo={materials.unknown[unknownIdx]}
 			/>
