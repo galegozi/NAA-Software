@@ -1,81 +1,85 @@
-// These are computeations that derive from attributes of an isotope and a single material.
+// These are computations that derive from attributes of an isotope and a single material.
 
+import type { IsotopeInfo, BaseMaterialInfo } from '../types.js';
+import type { MaterialIsotopeComputed } from './types.js';
 import { getAll as isoGA } from './isotopeMath.ts';
 import { getAll as matGA } from './MaterialMath.ts';
 
-// function getSaturationFactor(halfLife: number, irradiationTime: number): number {
-// 	const decayConst = (isoGA({ halfLife }) as any).decayConstant;
-// 	return 1 - Math.exp(-decayConst * irradiationTime);
-// }
-
-function getSaturationFactor(material: object, isotope: object, isoIndex: number): number {
-    let isoAll = isoGA(isotope);
-    return 1 - Math.exp(-(isoAll as any).decayConstant * (material as any).irradiationTime);
+function getSaturationFactor(
+	material: BaseMaterialInfo,
+	isotope: IsotopeInfo,
+	isoIndex: number
+): number {
+	const isoAll = isoGA(isotope);
+	return 1 - Math.exp(-isoAll.decayConstant * material.irradiationTime);
 }
 
-function getDecayCorrectionFactor(material: object, isotope: object, isoIndex: number): number {
-    let isoAll = isoGA(isotope);
-    return Math.exp(-(isoAll as any).decayConstant * (material as any).decayTime);
+function getDecayCorrectionFactor(
+	material: BaseMaterialInfo,
+	isotope: IsotopeInfo,
+	isoIndex: number
+): number {
+	const isoAll = isoGA(isotope);
+	return Math.exp(-isoAll.decayConstant * material.decayTime);
 }
 
-function getShortDD(material: object, isotope: object, isoIndex: number): number {
-    //=(EXP(decay constant*dead time seconds)-1)*(net counts/dead time seconds)/(1-EXP(-decay constant*live time))
-    let isoAll = isoGA(isotope);
-    let matAll = matGA(material);
-    const decayConst = (isoAll as any).decayConstant;
-    const deadTimeSeconds = matAll.deadTime;
-    let first_factor = Math.exp(decayConst * deadTimeSeconds) - 1;
-    let second_factor = (material as any).counts[isoIndex].netCounts / deadTimeSeconds;
-    let third_factor = 1 - Math.exp(-decayConst * (material as any).liveTime);
-    return first_factor * second_factor / third_factor;
+function getShortDD(material: BaseMaterialInfo, isotope: IsotopeInfo, isoIndex: number): number {
+	//=(EXP(decay constant*dead time seconds)-1)*(net counts/dead time seconds)/(1-EXP(-decay constant*live time))
+	const isoAll = isoGA(isotope);
+	const matAll = matGA(material);
+	const decayConst = isoAll.decayConstant;
+	const deadTimeSeconds = matAll.deadTime;
+	const first_factor = Math.exp(decayConst * deadTimeSeconds) - 1;
+	const second_factor = material.counts[isoIndex].netCounts / deadTimeSeconds;
+	const third_factor = 1 - Math.exp(-decayConst * material.liveTime);
+	return (first_factor * second_factor) / third_factor;
 }
 
-function getMixedDD(material: object, isotope: object, isoIndex: number): number {
-    let isoAll = isoGA(isotope);
-    let matAll = matGA(material);
-    // a = net counts * decay constant
-    let a = (material as any).counts[isoIndex].netCounts * (isoAll as any).decayConstant;
-    // b = real time / live time
-    let b = (material as any).realTime / (material as any).liveTime;
-    // c = 1 - EXP(-decay constant * real time)
-    let c = 1 - Math.exp(-(isoAll as any).decayConstant * (material as any).realTime);
-    return a * b / c;
+function getMixedDD(material: BaseMaterialInfo, isotope: IsotopeInfo, isoIndex: number): number {
+	const isoAll = isoGA(isotope);
+	// a = net counts * decay constant
+	const a = material.counts[isoIndex].netCounts * isoAll.decayConstant;
+	// b = real time / live time
+	const b = material.realTime / material.liveTime;
+	// c = 1 - EXP(-decay constant * real time)
+	const c = 1 - Math.exp(-isoAll.decayConstant * material.realTime);
+	return (a * b) / c;
 }
 
-function getSimpleDD(material: object, isotope: object, isoIndex: number): number {
-    // (net counts)/(1-e^(-decay constant * live time))
-    let isoAll = isoGA(isotope);
-    const decayConst = (isoAll as any).decayConstant;
-    let denominator = 1 - Math.exp(-decayConst * (material as any).liveTime);
-    return (material as any).counts[isoIndex].netCounts / denominator;
+function getSimpleDD(material: BaseMaterialInfo, isotope: IsotopeInfo, isoIndex: number): number {
+	// (net counts)/(1-e^(-decay constant * live time))
+	const isoAll = isoGA(isotope);
+	const decayConst = isoAll.decayConstant;
+	const denominator = 1 - Math.exp(-decayConst * material.liveTime);
+	return material.counts[isoIndex].netCounts / denominator;
 }
 
-function getFuncDD(material: object, isotope: object, isoIndex: number): number {
-    // This function uses the material's dead time property to decide which dead time correction to use.
-    if ((material as any).dtType === 'short') {
-        return getShortDD(material, isotope, isoIndex);
-    }
-    else if ((material as any).dtType === 'mixed') {
-        return getMixedDD(material, isotope, isoIndex);
-    }
-    else if ((material as any).dtType === 'simple') {
-        return getSimpleDD(material, isotope, isoIndex);
-    }
-    else if ((material as any).dtType === undefined) {
-        return 0;
-    }
-    else {
-        throw new Error('Invalid dead time correction type specified in material.');
-    }
+function getFuncDD(material: BaseMaterialInfo, isotope: IsotopeInfo, isoIndex: number): number {
+	// This function uses the material's dead time property to decide which dead time correction to use.
+	if (material.dtType === 'short') {
+		return getShortDD(material, isotope, isoIndex);
+	} else if (material.dtType === 'mixed') {
+		return getMixedDD(material, isotope, isoIndex);
+	} else if (material.dtType === 'simple') {
+		return getSimpleDD(material, isotope, isoIndex);
+	} else if (material.dtType === undefined) {
+		return 0;
+	} else {
+		throw new Error('Invalid dead time correction type specified in material.');
+	}
 }
 
-export function getAll(material: object, isotope: object, isoIndex: number): object {
-    return {
-        saturationFactor: getSaturationFactor(material, isotope, isoIndex),
-        decayCorrectionFactor: getDecayCorrectionFactor(material, isotope, isoIndex),
-        shortDeadTimeCorrection: getShortDD(material, isotope, isoIndex),
-        mixedDeadTimeCorrection: getMixedDD(material, isotope, isoIndex),
-        simpleDeadTimeCorrection: getSimpleDD(material, isotope, isoIndex),
-        funcDeadTimeCorrection: getFuncDD(material, isotope, isoIndex)
-    };
+export function getAll(
+	material: BaseMaterialInfo,
+	isotope: IsotopeInfo,
+	isoIndex: number
+): MaterialIsotopeComputed {
+	return {
+		saturationFactor: getSaturationFactor(material, isotope, isoIndex),
+		decayCorrectionFactor: getDecayCorrectionFactor(material, isotope, isoIndex),
+		shortDeadTimeCorrection: getShortDD(material, isotope, isoIndex),
+		mixedDeadTimeCorrection: getMixedDD(material, isotope, isoIndex),
+		simpleDeadTimeCorrection: getSimpleDD(material, isotope, isoIndex),
+		funcDeadTimeCorrection: getFuncDD(material, isotope, isoIndex)
+	};
 }

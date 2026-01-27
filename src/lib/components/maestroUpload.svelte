@@ -1,19 +1,19 @@
 <script lang="ts">
+	import type { MaestroRoiEntry, MaestroParsedData } from '$lib/NAAMath/types.js';
+
 	let files: FileList | undefined = $state(undefined);
 	let fileContent = $state('');
 	let fileLines: string[] = $state([]);
 	let detectorInfo: string[] = $state([]);
 	let dataLines: string[] = $state([]);
-	// let roiData: object[] = $state([]);
 	let parsedRealTime: number = $state(0);
 	let parsedLiveTime: number = $state(0);
-	let { onParsed } = $props();
-	// let parseCompleted: boolean = $state(false);
+	let { onParsed }: { onParsed?: (data: MaestroParsedData) => void } = $props();
 
 	async function handleFileChange() {
 		if (files && files.length > 0) {
 			const file = files[0];
-			let roiData = [];
+			const roiData: MaestroRoiEntry[] = [];
 			fileContent = await file.text(); // Read plain text content
 			fileLines = fileContent.split('\n'); // Split content into lines
 			// check for empty lines & lines with pure whitespace.
@@ -29,13 +29,13 @@
 			// look for RT = and LT = in detectorInfo
 			for (const line of detectorInfo) {
 				if (line.includes('RT =')) {
-					let parts = line.split('RT =');
+					const parts = line.split('RT =');
 					if (parts.length > 1) {
 						parsedRealTime = parseFloat(parts[1].trim());
 					}
 				}
 				if (line.includes('LT =')) {
-					let parts = line.split('LT =');
+					const parts = line.split('LT =');
 					if (parts.length > 1) {
 						parsedLiveTime = parseFloat(parts[1].trim());
 					}
@@ -53,8 +53,8 @@
 				}
 			}
 			for (const line of dataLines) {
-				let parts = line.split(/\s+/);
-				let roiEntry = {
+				const parts = line.split(/\s+/);
+				const roiEntry: MaestroRoiEntry = {
 					roi: parseInt(parts[0]),
 					// parts 1 & 2 are for min and max energy
 					energyRange: [parseFloat(parts[1]), parseFloat(parts[2])],
@@ -65,9 +65,8 @@
 				};
 				roiData.push(roiEntry);
 			}
-			// parseCompleted = true;
 			if (onParsed) {
-				let parsedData = {
+				const parsedData: MaestroParsedData = {
 					roiData: roiData,
 					realTime: parsedRealTime,
 					liveTime: parsedLiveTime

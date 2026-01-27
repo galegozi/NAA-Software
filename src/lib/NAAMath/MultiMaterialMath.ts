@@ -1,11 +1,17 @@
 // These are computations that derive from attributes of multiple materials.
 
-function getMassCorrection(reference: object, unknown: object): number {
-    return (reference as any).mass / (unknown as any).mass
+import type { BaseMaterialInfo } from '../types.js';
+import type { MultiMaterialComputed } from './types.js';
+
+function getMassCorrection(reference: BaseMaterialInfo, unknown: BaseMaterialInfo): number {
+	return reference.mass / unknown.mass;
 }
 
-export function getAll(reference: object, unknown: object) {
-    return {
-        massCorrection: getMassCorrection(reference, unknown)
-    }
+export function getAll(
+	reference: BaseMaterialInfo,
+	unknown: BaseMaterialInfo
+): MultiMaterialComputed {
+	return {
+		massCorrection: getMassCorrection(reference, unknown)
+	};
 }

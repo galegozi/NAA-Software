@@ -3,6 +3,8 @@
 	import MaterialInfo from '$lib/components/materialInfo.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
 	import PageCounter from '$lib/components/pageCounter.svelte';
+	import ComputedDisplay from '$lib/components/ComputedDisplay.svelte';
+	import ProgressIndicator from '$lib/components/ProgressIndicator.svelte';
 
 	import { getAll as isoGA } from '../lib/NAAMath/isotopeMath.ts';
 	import { getAll as matGA } from '../lib/NAAMath/MaterialMath.ts';
@@ -10,94 +12,68 @@
 	import { getAll as MMGA } from '../lib/NAAMath/MultiMaterialMath.ts';
 	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
 
-	function findIndex(roiData: object[]): number[] {
-		// match each isotope to the closest roi centroid
-		let indices: number[] = [];
-		for (let i = 0; i < isotopeInfo.length; i++) {
-			let isotopeEnergy = isotopeInfo[i].energy;
-			let closestIndex = -1;
-			let closestDiff = Infinity;
-			for (let j = 0; j < roiData.length; j++) {
-				let roiCentroid = (roiData as any)[j].centroid;
-				let diff = Math.abs(isotopeEnergy - roiCentroid);
-				if (diff < closestDiff) {
-					closestDiff = diff;
-					closestIndex = j;
-				}
-			}
-			indices.push(closestIndex);
-		}
-		return indices;
-	}
+	import type { IsotopeInfo as IsotopeInfoType, ReferenceMaterial } from '$lib/types.js';
+	import {
+		createIsotopeInfo,
+		createReferenceMaterial,
+		createUnknownMaterial,
+		findRoiIndices
+	} from '$lib/utils/naaUtils.js';
+	import {
+		APP_VERSION,
+		getIsotopeIndex,
+		getUnknownIndex,
+		getNextButtonText,
+		getBackButtonText,
+		getStepTitle,
+		StepType,
+		getStepType,
+		getProgressPercentage,
+		getReviewStep
+	} from '$lib/utils/stepUtils.js';
+
+	// Using findRoiIndices from naaUtils
 
 	function updateIsotopeData(newCount: number) {
 		isotopeCount = newCount;
-		isotopeInfo = Array.from({ length: isotopeCount }, () => ({
-			elementName: '',
-			isotopeName: '',
-			energy: 0,
-			halfLife: 0
-		}));
+		isotopeInfo = Array.from({ length: isotopeCount }, createIsotopeInfo);
 		isoRef = Array.from({ length: isotopeCount }, () => undefined);
 
-		materials.reference.counts = Array.from({ length: isotopeCount }, () => ({
-			grossCounts: 0,
-			netCounts: 0,
-			uncertainty: 0
-		}));
-		materials.reference.knownConcentration = Array.from({ length: isotopeCount }, () => 0);
-		materials.reference.knownUncertainty = Array.from({ length: isotopeCount }, () => 0);
-		for (let i = 0; i < materials.unknown.length; i++) {
-			materials.unknown[i].counts = Array.from({ length: isotopeCount }, () => ({
+		// Update reference material counts
+		const currentReference = materials.reference;
+		materials.reference = {
+			...currentReference,
+			...createReferenceMaterial(isotopeCount)
+		};
+
+		// Update unknown materials counts
+		materials.unknown = materials.unknown.map((unk) => ({
+			...unk,
+			counts: Array.from({ length: isotopeCount }, () => ({
 				grossCounts: 0,
 				netCounts: 0,
 				uncertainty: 0
-			}));
-		}
+			}))
+		}));
 	}
 
 	function updateUnknownData(newCount: number) {
 		unknownCount = newCount;
 		matRefs.unknown = Array.from({ length: unknownCount }, () => undefined);
-		materials.unknown = Array.from({ length: unknownCount }, () => ({
-			NETL_code: '',
-			sampleName: '',
-			mass: 0,
-			irradiationTime: 0,
-			decayTime: 0,
-			liveTime: 0,
-			realTime: 0,
-			fluence: 0,
-			counts: Array.from({ length: isotopeCount }, () => ({
-				grossCounts: 0,
-				netCounts: 0,
-				uncertainty: 0
-			})),
-			dtType: undefined
-		}));
+		materials.unknown = Array.from({ length: unknownCount }, () =>
+			createUnknownMaterial(isotopeCount)
+		);
 	}
 
 	let step = $state(0);
 
 	// isotope information
-	let isoIndex = $derived(step - 2);
+	let isoIndex = $derived(getIsotopeIndex(step));
 	let isotopeCount = $state(1);
 	// holds the reference to each isotope info component
 	let isoRef: (IsotopeInfo | undefined)[] = $state([undefined]);
 	// array of isotope information
-	let isotopeInfo: {
-		elementName: string;
-		isotopeName: string;
-		energy: number;
-		halfLife: number;
-	}[] = $state([
-		{
-			elementName: '',
-			isotopeName: '',
-			energy: 0,
-			halfLife: 0
-		}
-	]);
+	let isotopeInfo: IsotopeInfoType[] = $state([createIsotopeInfo()]);
 	// computed isotope information
 	let isoComp = $derived(isotopeInfo.map(isoGA));
 
@@ -107,44 +83,15 @@
 	//step 3 + isotope count: how many unknowns
 	//step 4 + isotope count to 3 + isotope count + unknownCount : unknown material information
 	//step 4 + isotope count + unknownCount : review
-	let unknownIdx = $derived(step - (4 + isotopeCount));
+	let unknownIdx = $derived(getUnknownIndex(step, isotopeCount));
 	let unknownCount = $state(1);
 	let matRefs = $state({
 		reference: undefined as RefMatInfo | undefined,
 		unknown: [undefined] as (MaterialInfo | undefined)[]
 	});
 	let materials = $state({
-		reference: {
-			// inherited from MaterialInfo
-			NETL_code: '',
-			sampleName: '',
-			mass: 0,
-			irradiationTime: 0,
-			decayTime: 0,
-			liveTime: 0,
-			realTime: 0,
-			fluence: 0,
-			counts: [
-				{ grossCounts: 0, netCounts: 0, uncertainty: 0 }
-			] as { grossCounts: number; netCounts: number; uncertainty: number }[],
-			dtType: undefined as 'short' | 'simple' | 'mixed' | undefined,
-
-			// specific to Reference Material
-			knownConcentration: [] as number[],
-			knownUncertainty: [] as number[]
-		},
-		unknown: [] as {
-			NETL_code: string;
-			sampleName: string;
-			mass: number;
-			irradiationTime: number;
-			decayTime: number;
-			liveTime: number;
-			realTime: number;
-			fluence: number;
-			counts: { grossCounts: number; netCounts: number; uncertainty: number }[];
-			dtType: 'short' | 'simple' | 'mixed' | undefined;
-		}[]
+		reference: createReferenceMaterial(1),
+		unknown: [] as ReturnType<typeof createUnknownMaterial>[]
 	});
 	let matComp = $derived({
 		reference: matGA(materials.reference),
@@ -163,33 +110,118 @@
 		)
 	);
 
-	let nextButtonText = $derived(
-		step < 1
-			? 'Next: Number of Isotopes'
-			: step >= 1 && step < 1 + isotopeCount
-				? 'Next: Isotope Information'
-				: step === 1 + isotopeCount
-					? 'Next: Reference Material Information'
-					: step === 2 + isotopeCount
-						? 'Next: Number of Unknown Materials'
-						: step > 2 + isotopeCount && step < 3 + isotopeCount + unknownCount
-							? 'Next: Unknown Material Information'
-							: 'Review All Information'
-	);
+	let nextButtonText = $derived(getNextButtonText(step, isotopeCount, unknownCount));
+	let backButtonText = $derived(getBackButtonText(step, isotopeCount, unknownCount));
+	let stepTitle = $derived(getStepTitle(step, isotopeCount, unknownCount));
+	let stepType = $derived(getStepType(step, isotopeCount, unknownCount));
+	let progressPercentage = $derived(getProgressPercentage(step, isotopeCount, unknownCount));
+	let totalSteps = $derived(getReviewStep(isotopeCount, unknownCount));
+	let showProgress = $derived(step > 0);
 
-	const next = () => step++;
-	const prev = () => step--;
+	// Validation state
+	let validationErrors: string[] = $state([]);
+
+	function validateCurrentStep(): boolean {
+		validationErrors = [];
+
+		// Validate isotope info steps
+		if (isoIndex >= 0 && isoIndex < isotopeCount) {
+			if (isoRef[isoIndex] && typeof isoRef[isoIndex]?.validateIsotopeInfo === 'function') {
+				const isValid = isoRef[isoIndex]!.validateIsotopeInfo();
+				if (!isValid) {
+					if (typeof isoRef[isoIndex]?.showValidationErrors === 'function') {
+						isoRef[isoIndex]!.showValidationErrors();
+					}
+					const errors = isoRef[isoIndex]!.getValidationErrors?.() || ['Please fill in all required fields'];
+					validationErrors = errors;
+					return false;
+				}
+			}
+		}
+
+		// Validate reference material step
+		if (step === 2 + isotopeCount) {
+			if (matRefs.reference && typeof matRefs.reference.validateRefMatInfo === 'function') {
+				const isValid = matRefs.reference.validateRefMatInfo();
+				if (!isValid) {
+					if (typeof matRefs.reference.showValidationErrors === 'function') {
+						matRefs.reference.showValidationErrors();
+					}
+					const errors = matRefs.reference.getValidationErrors?.() || ['Please fill in all required fields'];
+					validationErrors = errors;
+					return false;
+				}
+			}
+		}
+
+		// Validate unknown material steps
+		if (unknownIdx >= 0 && unknownIdx < unknownCount) {
+			if (matRefs.unknown[unknownIdx] && typeof matRefs.unknown[unknownIdx]?.validateMaterialInfo === 'function') {
+				const isValid = matRefs.unknown[unknownIdx]!.validateMaterialInfo();
+				if (!isValid) {
+					if (typeof matRefs.unknown[unknownIdx]?.showValidationErrors === 'function') {
+						matRefs.unknown[unknownIdx]!.showValidationErrors();
+					}
+					const errors = matRefs.unknown[unknownIdx]!.getValidationErrors?.() || ['Please fill in all required fields'];
+					validationErrors = errors;
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	const next = () => {
+		// Clear previous errors
+		validationErrors = [];
+
+		// Validate before proceeding (skip validation for welcome and count steps)
+		if (step > 1 && step < totalSteps) {
+			if (!validateCurrentStep()) {
+				// Show error message
+				alert('Please complete all required fields before proceeding.');
+				return;
+			}
+		}
+
+		step++;
+	};
+	const prev = () => {
+		if (step > 0) step--;
+	};
 
 	const handleSubmit = () => {};
+
+	// Keyboard navigation
+	const handleKeyPress = (e: KeyboardEvent) => {
+		if (e.ctrlKey || e.metaKey) {
+			if (e.key === 'ArrowRight' && step < totalSteps) {
+				e.preventDefault();
+				next();
+			} else if (e.key === 'ArrowLeft' && step > 0) {
+				e.preventDefault();
+				prev();
+			}
+		}
+	};
 </script>
 
 <svelte:head>
 	<title>NAA Analysis</title>
 </svelte:head>
 
+<svelte:window onkeydown={handleKeyPress} />
+
 <div style="padding: 5%">
-	<h1 class="text-3xl font-bold">NAA Analysis - Version 4.1.1 BETA</h1>
+	<h1 class="text-3xl font-bold">NAA Analysis - Version {APP_VERSION}</h1>
 	<br />
+	
+	{#if showProgress}
+		<ProgressIndicator currentStep={step} totalSteps={totalSteps} percentage={progressPercentage} />
+	{/if}
+
+	
 	<form
 		onsubmit={(e) => {
 			e.preventDefault();
@@ -232,15 +264,13 @@
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
 		{:else if step === 1}
-			<h2 class="text-2xl font-bold">Step 1: Number of Isotopes</h2>
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<PageCounter pageType="isotopes" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
 			<button type="button" onclick={next}> {nextButtonText} </button>
 		{:else if isoIndex >= 0 && isoIndex < isotopeCount}
 			<!--For each step, show this. All of this should be in step 2, but there should be an indication of which isotope is being filled out. Ensure that the forward and back buttons work correctly.-->
 			<!-- {#each { length: isotopeCount } as _, index} -->
-			<h2 class="text-2xl font-bold">
-				Step {isoIndex + 2}: Isotope Information for Isotope: {isoIndex + 1}
-			</h2>
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>
 				This is where you enter information about isotope {isoIndex + 1}. This is used in the
 				concentration calculations.
@@ -248,16 +278,18 @@
 			<br /><br />
 			<IsotopeInfo bind:this={isoRef[isoIndex]} bind:isotopeInfo={isotopeInfo[isoIndex]} />
 			<br />
-			<h3 class="text-xl font-bold">Computed Isotope Information for Isotope {isoIndex + 1}</h3>
-			<pre>{JSON.stringify(isoComp[isoIndex], null, 4)}</pre>
+			<ComputedDisplay
+				title="Computed Isotope Information for Isotope {isoIndex + 1}"
+				data={isoComp[isoIndex]}
+			/>
 
-			<button type="button" onclick={prev}> Back </button>
+			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
 			<br /><br />
 			<!-- {/each} -->
 		{:else if step === 2 + isotopeCount}
-			<h2 class="text-2xl font-bold">Step {step}: Reference Material Information</h2>
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>
 				This is where you enter information about the reference material. This is used when
 				comparing to the unknown material to determine concentrations.
@@ -266,82 +298,73 @@
 			<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
 			<RefMatInfo
 				{isotopeCount}
-				getRoiIndex={findIndex}
+				getRoiIndex={(roiData: { centroid: number }[]) => findRoiIndices(isotopeInfo, roiData)}
 				bind:refMatInfo={materials.reference}
 				bind:this={matRefs.reference}
 			/>
 
-			<!-- <br /> -->
-			<h3 class="text-xl font-bold">Reference Material Information</h3>
-			<pre>{JSON.stringify(matComp.reference, null, 4)}</pre>
-			<h3 class="text-xl font-bold">Reference and Isotope Information</h3>
-			<pre>{JSON.stringify(
-					matIsoComp.map((item) => item.reference),
-					null,
-					4
-				)}</pre>
+			<ComputedDisplay title="Reference Material Information" data={matComp.reference} />
+			<ComputedDisplay
+				title="Reference and Isotope Information"
+				data={matIsoComp.map((item) => item.reference)}
+			/>
 
-			<button type="button" onclick={prev}> Back </button>
+			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
 		{:else if step === 3 + isotopeCount}
-			<h2 class="text-2xl font-bold">Step {step}: Number of Unknown Materials</h2>
-			<PageCounter pageType="unknown materials" pageCount={unknownCount} updateFxn={updateUnknownData} />
-			<button type="button" onclick={prev}> Back </button>
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
+			<PageCounter
+				pageType="unknown materials"
+				pageCount={unknownCount}
+				updateFxn={updateUnknownData}
+			/>
+			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
 		{:else if unknownIdx >= 0 && unknownIdx < unknownCount}
-			<h2 class="text-2xl font-bold">
-				Step {step}: Unknown Material Information for Unknown {unknownIdx + 1}
-			</h2>
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>
 				This is where you enter information about the unknown material you are trying to understand.
 			</p>
 			<br /><br />
 			<MaterialInfo
 				{isotopeCount}
-				getRoiIndex={findIndex}
+				getRoiIndex={(roiData: { centroid: number }[]) => findRoiIndices(isotopeInfo, roiData)}
 				bind:this={matRefs.unknown[unknownIdx]}
 				bind:materialInfo={materials.unknown[unknownIdx]}
 			/>
 
 			<br />
-			<h3 class="text-xl font-bold">Unknown Material Information for Unknown {unknownIdx + 1}</h3>
-			<pre>{JSON.stringify(matComp.unknown[unknownIdx], null, 4)}</pre>
-			<h3 class="text-xl font-bold">
-				Unknown and Isotope Information for Unknown {unknownIdx + 1}
-			</h3>
-			<pre>{JSON.stringify(
-					matIsoComp.map((item) => item.unknown[unknownIdx]),
-					null,
-					4
-				)}</pre>
+			<ComputedDisplay
+				title="Unknown Material Information for Unknown {unknownIdx + 1}"
+				data={matComp.unknown[unknownIdx]}
+			/>
+			<ComputedDisplay
+				title="Unknown and Isotope Information for Unknown {unknownIdx + 1}"
+				data={matIsoComp.map((item) => item.unknown[unknownIdx])}
+			/>
 
-			<button type="button" onclick={prev}> Back </button>
+			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
 		{:else if unknownIdx === unknownCount}
-			<h2 class="text-2xl font-bold">Step {step}: Review</h2>
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Please review all information you entered and see computed values below.</p>
-			<h3 class="text-xl font-bold">Isotope Information</h3>
-			<pre>{JSON.stringify(isotopeInfo, null, 4)}</pre>
+			
+			<ComputedDisplay title="Isotope Information" data={isotopeInfo} />
 			<br />
-			<h3 class="text-xl font-bold">Material Information</h3>
-			<pre>{JSON.stringify(materials, null, 4)}</pre>
+			<ComputedDisplay title="Material Information" data={materials} />
 			<br /><br />
+			
 			<h3 class="text-xl font-bold">Computed Values:</h3>
-			<h4 class="text-lg font-semibold">Isotope Computed Values</h4>
-			<pre>{JSON.stringify(isoComp, null, 4)}</pre>
-			<h4 class="text-lg font-semibold">Material Computed Values</h4>
-			<pre>{JSON.stringify(matComp, null, 4)}</pre>
-			<h4 class="text-lg font-semibold">Material and Isotope Computed Values</h4>
-			<pre>{JSON.stringify(matIsoComp, null, 4)}</pre>
-			<h4 class="text-lg font-semibold">Multi Material Computed Values</h4>
-			<pre>{JSON.stringify(multiMatComp, null, 4)}</pre>
-			<h4 class="text-lg font-semibold">Computed Values that use everything</h4>
-			<pre>{JSON.stringify(everythingComp, null, 4)}</pre>
+			<ComputedDisplay level={4} title="Isotope Computed Values" data={isoComp} />
+			<ComputedDisplay level={4} title="Material Computed Values" data={matComp} />
+			<ComputedDisplay level={4} title="Material and Isotope Computed Values" data={matIsoComp} />
+			<ComputedDisplay level={4} title="Multi Material Computed Values" data={multiMatComp} />
+			<ComputedDisplay level={4} title="Computed Values that use everything" data={everythingComp} />
 			<br />
-			<button type="button" onclick={prev}>Back</button>
+			<button type="button" onclick={prev}>{backButtonText}</button>
 		{/if}
 		<br />
 	</form>
