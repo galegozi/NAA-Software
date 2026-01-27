@@ -18,12 +18,6 @@
 			alert(`Please enter a positive integer for the number of ${pageType}. Using 1 as the count.`);
 		}
 
-		// Limit to reasonable maximum
-		// if (pageCount > 100) {
-		// 	pageCount = 100;
-		// 	alert(`Maximum of 100 ${pageType} allowed. Setting count to 100.`);
-		// }
-
 		updateFxn(pageCount);
 	}
 </script>
