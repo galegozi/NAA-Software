@@ -250,12 +250,6 @@
 		if (step > 0) step--;
 	};
 
-	// Reusable function for getRoiIndex to avoid recreating on every render
-	// This creates a stable function reference that properly closes over isotopeInfo
-	function getRoiIndexFn(roiData: { centroid: number }[]) {
-		return findRoiIndices(isotopeInfo, roiData);
-	}
-
 	const handleSubmit = () => {};
 
 	// Keyboard navigation
