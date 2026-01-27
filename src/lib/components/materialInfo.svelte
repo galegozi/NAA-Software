@@ -93,56 +93,110 @@
 
 <label class="label">
 	<span>NETL Code</span>
-	<input class="input w-50" type="text" bind:value={materialInfo.NETL_code} placeholder="e.g., AB0053" required />
+	<input
+		class="input w-50"
+		type="text"
+		bind:value={materialInfo.NETL_code}
+		placeholder="e.g., AB0053"
+		required
+	/>
 	{#if showErrors && (!materialInfo.NETL_code || materialInfo.NETL_code.trim() === '')}
 		<span class="field-error">NETL Code is required</span>
 	{/if}
 </label>
 <label class="label">
 	<span>Sample Name</span>
-	<input class="input w-50" type="text" bind:value={materialInfo.sampleName} placeholder="e.g., 1633C" required />
+	<input
+		class="input w-50"
+		type="text"
+		bind:value={materialInfo.sampleName}
+		placeholder="e.g., 1633C"
+		required
+	/>
 	{#if showErrors && (!materialInfo.sampleName || materialInfo.sampleName.trim() === '')}
 		<span class="field-error">Sample Name is required</span>
 	{/if}
 </label>
 <label class="label">
 	<span>Mass (in grams, g)</span>
-	<input class="input w-50" type="number" bind:value={materialInfo.mass} placeholder="e.g., 1" min="0" required />
+	<input
+		class="input w-50"
+		type="number"
+		bind:value={materialInfo.mass}
+		placeholder="e.g., 1"
+		min="0"
+		required
+	/>
 	{#if showErrors && materialInfo.mass <= 0}
 		<span class="field-error">Mass must be greater than 0</span>
 	{/if}
 </label>
 <label class="label">
 	<span>Irradiation time (in seconds, s)</span>
-	<input class="input w-50" type="number" bind:value={materialInfo.irradiationTime} placeholder="e.g., 3600" min="0" required />
+	<input
+		class="input w-50"
+		type="number"
+		bind:value={materialInfo.irradiationTime}
+		placeholder="e.g., 3600"
+		min="0"
+		required
+	/>
 	{#if showErrors && materialInfo.irradiationTime <= 0}
 		<span class="field-error">Irradiation Time must be greater than 0</span>
 	{/if}
 </label>
 <label class="label">
 	<span>Decay Time (in seconds, s)</span>
-	<input class="input w-50" type="number" bind:value={materialInfo.decayTime} placeholder="e.g., 7200" min="0" required />
+	<input
+		class="input w-50"
+		type="number"
+		bind:value={materialInfo.decayTime}
+		placeholder="e.g., 7200"
+		min="0"
+		required
+	/>
 	{#if showErrors && materialInfo.decayTime < 0}
 		<span class="field-error">Decay Time cannot be negative</span>
 	{/if}
 </label>
 <label class="label">
 	<span>Live Time (in seconds, s)</span>
-	<input class="input w-50" type="number" bind:value={materialInfo.liveTime} placeholder="e.g., 1800" min="0" required />
+	<input
+		class="input w-50"
+		type="number"
+		bind:value={materialInfo.liveTime}
+		placeholder="e.g., 1800"
+		min="0"
+		required
+	/>
 	{#if showErrors && materialInfo.liveTime <= 0}
 		<span class="field-error">Live Time must be greater than 0</span>
 	{/if}
 </label>
 <label class="label">
 	<span>Real Time (in seconds, s)</span>
-	<input class="input w-50" type="number" bind:value={materialInfo.realTime} placeholder="e.g., 1850" min="0" required />
+	<input
+		class="input w-50"
+		type="number"
+		bind:value={materialInfo.realTime}
+		placeholder="e.g., 1850"
+		min="0"
+		required
+	/>
 	{#if showErrors && materialInfo.realTime <= 0}
 		<span class="field-error">Real Time must be greater than 0</span>
 	{/if}
 </label>
 <label class="label">
 	<span>Fluence (in neutrons/cm²)</span>
-	<input class="input w-50" type="number" bind:value={materialInfo.fluence} placeholder="e.g., 1" min="0" required />
+	<input
+		class="input w-50"
+		type="number"
+		bind:value={materialInfo.fluence}
+		placeholder="e.g., 1"
+		min="0"
+		required
+	/>
 	{#if showErrors && materialInfo.fluence <= 0}
 		<span class="field-error">Fluence must be greater than 0</span>
 	{/if}
@@ -152,15 +206,36 @@
 	<h3 class="text-xl font-bold">Isotope {index + 1} Counts</h3>
 	<label class="label">
 		<span>Gross Counts</span>
-		<input class="input w-50" type="number" bind:value={materialInfo.counts[index].grossCounts} placeholder="e.g., 5000" min="0" required />
+		<input
+			class="input w-50"
+			type="number"
+			bind:value={materialInfo.counts[index].grossCounts}
+			placeholder="e.g., 5000"
+			min="0"
+			required
+		/>
 	</label>
 	<label class="label">
 		<span>Net Counts</span>
-		<input class="input w-50" type="number" bind:value={materialInfo.counts[index].netCounts} placeholder="e.g., 4500" min="0" required />
+		<input
+			class="input w-50"
+			type="number"
+			bind:value={materialInfo.counts[index].netCounts}
+			placeholder="e.g., 4500"
+			min="0"
+			required
+		/>
 	</label>
 	<label class="label">
 		<span>Uncertainty (in counts)</span>
-		<input class="input w-50" type="number" bind:value={materialInfo.counts[index].uncertainty} placeholder="e.g., 67.08" min="0" required />
+		<input
+			class="input w-50"
+			type="number"
+			bind:value={materialInfo.counts[index].uncertainty}
+			placeholder="e.g., 67.08"
+			min="0"
+			required
+		/>
 	</label>
 	<br />
 {/each}

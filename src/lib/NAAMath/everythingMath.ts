@@ -68,7 +68,12 @@ export function getAll(
 	isotopeIndex: number
 ): EverythingComputed {
 	return {
-		saturationFactorRatio: getSaturationFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex),
+		saturationFactorRatio: getSaturationFactorRatio(
+			refMaterial,
+			unkMaterial,
+			isotope,
+			isotopeIndex
+		),
 		deadTimeCorrectionRatio: getDeadTimeCorrectionRatio(
 			refMaterial,
 			unkMaterial,
