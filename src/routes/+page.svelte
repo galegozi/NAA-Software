@@ -39,13 +39,43 @@
 		isotopeInfo = Array.from({ length: isotopeCount }, createIsotopeInfo);
 		isoRef = Array.from({ length: isotopeCount }, () => undefined);
 
-		// Update reference material counts
+		// Update reference material counts, preserving existing knownConcentration and knownUncertainty
 		const currentReference = materials.reference;
-		materials.reference = {
-			...currentReference,
-			...createReferenceMaterial(isotopeCount)
+		const newReferenceBase = createReferenceMaterial(isotopeCount);
+
+		// Preserve scalar / non-array properties from the current reference material
+		const updatedReference: ReferenceMaterial = {
+			...newReferenceBase,
+			...currentReference
 		};
 
+		// Carefully merge knownConcentration and knownUncertainty arrays so existing values are preserved
+		const existingKnownConcentration =
+			currentReference && Array.isArray(currentReference.knownConcentration)
+				? currentReference.knownConcentration
+				: [];
+		const existingKnownUncertainty =
+			currentReference && Array.isArray(currentReference.knownUncertainty)
+				? currentReference.knownUncertainty
+				: [];
+
+		updatedReference.knownConcentration = Array.from(
+			{ length: isotopeCount },
+			(_, i) =>
+				existingKnownConcentration[i] !== undefined
+					? existingKnownConcentration[i]
+					: newReferenceBase.knownConcentration[i]
+		);
+
+		updatedReference.knownUncertainty = Array.from(
+			{ length: isotopeCount },
+			(_, i) =>
+				existingKnownUncertainty[i] !== undefined
+					? existingKnownUncertainty[i]
+					: newReferenceBase.knownUncertainty[i]
+		);
+
+		materials.reference = updatedReference;
 		// Update unknown materials counts
 		materials.unknown = materials.unknown.map((unk) => ({
 			...unk,
