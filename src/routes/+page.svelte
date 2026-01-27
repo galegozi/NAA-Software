@@ -132,7 +132,9 @@
 					if (typeof isoRef[isoIndex]?.showValidationErrors === 'function') {
 						isoRef[isoIndex]!.showValidationErrors();
 					}
-					const errors = isoRef[isoIndex]!.getValidationErrors?.() || ['Please fill in all required fields'];
+					const errors = isoRef[isoIndex]!.getValidationErrors?.() || [
+						'Please fill in all required fields'
+					];
 					validationErrors = errors;
 					return false;
 				}
@@ -147,7 +149,9 @@
 					if (typeof matRefs.reference.showValidationErrors === 'function') {
 						matRefs.reference.showValidationErrors();
 					}
-					const errors = matRefs.reference.getValidationErrors?.() || ['Please fill in all required fields'];
+					const errors = matRefs.reference.getValidationErrors?.() || [
+						'Please fill in all required fields'
+					];
 					validationErrors = errors;
 					return false;
 				}
@@ -156,13 +160,18 @@
 
 		// Validate unknown material steps
 		if (unknownIdx >= 0 && unknownIdx < unknownCount) {
-			if (matRefs.unknown[unknownIdx] && typeof matRefs.unknown[unknownIdx]?.validateMaterialInfo === 'function') {
+			if (
+				matRefs.unknown[unknownIdx] &&
+				typeof matRefs.unknown[unknownIdx]?.validateMaterialInfo === 'function'
+			) {
 				const isValid = matRefs.unknown[unknownIdx]!.validateMaterialInfo();
 				if (!isValid) {
 					if (typeof matRefs.unknown[unknownIdx]?.showValidationErrors === 'function') {
 						matRefs.unknown[unknownIdx]!.showValidationErrors();
 					}
-					const errors = matRefs.unknown[unknownIdx]!.getValidationErrors?.() || ['Please fill in all required fields'];
+					const errors = matRefs.unknown[unknownIdx]!.getValidationErrors?.() || [
+						'Please fill in all required fields'
+					];
 					validationErrors = errors;
 					return false;
 				}
@@ -216,12 +225,11 @@
 <div style="padding: 5%">
 	<h1 class="text-3xl font-bold">NAA Analysis - Version {APP_VERSION}</h1>
 	<br />
-	
+
 	{#if showProgress}
-		<ProgressIndicator currentStep={step} totalSteps={totalSteps} percentage={progressPercentage} />
+		<ProgressIndicator currentStep={step} {totalSteps} percentage={progressPercentage} />
 	{/if}
 
-	
 	<form
 		onsubmit={(e) => {
 			e.preventDefault();
@@ -351,18 +359,22 @@
 		{:else if unknownIdx === unknownCount}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Please review all information you entered and see computed values below.</p>
-			
+
 			<ComputedDisplay title="Isotope Information" data={isotopeInfo} />
 			<br />
 			<ComputedDisplay title="Material Information" data={materials} />
 			<br /><br />
-			
+
 			<h3 class="text-xl font-bold">Computed Values:</h3>
 			<ComputedDisplay level={4} title="Isotope Computed Values" data={isoComp} />
 			<ComputedDisplay level={4} title="Material Computed Values" data={matComp} />
 			<ComputedDisplay level={4} title="Material and Isotope Computed Values" data={matIsoComp} />
 			<ComputedDisplay level={4} title="Multi Material Computed Values" data={multiMatComp} />
-			<ComputedDisplay level={4} title="Computed Values that use everything" data={everythingComp} />
+			<ComputedDisplay
+				level={4}
+				title="Computed Values that use everything"
+				data={everythingComp}
+			/>
 			<br />
 			<button type="button" onclick={prev}>{backButtonText}</button>
 		{/if}

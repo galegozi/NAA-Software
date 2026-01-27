@@ -2,12 +2,7 @@
  * Utility functions for creating and managing NAA data structures
  */
 
-import type {
-	IsotopeInfo,
-	CountData,
-	ReferenceMaterial,
-	UnknownMaterial
-} from '../types.js';
+import type { IsotopeInfo, CountData, ReferenceMaterial, UnknownMaterial } from '../types.js';
 
 /**
  * Creates a default isotope info object
