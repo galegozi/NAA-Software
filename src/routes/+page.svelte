@@ -380,7 +380,7 @@
 			<br />
 			<p>Version 4.1.1 is a refactor to improve code organization and maintainability.</p>
 			<br />
-			<p>Version 4.2 is an alpha with a reporting table and concentration units.</p>
+			<p>Version 4.2 is a beta with a reporting table and concentration units, along with a CSV download link.</p>
 			<br />
 			<h2 class="text-2xl font-bold">Future plans:</h2>
 			<ol class="list-inside list-decimal">
