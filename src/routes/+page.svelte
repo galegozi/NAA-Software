@@ -283,6 +283,51 @@
 		if (step > 0) step--;
 	};
 
+	function downloadTableAsCSV() {
+		// Helper function to escape CSV fields
+		const escapeCSV = (value: any): string => {
+			const str = String(value ?? '');
+			// If the field contains comma, quote, or newline, wrap it in quotes and escape internal quotes
+			if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+				return `"${str.replace(/"/g, '""')}"`;
+			}
+			return str;
+		};
+
+		// Create CSV header row
+		const headers = ['', ...isotopeInfo.map(iso => escapeCSV(iso.isotopeName))];
+		const csvRows = [headers.join(',')];
+
+		// Add units row
+		const unitsRow = ['Units', ...isotopeInfo.map((_, index) => escapeCSV(materials.reference.concentrationUnits[index] || ''))];
+		csvRows.push(unitsRow.join(','));
+
+		// Add data rows for each unknown material
+		materials.unknown.forEach((unk, uIndex) => {
+			const row = [
+				escapeCSV(unk.NETL_code || `Unknown ${uIndex + 1}`),
+				...isotopeInfo.map((_, iIndex) => escapeCSV(everythingComp[iIndex][uIndex].unknownConcentration))
+			];
+			csvRows.push(row.join(','));
+		});
+
+		// Create CSV string
+		const csvContent = csvRows.join('\n');
+
+		// Create blob and download link
+		const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+		const link = document.createElement('a');
+		const url = URL.createObjectURL(blob);
+		
+		link.setAttribute('href', url);
+		link.setAttribute('download', 'naa_concentrations.csv');
+		link.style.visibility = 'hidden';
+		
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+	}
+
 	const handleSubmit = () => {};
 
 	// Keyboard navigation
@@ -481,6 +526,10 @@
 					{/each}
 				</tbody>
 			</table>
+			<br />
+			<button type="button" class="btn variant-filled-primary" onclick={downloadTableAsCSV}>
+				Download Table as CSV
+			</button>
 			<br /><br />
 
 			<ComputedDisplay title="Isotope Information" data={isotopeInfo} />
