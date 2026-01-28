@@ -22,6 +22,7 @@ export interface CountData {
  * Avoid using `'mixed'` in new code and prefer `'short'` or `'simple'` instead.
  */
 export type DeadTimeType = 'short' | 'simple' | 'mixed' | undefined;
+export type ConcUnitType = 'percentage' | 'ppm' | undefined;
 
 export interface BaseMaterialInfo {
 	NETL_code: string;
@@ -37,6 +38,7 @@ export interface BaseMaterialInfo {
 }
 
 export interface ReferenceMaterial extends BaseMaterialInfo {
+	concentrationUnits: ConcUnitType[];
 	knownConcentration: number[];
 	knownUncertainty: number[];
 }

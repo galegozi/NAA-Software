@@ -36,18 +36,6 @@ export {
 	getStepTitle,
 	getNextButtonText,
 	getBackButtonText,
-	getProgressPercentage,
-	canProceedFromStep
+	getProgressPercentage
 } from './utils/stepUtils.js';
 
-export type { NAAState } from './utils/stateManager.js';
-export {
-	createInitialState,
-	updateIsotopeCount,
-	updateUnknownCount,
-	nextStep,
-	prevStep
-} from './utils/stateManager.js';
-
-// Export optimization utilities
-export { memoize, debounce } from './utils/optimization.js';
