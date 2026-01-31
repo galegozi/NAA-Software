@@ -95,3 +95,15 @@ export function findRoiIndices(
 		return closestIndex;
 	});
 }
+
+export function truncateToSigFigs(value: number, sigFigs: number = 3): number {
+	if (value === 0) {
+		return 0;
+	} else if (Math.abs(value) >= Math.pow(10, sigFigs - 1)) {
+		return Math.round(value);
+	} else {
+		const bitShift = Math.ceil(Math.log10(Math.abs(value)));
+		const factor = Math.pow(10, sigFigs - bitShift);
+		return Math.round(value * factor) / factor;
+	}
+}
