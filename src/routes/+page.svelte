@@ -17,7 +17,8 @@
 		createIsotopeInfo,
 		createReferenceMaterial,
 		createUnknownMaterial,
-		findRoiIndices
+		findRoiIndices,
+		truncateToSigFigs
 	} from '$lib/utils/naaUtils.js';
 	import {
 		APP_VERSION,
@@ -306,7 +307,7 @@
 		materials.unknown.forEach((unk, uIndex) => {
 			const row = [
 				escapeCSV(unk.NETL_code || `Unknown ${uIndex + 1}`),
-				...isotopeInfo.map((_, iIndex) => escapeCSV(everythingComp[iIndex][uIndex].unknownConcentration))
+				...isotopeInfo.map((_, iIndex) => escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)))
 			];
 			csvRows.push(row.join(','));
 		});
@@ -382,8 +383,11 @@
 			<br />
 			<p>Version 4.2 is a beta with a reporting table and concentration units, along with a CSV download link.</p>
 			<br />
+			<p>Version 4.2.1 includes improvements to significant figure handling in concentration displays.</p>
+			<br />
 			<h2 class="text-2xl font-bold">Future plans:</h2>
 			<ol class="list-inside list-decimal">
+				<li>Version 4.3: Add uncertainty calculations. For HTML table display use plus/minus, but for CSV use separate columns for value and uncertainty.</li>
 			</ol>
 			<br />
 			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
@@ -392,7 +396,6 @@
 				<li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li>
 				<li>Correct the matching to ensure it works with interference</li>
 				<li>Fluence correction</li>
-				<li>Uncertainty & relevant calculations</li>
 				<li>Multiple standards</li>
 				<li>Font size adjustment</li>
 			</ul>
@@ -519,7 +522,7 @@
 							</td>
 							{#each isotopeInfo as _, iIndex}
 								<td class="border border-gray-400 px-4 py-2">
-									{everythingComp[iIndex][uIndex].unknownConcentration}
+									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)}
 								</td>
 							{/each}
 						</tr>
