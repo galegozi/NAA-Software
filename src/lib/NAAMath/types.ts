@@ -25,6 +25,7 @@ export interface MaterialComputed {
 	deadTimeFraction: number;
 	backgroundCounts: number[];
 	detectionLimit: number[];
+	countUncertaintyPercent: number[];
 }
 
 /**
@@ -44,6 +45,7 @@ export interface MaterialIsotopeComputed {
  */
 export interface MultiMaterialComputed {
 	massCorrection: number;
+	fluenceCorrection: number;
 }
 
 /**
@@ -54,6 +56,7 @@ export interface EverythingComputed {
 	deadTimeCorrectionRatio: number;
 	decayCorrectionFactorRatio: number;
 	unknownConcentration: number;
+	unknownConcentrationUncertainty: number;
 }
 
 /**

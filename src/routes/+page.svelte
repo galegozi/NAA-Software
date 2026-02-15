@@ -295,19 +295,22 @@
 			return str;
 		};
 
-		// Create CSV header row
-		const headers = ['', ...isotopeInfo.map(iso => escapeCSV(iso.isotopeName))];
+		// Create CSV header row with concentration and uncertainty columns
+		const headers = ['', ...isotopeInfo.flatMap(iso => [escapeCSV(iso.isotopeName), escapeCSV(`${iso.isotopeName} Uncertainty`)])];
 		const csvRows = [headers.join(',')];
 
 		// Add units row
-		const unitsRow = ['Units', ...isotopeInfo.map((_, index) => escapeCSV(materials.reference.concentrationUnits[index] || ''))];
+		const unitsRow = ['Units', ...isotopeInfo.flatMap((_, index) => [escapeCSV(materials.reference.concentrationUnits[index] || ''), '%'])];
 		csvRows.push(unitsRow.join(','));
 
 		// Add data rows for each unknown material
 		materials.unknown.forEach((unk, uIndex) => {
 			const row = [
 				escapeCSV(unk.NETL_code || `Unknown ${uIndex + 1}`),
-				...isotopeInfo.map((_, iIndex) => escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)))
+				...isotopeInfo.flatMap((_, iIndex) => [
+					escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)),
+					escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentrationUncertainty, 2))
+				])
 			];
 			csvRows.push(row.join(','));
 		});
@@ -385,9 +388,11 @@
 			<br />
 			<p>Version 4.2.1 includes improvements to significant figure handling in concentration displays.</p>
 			<br />
+			<p>Version 4.3 adds uncertainty calculations. For HTML table display use plus/minus, but for CSV use separate columns for value and uncertainty. It also includes fluence correction.</p>
+			<br />
 			<h2 class="text-2xl font-bold">Future plans:</h2>
 			<ol class="list-inside list-decimal">
-				<li>Version 4.3: Add uncertainty calculations. For HTML table display use plus/minus, but for CSV use separate columns for value and uncertainty.</li>
+				<li>Version 5.0: Add the option for a standard library instead of just one standard.</li>
 			</ol>
 			<br />
 			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
@@ -395,8 +400,6 @@
 				<li>Exporting reports</li>
 				<li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li>
 				<li>Correct the matching to ensure it works with interference</li>
-				<li>Fluence correction</li>
-				<li>Multiple standards</li>
 				<li>Font size adjustment</li>
 			</ul>
 			<br />
@@ -522,7 +525,7 @@
 							</td>
 							{#each isotopeInfo as _, iIndex}
 								<td class="border border-gray-400 px-4 py-2">
-									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)}
+									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)} ± {truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentrationUncertainty, 2)}%
 								</td>
 							{/each}
 						</tr>
