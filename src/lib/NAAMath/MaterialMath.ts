@@ -24,11 +24,17 @@ function computeDetectionLimit(material: BaseMaterialInfo): number[] {
 	return backgroundCounts.map((bc) => 2.71 + 4.65 * Math.sqrt(bc));
 }
 
+function computeCountUncertaintyPercent(material: BaseMaterialInfo): number[] {
+	// uncertainty / net counts * 100
+	return material.counts.map((c) => (c.uncertainty / c.netCounts) * 100);
+}
+
 export function getAll(material: BaseMaterialInfo): MaterialComputed {
 	return {
 		deadTime: computeDeadTime(material),
 		deadTimeFraction: computeDeadTimeFraction(material),
 		backgroundCounts: computeBackgroundCounts(material),
-		detectionLimit: computeDetectionLimit(material)
+		detectionLimit: computeDetectionLimit(material),
+		countUncertaintyPercent: computeCountUncertaintyPercent(material)
 	};
 }

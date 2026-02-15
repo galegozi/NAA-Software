@@ -4,6 +4,7 @@ import type { IsotopeInfo, ReferenceMaterial, UnknownMaterial } from '../types.j
 import type { EverythingComputed } from './types.js';
 import { getAll as matIsoGA } from './MaterialIsotopeMath.ts';
 import { getAll as MMGA } from './MultiMaterialMath.ts';
+import { getAll as matGA } from './MaterialMath.ts';
 
 function getSaturationFactorRatio(
 	refMaterial: ReferenceMaterial,
@@ -56,9 +57,36 @@ function getUnknownConcentration(
 		getDeadTimeCorrectionRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
 		getSaturationFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
 		getDecayCorrectionFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
-		multimaterial.massCorrection;
-	// fluence correction would go here
+		multimaterial.massCorrection *
+		multimaterial.fluenceCorrection;
 	return result;
+}
+
+function getUnknownConcentrationUncertainty(
+	refMaterial: ReferenceMaterial,
+	unkMaterial: UnknownMaterial,
+	isotope: IsotopeInfo,
+	isotopeIndex: number
+): number {
+	// This is a placeholder for the actual uncertainty propagation calculation.
+	// sqrt(R18^2 + CONST(R16)^2 + CONST(L5)^2)
+	// R18 is count uncertainty
+	// R16 is reference material count uncertainty
+	// L5 is reference material known concentration uncertainty
+	let refComp = matGA(refMaterial);
+	let unkComp = matGA(unkMaterial);
+
+	let rawKnownUncertainty = refMaterial.knownUncertainty[isotopeIndex];
+	if (refMaterial.concentrationUnits[isotopeIndex] === 'ppm') {
+		// convert to percent
+		rawKnownUncertainty = rawKnownUncertainty / 1000000 * 100;
+	}
+
+	return Math.sqrt(
+		Math.pow(refComp.countUncertaintyPercent[isotopeIndex], 2) +
+		Math.pow(unkComp.countUncertaintyPercent[isotopeIndex], 2) +
+		Math.pow(rawKnownUncertainty, 2)
+	);
 }
 
 export function getAll(
@@ -86,6 +114,12 @@ export function getAll(
 			isotope,
 			isotopeIndex
 		),
-		unknownConcentration: getUnknownConcentration(refMaterial, unkMaterial, isotope, isotopeIndex)
+		unknownConcentration: getUnknownConcentration(refMaterial, unkMaterial, isotope, isotopeIndex),
+		unknownConcentrationUncertainty: getUnknownConcentrationUncertainty(
+			refMaterial,
+			unkMaterial,
+			isotope,
+			isotopeIndex
+		)
 	};
 }
