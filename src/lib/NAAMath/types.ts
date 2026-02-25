@@ -57,6 +57,7 @@ export interface EverythingComputed {
 	decayCorrectionFactorRatio: number;
 	unknownConcentration: number;
 	unknownConcentrationUncertainty: number;
+	unknownConcentrationUncertaintyAbsolute: number;
 }
 
 /**
