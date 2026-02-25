@@ -68,7 +68,6 @@ function getUnknownConcentrationUncertainty(
 	isotope: IsotopeInfo,
 	isotopeIndex: number
 ): number {
-	// This is a placeholder for the actual uncertainty propagation calculation.
 	// sqrt(R18^2 + CONST(R16)^2 + CONST(L5)^2)
 	// R18 is count uncertainty
 	// R16 is reference material count uncertainty
@@ -87,6 +86,17 @@ function getUnknownConcentrationUncertainty(
 		Math.pow(unkComp.countUncertaintyPercent[isotopeIndex], 2) +
 		Math.pow(rawKnownUncertainty, 2)
 	);
+}
+
+function getNumUnknownConcUncertainty(
+	refMaterial: ReferenceMaterial,
+	unkMaterial: UnknownMaterial,
+	isotope: IsotopeInfo,
+	isotopeIndex: number
+) : number {
+	const percUncertainty = getUnknownConcentrationUncertainty(refMaterial, unkMaterial, isotope, isotopeIndex);
+	const unkConc = getUnknownConcentration(refMaterial, unkMaterial, isotope, isotopeIndex);
+	return (percUncertainty / 100) * unkConc;
 }
 
 export function getAll(
@@ -116,6 +126,12 @@ export function getAll(
 		),
 		unknownConcentration: getUnknownConcentration(refMaterial, unkMaterial, isotope, isotopeIndex),
 		unknownConcentrationUncertainty: getUnknownConcentrationUncertainty(
+			refMaterial,
+			unkMaterial,
+			isotope,
+			isotopeIndex
+		),
+		unknownConcentrationUncertaintyAbsolute: getNumUnknownConcUncertainty(
 			refMaterial,
 			unkMaterial,
 			isotope,

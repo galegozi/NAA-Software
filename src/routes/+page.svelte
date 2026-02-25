@@ -433,6 +433,10 @@
 			if (str.includes(',') || str.includes('"') || str.includes('\n')) {
 				return `"${str.replace(/"/g, '""')}"`;
 			}
+			// replace 'ppm' with 'µg/g' for better readability in CSV
+			if (str === 'ppm') {
+				return 'µg/g';
+			}
 			return str;
 		};
 
@@ -463,7 +467,7 @@
 				escapeCSV(unk.NETL_code || `Unknown ${uIndex + 1}`),
 				...isotopeInfo.flatMap((_, iIndex) => [
 					escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)),
-					escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentrationUncertainty, 2))
+					escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute, 2))
 				])
 			];
 			csvRows.push(row.join(','));
@@ -543,6 +547,8 @@
 			<p>Version 4.2.1 includes improvements to significant figure handling in concentration displays.</p>
 			<br />
 			<p>Version 4.3 adds uncertainty calculations. For HTML table display use plus/minus, but for CSV use separate columns for value and uncertainty. It also includes fluence correction.</p>
+			<br />
+			<p>Version 4.4 adds minor fixes, such as the units, the isotope display, using the % symbol instead of the word "percentage", and fixes the uncertainty to show correctly.</p>
 			<br />
 			<h2 class="text-2xl font-bold">Future plans:</h2>
 			<ol class="list-inside list-decimal">
@@ -673,7 +679,7 @@
 						<th class="border border-gray-400 px-4 py-2"></th>
 						{#each isotopeInfo as iso, index}
 							<th class="border border-gray-400 px-4 py-2">
-								{iso.isotopeName}
+								{iso.elementName}
 							</th>
 						{/each}
 					</tr>
@@ -685,7 +691,7 @@
 						</td>
 						{#each isotopeInfo as _, index}
 							<td class="border border-gray-400 px-4 py-2">
-								{materials.reference[isotopeReferenceMap[index] ?? 0]?.concentrationUnits[index]}
+								{materials.reference.concentrationUnits[index] === 'ppm' ? 'µg/g' : materials.reference.concentrationUnits[index] === 'percentage'? '%' : materials.reference.concentrationUnits[index]}
 							</td>
 						{/each}
 					</tr>
@@ -696,7 +702,7 @@
 							</td>
 							{#each isotopeInfo as _, iIndex}
 								<td class="border border-gray-400 px-4 py-2">
-									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)} ± {truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentrationUncertainty, 2)}%
+									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)} ± {truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute, 2)}
 								</td>
 							{/each}
 						</tr>
