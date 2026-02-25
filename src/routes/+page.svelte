@@ -402,6 +402,12 @@
 		return true;
 	}
 
+	function getReferenceLabel(index: number): string {
+		const ref = materials.reference[index];
+		const labelBase = ref?.NETL_code || ref?.sampleName;
+		return labelBase ? `${labelBase}` : `Reference ${index + 1}`;
+	}
+
 	const next = () => {
 		// Prevent navigating beyond the final review step
 		if (step >= totalSteps) return;

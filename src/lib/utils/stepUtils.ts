@@ -12,6 +12,10 @@ export const STEP_CONSTANTS = {
 	REFERENCE_COUNT_OFFSET: 2,
 	REFERENCE_INFO_OFFSET: 3,
 	UNKNOWN_COUNT_OFFSET: 4,
+	UNKNOWN_INFO_OFFSET: 5,
+	REFERENCE_COUNT_OFFSET: 2,
+	REFERENCE_INFO_OFFSET: 3,
+	UNKNOWN_COUNT_OFFSET: 4,
 	UNKNOWN_INFO_OFFSET: 5
 } as const;
 
@@ -80,9 +84,6 @@ export function getUnknownInfoStartStep(isotopeCount: number, referenceCount = 1
 	return getUnknownCountStep(isotopeCount, referenceCount) + 1;
 }
 
-/**
- * Calculate the step number for review
- */
 export function getReviewStep(
 	isotopeCount: number,
 	referenceCountOrUnknownCount: number,
@@ -103,6 +104,17 @@ export function getIsotopeIndex(step: number): number {
 /**
  * Calculate unknown index from current step and isotope count
  */
+export function getUnknownIndex(
+	step: number,
+	isotopeCount: number,
+	referenceCountOrUnknownCount?: number,
+	unknownCount?: number
+): number {
+	const { referenceCount } = normalizeCounts(
+		referenceCountOrUnknownCount ?? 1,
+		unknownCount
+	);
+	return step - getUnknownInfoStartStep(isotopeCount, referenceCount);
 export function getUnknownIndex(
 	step: number,
 	isotopeCount: number,
@@ -135,6 +147,7 @@ export function getStepType(
 	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount);
 	const reviewStep = getReviewStep(isotopeCount, referenceCount, resolvedUnknownCount);
 
+	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < referenceCountStep) {
 	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < referenceCountStep) {
 		return StepType.ISOTOPE_INFO;
 	}
@@ -215,8 +228,6 @@ export function getStepTitle(
 			const refIndex = step - getReferenceInfoStartStep(isotopeCount);
 			return `Step ${stepNum}: Reference Material Information for Reference ${refIndex + 1}`;
 		}
-		case StepType.REFERENCE_MATCH:
-			return `Step ${stepNum}: Match Isotopes to References`;
 		case StepType.UNKNOWN_COUNT:
 			return `Step ${stepNum}: Number of Unknown Materials`;
 		case StepType.UNKNOWN_INFO: {
