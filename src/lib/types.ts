@@ -46,8 +46,10 @@ export interface ReferenceMaterial extends BaseMaterialInfo {
 export interface UnknownMaterial extends BaseMaterialInfo {}
 
 export interface Materials {
-	reference: ReferenceMaterial;
+	reference: ReferenceMaterial[];
 	unknown: UnknownMaterial[];
+	// Optional: map each isotope to a reference index
+	referenceIndexByIsotope?: number[];
 }
 
 export interface RoiData {

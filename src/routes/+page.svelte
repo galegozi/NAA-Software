@@ -12,7 +12,11 @@
 	import { getAll as MMGA } from '../lib/NAAMath/MultiMaterialMath.ts';
 	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
 
-	import type { IsotopeInfo as IsotopeInfoType, ReferenceMaterial } from '$lib/types.js';
+	import type {
+		IsotopeInfo as IsotopeInfoType,
+		ReferenceMaterial,
+		UnknownMaterial
+	} from '$lib/types.js';
 	import {
 		createIsotopeInfo,
 		createReferenceMaterial,
@@ -23,7 +27,7 @@
 	import {
 		APP_VERSION,
 		getIsotopeIndex,
-		getUnknownIndex,
+		getReferenceMatchStep,
 		getNextButtonText,
 		getBackButtonText,
 		getStepTitle,
@@ -35,76 +39,127 @@
 
 	// Using findRoiIndices from naaUtils
 
-	function updateIsotopeData(newCount: number) {
-		const previousCount = isotopeCount;
-		isotopeCount = newCount;
-		
-		// Preserve existing isotope data, only add/remove as needed
-		const existingIsotopeInfo = [...isotopeInfo];
-		isotopeInfo = Array.from({ length: isotopeCount }, (_, i) => 
-			i < existingIsotopeInfo.length ? existingIsotopeInfo[i] : createIsotopeInfo()
-		);
-		
-		// Preserve component references for existing isotopes
-		const existingIsoRef = [...isoRef];
-		isoRef = Array.from({ length: isotopeCount }, (_, i) => 
-			i < existingIsoRef.length ? existingIsoRef[i] : undefined
-		);
-
-		// Update reference material counts, preserving existing knownConcentration and knownUncertainty
-		const currentReference = materials.reference;
-		const newReferenceBase = createReferenceMaterial(isotopeCount);
-
-		// Preserve scalar / non-array properties from the current reference material
+	function resizeReferenceMaterial(
+		reference: ReferenceMaterial,
+		newIsotopeCount: number
+	): ReferenceMaterial {
+		const baseReference = createReferenceMaterial(newIsotopeCount);
 		const updatedReference: ReferenceMaterial = {
-			...newReferenceBase,
-			...currentReference
+			...baseReference,
+			...reference
 		};
 
-		// Preserve and resize the counts array for reference material
-		const existingRefCounts = currentReference.counts || [];
-		updatedReference.counts = Array.from({ length: isotopeCount }, (_, i) =>
-			i < existingRefCounts.length 
-				? existingRefCounts[i] 
+		const existingRefCounts = reference.counts || [];
+		updatedReference.counts = Array.from({ length: newIsotopeCount }, (_, i) =>
+			i < existingRefCounts.length
+				? existingRefCounts[i]
 				: { grossCounts: 0, netCounts: 0, uncertainty: 0 }
 		);
 
-		// Carefully merge knownConcentration and knownUncertainty arrays so existing values are preserved
-		const existingKnownConcentration =
-			currentReference && Array.isArray(currentReference.knownConcentration)
-				? currentReference.knownConcentration
-				: [];
-		const existingKnownUncertainty =
-			currentReference && Array.isArray(currentReference.knownUncertainty)
-				? currentReference.knownUncertainty
-				: [];
+		const existingKnownConcentration = Array.isArray(reference.knownConcentration)
+			? reference.knownConcentration
+			: [];
+		const existingKnownUncertainty = Array.isArray(reference.knownUncertainty)
+			? reference.knownUncertainty
+			: [];
+		const existingUnits = Array.isArray(reference.concentrationUnits)
+			? reference.concentrationUnits
+			: [];
 
-		updatedReference.knownConcentration = Array.from({ length: isotopeCount }, (_, i) =>
+		updatedReference.knownConcentration = Array.from({ length: newIsotopeCount }, (_, i) =>
 			existingKnownConcentration[i] !== undefined
 				? existingKnownConcentration[i]
-				: newReferenceBase.knownConcentration[i]
+				: baseReference.knownConcentration[i]
 		);
 
-		updatedReference.knownUncertainty = Array.from({ length: isotopeCount }, (_, i) =>
+		updatedReference.knownUncertainty = Array.from({ length: newIsotopeCount }, (_, i) =>
 			existingKnownUncertainty[i] !== undefined
 				? existingKnownUncertainty[i]
-				: newReferenceBase.knownUncertainty[i]
+				: baseReference.knownUncertainty[i]
 		);
 
-		materials.reference = updatedReference;
-		
-		// Update unknown materials counts, preserving existing count data
-		materials.unknown = materials.unknown.map((unk) => {
-			const existingCounts = unk.counts || [];
-			return {
-				...unk,
-				counts: Array.from({ length: isotopeCount }, (_, i) =>
-					i < existingCounts.length 
-						? existingCounts[i] 
-						: { grossCounts: 0, netCounts: 0, uncertainty: 0 }
-				)
-			};
+		updatedReference.concentrationUnits = Array.from({ length: newIsotopeCount }, (_, i) =>
+			existingUnits[i] !== undefined ? existingUnits[i] : baseReference.concentrationUnits[i]
+		);
+
+		return updatedReference;
+	}
+
+	function resizeUnknownMaterial(
+		unknown: UnknownMaterial,
+		newIsotopeCount: number
+	): UnknownMaterial {
+		const existingCounts = unknown.counts || [];
+		return {
+			...unknown,
+			counts: Array.from({ length: newIsotopeCount }, (_, i) =>
+				i < existingCounts.length ? existingCounts[i] : { grossCounts: 0, netCounts: 0, uncertainty: 0 }
+			)
+		};
+	}
+
+	function updateIsotopeReferenceMap(
+		newIsotopeCount: number,
+		newReferenceCount: number
+	) {
+		const existingMap = [...isotopeReferenceMap];
+		isotopeReferenceMap = Array.from({ length: newIsotopeCount }, (_, i) => {
+			const currentValue = existingMap[i];
+			if (currentValue !== undefined && currentValue < newReferenceCount) {
+				return currentValue;
+			}
+			const autoIndex = materials.reference.findIndex(
+				(ref) => (ref.knownConcentration?.[i] ?? 0) > 0
+			);
+			return autoIndex >= 0 ? autoIndex : 0;
 		});
+	}
+
+	function updateIsotopeData(newCount: number) {
+		isotopeCount = newCount;
+
+		// Preserve existing isotope data, only add/remove as needed
+		const existingIsotopeInfo = [...isotopeInfo];
+		isotopeInfo = Array.from({ length: isotopeCount }, (_, i) =>
+			i < existingIsotopeInfo.length ? existingIsotopeInfo[i] : createIsotopeInfo()
+		);
+
+		// Preserve component references for existing isotopes
+		const existingIsoRef = [...isoRef];
+		isoRef = Array.from({ length: isotopeCount }, (_, i) =>
+			i < existingIsoRef.length ? existingIsoRef[i] : undefined
+		);
+
+		// Update reference materials, preserving existing values
+		const existingReferences = [...materials.reference];
+		materials.reference = Array.from({ length: referenceCount }, (_, i) => {
+			const currentReference = existingReferences[i] || createReferenceMaterial(isotopeCount);
+			return resizeReferenceMaterial(currentReference, isotopeCount);
+		});
+
+		// Update unknown materials counts, preserving existing count data
+		materials.unknown = materials.unknown.map((unk) => resizeUnknownMaterial(unk, isotopeCount));
+
+		updateIsotopeReferenceMap(isotopeCount, referenceCount);
+	}
+
+	function updateReferenceData(newCount: number) {
+		referenceCount = newCount;
+
+		// Preserve existing references, only add/remove as needed
+		const existingReferences = [...materials.reference];
+		const existingRefs = [...matRefs.reference];
+		materials.reference = Array.from({ length: referenceCount }, (_, i) =>
+			i < existingReferences.length
+				? resizeReferenceMaterial(existingReferences[i], isotopeCount)
+				: createReferenceMaterial(isotopeCount)
+		);
+
+		matRefs.reference = Array.from({ length: referenceCount }, (_, i) =>
+			i < existingRefs.length ? existingRefs[i] : undefined
+		);
+
+		updateIsotopeReferenceMap(isotopeCount, referenceCount);
 	}
 
 	function updateUnknownData(newCount: number) {
@@ -137,45 +192,69 @@
 	// computed isotope information
 	let isoComp = $derived(isotopeInfo.map(isoGA));
 
-	//step 1 : number of isotopes
-	//step 2 to 1 + isotopeCount  : isotope information
-	//step 2 + isotopeCount : reference material information
-	//step 3 + isotope count: how many unknowns
-	//step 4 + isotope count to 3 + isotope count + unknownCount : unknown material information
-	//step 4 + isotope count + unknownCount : review
-	let unknownIdx = $derived(getUnknownIndex(step, isotopeCount));
+	// step 1: number of isotopes
+	// step 2 to 1 + isotopeCount: isotope information
+	// step 2 + isotopeCount: number of references
+	// step 3 + isotopeCount to 2 + isotopeCount + referenceCount: reference information
+	// step 3 + isotopeCount + referenceCount: isotope-reference matching
+	// step 4 + isotopeCount + referenceCount: number of unknowns
+	// step 5 + isotopeCount + referenceCount to 4 + isotopeCount + referenceCount + unknownCount:
+	// unknown material information
+	// step 5 + isotopeCount + referenceCount + unknownCount: review
+	let referenceCount = $state(1);
+	let refIdx = $derived(
+		step >= isotopeCount + 3 && step < getReferenceMatchStep(isotopeCount, referenceCount)
+			? step - (isotopeCount + 3)
+			: -1
+	);
+	let unknownIdx = $derived(
+		step >= getReferenceMatchStep(isotopeCount, referenceCount) + 2
+			? step - (getReferenceMatchStep(isotopeCount, referenceCount) + 2)
+			: -1
+	);
 	let unknownCount = $state(1);
 	let matRefs = $state({
-		reference: undefined as RefMatInfo | undefined,
+		reference: [undefined] as (RefMatInfo | undefined)[],
 		unknown: [undefined] as (MaterialInfo | undefined)[]
 	});
 	let materials = $state({
-		reference: createReferenceMaterial(1),
+		reference: [createReferenceMaterial(1)],
 		unknown: [createUnknownMaterial(1)]
 	});
+	let isotopeReferenceMap = $state<number[]>([0]);
 	let matComp = $derived({
-		reference: matGA(materials.reference),
+		reference: materials.reference.map((ref) => matGA(ref)),
 		unknown: materials.unknown.map((unk) => matGA(unk))
 	});
 	let matIsoComp = $derived(
 		isotopeInfo.map((iso, index) => ({
-			reference: matIsoGA(materials.reference, iso, index),
+			reference: materials.reference.map((ref) => matIsoGA(ref, iso, index)),
 			unknown: materials.unknown.map((unk) => matIsoGA(unk, iso, index))
 		}))
 	);
-	let multiMatComp = $derived(materials.unknown.map((unk) => MMGA(materials.reference, unk)));
+	let multiMatComp = $derived(
+		materials.reference.map((ref) => materials.unknown.map((unk) => MMGA(ref, unk)))
+	);
 	let everythingComp = $derived(
-		isotopeInfo.map((iso, index) =>
-			materials.unknown.map((unk) => EGA(materials.reference, unk, iso, index))
-		)
+		isotopeInfo.map((iso, index) => {
+			const referenceIndex = isotopeReferenceMap[index] ?? 0;
+			const reference = materials.reference[referenceIndex] ?? materials.reference[0];
+			return materials.unknown.map((unk) => EGA(reference, unk, iso, index));
+		})
 	);
 
-	let nextButtonText = $derived(getNextButtonText(step, isotopeCount, unknownCount));
-	let backButtonText = $derived(getBackButtonText(step, isotopeCount, unknownCount));
-	let stepTitle = $derived(getStepTitle(step, isotopeCount, unknownCount));
-	let stepType = $derived(getStepType(step, isotopeCount, unknownCount));
-	let progressPercentage = $derived(getProgressPercentage(step, isotopeCount, unknownCount));
-	let totalSteps = $derived(getReviewStep(isotopeCount, unknownCount));
+	let nextButtonText = $derived(
+		getNextButtonText(step, isotopeCount, referenceCount, unknownCount)
+	);
+	let backButtonText = $derived(
+		getBackButtonText(step, isotopeCount, referenceCount, unknownCount)
+	);
+	let stepTitle = $derived(getStepTitle(step, isotopeCount, referenceCount, unknownCount));
+	let stepType = $derived(getStepType(step, isotopeCount, referenceCount, unknownCount));
+	let progressPercentage = $derived(
+		getProgressPercentage(step, isotopeCount, referenceCount, unknownCount)
+	);
+	let totalSteps = $derived(getReviewStep(isotopeCount, referenceCount, unknownCount));
 	let showProgress = $derived(step > 0);
 
 	// Memoized function to prevent recreation on every render
@@ -214,15 +293,26 @@
 			}
 		}
 
-		// Validate reference material step
-		if (step === 2 + isotopeCount) {
-			if (matRefs.reference && typeof matRefs.reference.validateRefMatInfo === 'function') {
-				const isValid = matRefs.reference.validateRefMatInfo();
+		// Validate reference count step
+		if (step === isotopeCount + 2) {
+			if (!Number.isInteger(referenceCount) || referenceCount < 1) {
+				validationErrors = [
+					'Please enter a positive integer for the number of reference materials'
+				];
+				return false;
+			}
+		}
+
+		// Validate reference material steps
+		if (refIdx >= 0 && refIdx < referenceCount) {
+			const currentRef = matRefs.reference[refIdx];
+			if (currentRef && typeof currentRef.validateRefMatInfo === 'function') {
+				const isValid = currentRef.validateRefMatInfo();
 				if (!isValid) {
-					if (typeof matRefs.reference.showValidationErrors === 'function') {
-						matRefs.reference.showValidationErrors();
+					if (typeof currentRef.showValidationErrors === 'function') {
+						currentRef.showValidationErrors();
 					}
-					const errors = matRefs.reference.getValidationErrors?.() || [
+					const errors = currentRef.getValidationErrors?.() || [
 						'Please fill in all required fields'
 					];
 					validationErrors = errors;
@@ -231,8 +321,19 @@
 			}
 		}
 
-		// Validate unknown count step (step 3 + isotopeCount)
-		if (step === 3 + isotopeCount) {
+		// Validate isotope-reference matching step
+		if (step === getReferenceMatchStep(isotopeCount, referenceCount)) {
+			const invalidSelections = isotopeReferenceMap.some(
+				(refIndex) => refIndex === undefined || refIndex < 0 || refIndex >= referenceCount
+			);
+			if (invalidSelections) {
+				validationErrors = ['Please assign each isotope to a valid reference material'];
+				return false;
+			}
+		}
+
+		// Validate unknown count step
+		if (step === getReferenceMatchStep(isotopeCount, referenceCount) + 1) {
 			if (!Number.isInteger(unknownCount) || unknownCount < 1) {
 				validationErrors = ['Please enter a positive integer for the number of unknown materials'];
 				return false;
@@ -240,7 +341,7 @@
 		}
 
 		// Validate unknown material steps
-		if (unknownIdx >= 0 && unknownIdx < unknownCount) {
+		if (stepType === StepType.UNKNOWN_INFO && unknownIdx >= 0 && unknownIdx < unknownCount) {
 			if (
 				matRefs.unknown[unknownIdx] &&
 				typeof matRefs.unknown[unknownIdx]?.validateMaterialInfo === 'function'
@@ -260,6 +361,12 @@
 		}
 
 		return true;
+	}
+
+	function getReferenceLabel(index: number): string {
+		const ref = materials.reference[index];
+		const labelBase = ref?.NETL_code || ref?.sampleName;
+		return labelBase ? `${labelBase}` : `Reference ${index + 1}`;
 	}
 
 	const next = () => {
@@ -296,11 +403,24 @@
 		};
 
 		// Create CSV header row with concentration and uncertainty columns
-		const headers = ['', ...isotopeInfo.flatMap(iso => [escapeCSV(iso.isotopeName), escapeCSV(`${iso.isotopeName} Uncertainty`)])];
+		const headers = [
+			'',
+			...isotopeInfo.flatMap((iso) => [
+				escapeCSV(iso.isotopeName),
+				escapeCSV(`${iso.isotopeName} Uncertainty`)
+			])
+		];
 		const csvRows = [headers.join(',')];
 
 		// Add units row
-		const unitsRow = ['Units', ...isotopeInfo.flatMap((_, index) => [escapeCSV(materials.reference.concentrationUnits[index] || ''), '%'])];
+		const unitsRow = [
+			'Units',
+			...isotopeInfo.flatMap((_, index) => {
+				const referenceIndex = isotopeReferenceMap[index] ?? 0;
+				const reference = materials.reference[referenceIndex] ?? materials.reference[0];
+				return [escapeCSV(reference?.concentrationUnits[index] || ''), '%'];
+			})
+		];
 		csvRows.push(unitsRow.join(','));
 
 		// Add data rows for each unknown material
@@ -368,7 +488,7 @@
 			handleSubmit();
 		}}
 	>
-		{#if step === 0}
+		{#if stepType === StepType.WELCOME}
 			<p>
 				This version includes a complete analysis process for a single isotope, a single standard,
 				and a single unknown sample. It also includes uploading from a Maestro .rpt file to
@@ -404,11 +524,11 @@
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
-		{:else if step === 1}
+		{:else if stepType === StepType.ISOTOPE_COUNT}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<PageCounter pageType="isotopes" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
 			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if isoIndex >= 0 && isoIndex < isotopeCount}
+		{:else if stepType === StepType.ISOTOPE_INFO}
 			<!--For each step, show this. All of this should be in step 2, but there should be an indication of which isotope is being filled out. Ensure that the forward and back buttons work correctly.-->
 			<!-- {#each { length: isotopeCount } as _, index} -->
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
@@ -429,7 +549,17 @@
 			<button type="button" onclick={next}> {nextButtonText} </button>
 			<br /><br />
 			<!-- {/each} -->
-		{:else if step === 2 + isotopeCount}
+		{:else if step === isotopeCount + 2}
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
+			<PageCounter
+				pageType="reference materials"
+				pageCount={referenceCount}
+				updateFxn={updateReferenceData}
+			/>
+			<button type="button" onclick={prev}>{backButtonText}</button>
+			&nbsp;&nbsp;
+			<button type="button" onclick={next}> {nextButtonText} </button>
+		{:else if refIdx >= 0 && refIdx < referenceCount}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>
 				This is where you enter information about the reference material. This is used when
@@ -440,20 +570,58 @@
 			<RefMatInfo
 				{isotopeCount}
 				getRoiIndex={getRoiIndexFn}
-				bind:refMatInfo={materials.reference}
-				bind:this={matRefs.reference}
+				bind:refMatInfo={materials.reference[refIdx]}
+				bind:this={matRefs.reference[refIdx]}
 			/>
 
-			<ComputedDisplay title="Reference Material Information" data={matComp.reference} />
+			<ComputedDisplay
+				title="Reference Material Information"
+				data={matComp.reference[refIdx]}
+			/>
 			<ComputedDisplay
 				title="Reference and Isotope Information"
-				data={matIsoComp.map((item) => item.reference)}
+				data={matIsoComp.map((item) => item.reference[refIdx])}
 			/>
 
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if step === 3 + isotopeCount}
+		{:else if step === getReferenceMatchStep(isotopeCount, referenceCount)}
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
+			<p>
+				Match each isotope to a reference material. Each isotope can use only one reference, but
+				references can serve multiple isotopes.
+			</p>
+			<br />
+			{#each isotopeInfo as iso, index}
+				<label class="label">
+					<span>
+						Isotope {index + 1} ({iso.isotopeName || 'Unnamed'}) Reference
+					</span>
+					<select
+						class="select w-80"
+						value={isotopeReferenceMap[index] ?? 0}
+						onchange={(event) => {
+							const target = event.target as HTMLSelectElement;
+							const value = Number(target.value);
+							isotopeReferenceMap = isotopeReferenceMap.map((refIndex, i) =>
+								i === index ? value : refIndex
+							);
+						}}
+					>
+						{#each materials.reference as _, refIndex}
+							<option value={refIndex}>
+								{getReferenceLabel(refIndex)}
+							</option>
+						{/each}
+					</select>
+				</label>
+			{/each}
+			<br />
+			<button type="button" onclick={prev}>{backButtonText}</button>
+			&nbsp;&nbsp;
+			<button type="button" onclick={next}> {nextButtonText} </button>
+		{:else if stepType === StepType.UNKNOWN_COUNT}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<PageCounter
 				pageType="unknown materials"
@@ -463,7 +631,7 @@
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if unknownIdx >= 0 && unknownIdx < unknownCount}
+		{:else if stepType === StepType.UNKNOWN_INFO}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>
 				This is where you enter information about the unknown material you are trying to understand.
@@ -489,7 +657,7 @@
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if unknownIdx === unknownCount}
+		{:else if stepType === StepType.REVIEW}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Please review all information you entered and see computed values below.</p>
 			<br /><br />
@@ -514,7 +682,7 @@
 						</td>
 						{#each isotopeInfo as _, index}
 							<td class="border border-gray-400 px-4 py-2">
-								{materials.reference.concentrationUnits[index]}
+								{materials.reference[isotopeReferenceMap[index] ?? 0]?.concentrationUnits[index]}
 							</td>
 						{/each}
 					</tr>

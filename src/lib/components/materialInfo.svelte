@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { MaestroParsedData } from '$lib/NAAMath/types.js';
+	import type { MaestroParsedData, MaestroRoiEntry } from '$lib/NAAMath/types.js';
 	import MaestroUpload from './maestroUpload.svelte';
 
 	let {
@@ -33,15 +33,58 @@
 		}
 	});
 
+	let roiData = $state<MaestroRoiEntry[] | null>(null);
+	let roiSelections = $state<number[]>([]);
+
+	$effect(() => {
+		const currentSelections = roiSelections ?? [];
+		if (currentSelections.length !== isotopeCount) {
+			roiSelections = Array.from({ length: isotopeCount }, (_, i) => currentSelections[i] ?? -1);
+		}
+	});
+
+	function applyRoiSelection(isoIndex: number, roiIndex: number) {
+		if (!roiData || roiIndex < 0 || !roiData[roiIndex]) {
+			return;
+		}
+		const entry = roiData[roiIndex]!;
+		materialInfo.counts = materialInfo.counts.map((count: any, idx: number) =>
+			idx === isoIndex
+				? { grossCounts: entry.grossCounts, netCounts: entry.netCounts, uncertainty: entry.uncertainty }
+				: count
+		);
+	}
+
+	function applyAllRoiSelections(selections: number[]) {
+		if (!roiData) return;
+		materialInfo.counts = materialInfo.counts.map((count: any, idx: number) => {
+			const roiIndex = selections[idx];
+			if (roiIndex === undefined || roiIndex < 0 || !roiData![roiIndex]) {
+				return count;
+			}
+			const entry = roiData![roiIndex];
+			return {
+				grossCounts: entry.grossCounts,
+				netCounts: entry.netCounts,
+				uncertainty: entry.uncertainty
+			};
+		});
+	}
+
+	function handleRoiSelectionChange(isoIndex: number, event: Event) {
+		const target = event.target as HTMLSelectElement;
+		const roiIndex = Number(target.value);
+		roiSelections = roiSelections.map((value, idx) => (idx === isoIndex ? roiIndex : value));
+		applyRoiSelection(isoIndex, roiIndex);
+	}
+
 	function handleParsedMaestro(data: MaestroParsedData) {
 		materialInfo.liveTime = materialInfo.liveTime || data.liveTime;
 		materialInfo.realTime = materialInfo.realTime || data.realTime;
 		const roiIndex = getRoiIndex(data.roiData);
-		materialInfo.counts = roiIndex.map((index: number) => ({
-			grossCounts: data.roiData[index].grossCounts,
-			netCounts: data.roiData[index].netCounts,
-			uncertainty: data.roiData[index].uncertainty
-		}));
+		roiData = data.roiData;
+		roiSelections = roiIndex.map((index: number) => (index === undefined ? -1 : index));
+		applyAllRoiSelections(roiSelections);
 	}
 
 	export function validateMaterialInfo(): boolean {
