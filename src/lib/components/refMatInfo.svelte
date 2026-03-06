@@ -27,7 +27,8 @@
 			knownConcentration: [],
 			knownUncertainty: []
 		}),
-		getRoiIndex
+		getRoiIndex,
+		isotopeInfo = []
 	} = $props();
 
 	// Initialize/rescale arrays reactively while preserving existing values
@@ -120,7 +121,7 @@
 <br /><br />
 
 {#each { length: isotopeCount } as _, index}
-	<h3 class="text-xl font-bold">Isotope {index + 1} Known Concentration</h3>
+	<h3 class="text-xl font-bold">{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Known Concentration</h3>
 	<label class="label">
 		<span>Known Concentration</span>
 		<input

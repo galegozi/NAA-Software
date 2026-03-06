@@ -1,8 +1,11 @@
 <script lang="ts">
+    import IsotopeEnable from './isotopeEnable.svelte';
+
 	import type { MaestroParsedData, MaestroRoiEntry } from '$lib/NAAMath/types.js';
 	import MaestroUpload from './maestroUpload.svelte';
 
 	let {
+
 		isotopeCount,
 		materialInfo = $bindable({
 			NETL_code: '',
@@ -20,8 +23,15 @@
 			})),
 			dtType: undefined
 		}),
-		getRoiIndex
-	} = $props();
+		getRoiIndex,
+		isotopeInfo = [],
+	// toggles supplied by parent (refMatInfo); default to all visible and editable
+	isotopeToggles = Array.from({ length: isotopeCount }, () => true),
+	canEditToggles = true,
+	isReference = false,
+	selected = null
+} = $props();
+
 
 	$effect(() => {
 		const currentCounts = materialInfo.counts ?? [];
@@ -256,9 +266,15 @@
 </label>
 <br />
 {#each { length: isotopeCount } as _, index}
-	<h3 class="text-xl font-bold">Isotope {index + 1} Counts</h3>
-	<label class="label">
-		<span>Gross Counts</span>
+    <!-- Toggle visibility for this isotope -->
+    <label class="checkbox label" style="margin-bottom:0.5rem; display:flex; align-items:center;">
+        <input type="checkbox" bind:checked={isotopeToggles[index]} />
+        <span style="margin-left:0.5rem;">{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`}</span>
+    </label>
+    {#if isotopeToggles[index]}
+    <h3 class="text-xl font-bold">{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Counts</h3>
+    <label class="label">
+        <span>Gross Counts</span>
 		<input
 			class="input w-50"
 			type="number"
@@ -290,9 +306,14 @@
 			required
 		/>
 	</label>
-	<br />
+	{/if}
+<br />
 {/each}
 <br />
+{#if isReference}
+    <IsotopeEnable isotopes={isotopeInfo.map(i => i?.isotopeName ?? '')} bind:selected={selected} />
+{/if}
+
 <label class="label">
 	<span>Dead Time Correction Type</span>
 	<select
