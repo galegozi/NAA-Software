@@ -697,7 +697,14 @@
 						</td>
 						{#each isotopeInfo as _, index}
 							<td class="border border-gray-400 px-4 py-2">
-								{materials.reference.concentrationUnits[index] === 'ppm' ? 'µg/g' : materials.reference.concentrationUnits[index] === 'percentage'? '%' : materials.reference.concentrationUnits[index]}
+								{(() => {
+									const referenceIndex = isotopeReferenceMap[index] ?? 0;
+									const unit =
+										materials.reference[referenceIndex]?.concentrationUnits?.[index] ??
+										materials.reference[0]?.concentrationUnits?.[index] ??
+										'';
+									return unit === 'ppm' ? 'µg/g' : unit === 'percentage' ? '%' : unit;
+								})()}
 							</td>
 						{/each}
 					</tr>

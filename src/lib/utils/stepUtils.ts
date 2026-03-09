@@ -12,10 +12,6 @@ export const STEP_CONSTANTS = {
 	REFERENCE_COUNT_OFFSET: 2,
 	REFERENCE_INFO_OFFSET: 3,
 	UNKNOWN_COUNT_OFFSET: 4,
-	UNKNOWN_INFO_OFFSET: 5,
-	REFERENCE_COUNT_OFFSET: 2,
-	REFERENCE_INFO_OFFSET: 3,
-	UNKNOWN_COUNT_OFFSET: 4,
 	UNKNOWN_INFO_OFFSET: 5
 } as const;
 
@@ -115,17 +111,6 @@ export function getUnknownIndex(
 		unknownCount
 	);
 	return step - getUnknownInfoStartStep(isotopeCount, referenceCount);
-export function getUnknownIndex(
-	step: number,
-	isotopeCount: number,
-	referenceCountOrUnknownCount?: number,
-	unknownCount?: number
-): number {
-	const { referenceCount } = normalizeCounts(
-		referenceCountOrUnknownCount ?? 1,
-		unknownCount
-	);
-	return step - getUnknownInfoStartStep(isotopeCount, referenceCount);
 }
 
 /**
@@ -147,7 +132,6 @@ export function getStepType(
 	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount);
 	const reviewStep = getReviewStep(isotopeCount, referenceCount, resolvedUnknownCount);
 
-	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < referenceCountStep) {
 	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < referenceCountStep) {
 		return StepType.ISOTOPE_INFO;
 	}
@@ -245,10 +229,10 @@ export function getStepTitle(
  * Determine the back button text based on current step
  */
 export function getBackButtonText(
-step: number,
-isotopeCount: number,
-referenceCountOrUnknownCount: number,
-unknownCount?: number
+	step: number,
+	isotopeCount: number,
+	referenceCountOrUnknownCount: number,
+	unknownCount?: number
 ): string {
 	if (step <= STEP_CONSTANTS.ISOTOPE_COUNT) {
 		return 'Back';
@@ -260,7 +244,6 @@ unknownCount?: number
 	const referenceInfoStartStep = getReferenceInfoStartStep(isotopeCount);
 	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount);
 
-	// From isotope info steps
 	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < referenceCountStep) {
 		if (step === STEP_CONSTANTS.ISOTOPE_INFO_START) {
 			return 'Back: Number of Isotopes';
@@ -279,12 +262,10 @@ unknownCount?: number
 		return 'Back: Previous Reference Material';
 	}
 
-	// From unknown count
 	if (step === unknownCountStep) {
 		return 'Back: Last Reference Material';
 	}
 
-	// From unknown info steps
 	if (step > unknownCountStep && step < getReviewStep(isotopeCount, referenceCount, resolvedUnknownCount)) {
 		if (step === unknownCountStep + 1) {
 			return 'Back: Number of Unknown Materials';
@@ -292,7 +273,6 @@ unknownCount?: number
 		return 'Back: Previous Unknown Material';
 	}
 
-	// From review
 	if (step === getReviewStep(isotopeCount, referenceCount, resolvedUnknownCount)) {
 		return resolvedUnknownCount > 0 ? 'Back: Last Unknown Material' : 'Back: Unknown Count';
 	}
@@ -304,10 +284,10 @@ unknownCount?: number
  * Determine the next button text based on current step
  */
 export function getNextButtonText(
-step: number,
-isotopeCount: number,
-referenceCountOrUnknownCount: number,
-unknownCount?: number
+	step: number,
+	isotopeCount: number,
+	referenceCountOrUnknownCount: number,
+	unknownCount?: number
 ): string {
 	if (step < STEP_CONSTANTS.ISOTOPE_COUNT) {
 		return 'Next: Number of Isotopes';
@@ -320,21 +300,18 @@ unknownCount?: number
 	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount);
 	const reviewStep = getReviewStep(isotopeCount, referenceCount, resolvedUnknownCount);
 
-	// From isotope count to isotope info
 	if (step === STEP_CONSTANTS.ISOTOPE_COUNT) {
 		return isotopeCount === 1 ? 'Next: Isotope Information' : 'Next: Isotope 1 Information';
 	}
 
-	// From isotope info steps
 	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < referenceCountStep) {
 		const currentIsoIndex = getIsotopeIndex(step);
 		const nextIsoIndex = currentIsoIndex + 1;
 
 		if (nextIsoIndex < isotopeCount) {
 			return `Next: Isotope ${nextIsoIndex + 1} Information`;
-		} else {
-			return 'Next: Number of Reference Materials';
 		}
+		return 'Next: Number of Reference Materials';
 	}
 
 	if (step === referenceCountStep) {
@@ -353,23 +330,20 @@ unknownCount?: number
 		return 'Next: Number of Unknown Materials';
 	}
 
-	// From unknown count
 	if (step === unknownCountStep) {
 		return resolvedUnknownCount === 1
 			? 'Next: Unknown Material Information'
 			: 'Next: Unknown 1 Information';
 	}
 
-	// From unknown info steps
 	if (step > unknownCountStep && step < reviewStep) {
 		const currentUnknownIdx = getUnknownIndex(step, isotopeCount, referenceCount);
 		const nextUnknownIdx = currentUnknownIdx + 1;
 
 		if (nextUnknownIdx < resolvedUnknownCount) {
 			return `Next: Unknown ${nextUnknownIdx + 1} Information`;
-		} else {
-			return 'Next: Review All';
 		}
+		return 'Next: Review All';
 	}
 
 	return 'Review All Information';
@@ -379,10 +353,10 @@ unknownCount?: number
  * Calculate progress percentage
  */
 export function getProgressPercentage(
-step: number,
-isotopeCount: number,
-referenceCountOrUnknownCount: number,
-unknownCount?: number
+	step: number,
+	isotopeCount: number,
+	referenceCountOrUnknownCount: number,
+	unknownCount?: number
 ): number {
 	const totalSteps = getReviewStep(isotopeCount, referenceCountOrUnknownCount, unknownCount);
 	return Math.round((step / totalSteps) * 100);
