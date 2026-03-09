@@ -84,9 +84,9 @@
 		}
 		const cleaned = new Set<string>();
 		for (let i = 0; i < isotopeCount; i++) {
-			const label = getIsotopeLabel(i);
-			if (selected.has(label) && !usedIsotopeLabels.has(label)) {
-				cleaned.add(label);
+			const isotopeKey = getIsotopeKey(i);
+			if (selected.has(isotopeKey) && !usedIsotopeLabels.has(isotopeKey)) {
+				cleaned.add(isotopeKey);
 			}
 		}
 		if (cleaned.size !== selected.size) {
@@ -99,15 +99,19 @@
 		return elementName || `Isotope ${index + 1}`;
 	}
 
+	function getIsotopeKey(index: number): string {
+		return `isotope:${index}`;
+	}
+
 	function isIsotopeEnabled(index: number): boolean {
-		const label = getIsotopeLabel(index);
-		if (usedIsotopeLabels.has(label)) {
+		const isotopeKey = getIsotopeKey(index);
+		if (usedIsotopeLabels.has(isotopeKey)) {
 			return false;
 		}
 		if (!(selected instanceof Set) || selected.size === 0) {
 			return true;
 		}
-		return selected.has(label);
+		return selected.has(isotopeKey);
 	}
 
 	export function validateRefMatInfo(): boolean {
@@ -131,10 +135,10 @@
 				continue;
 			}
 			if (refMatInfo.knownConcentration[i] <= 0) {
-				errors.push(`Isotope ${i + 1}: Known Concentration must be greater than 0`);
+				errors.push(`${getIsotopeLabel(i)}: Known Concentration must be greater than 0`);
 			}
 			if (refMatInfo.knownUncertainty[i] < 0) {
-				errors.push(`Isotope ${i + 1}: Known Uncertainty cannot be negative`);
+				errors.push(`${getIsotopeLabel(i)}: Known Uncertainty cannot be negative`);
 			}
 		}
 

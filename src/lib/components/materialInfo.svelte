@@ -93,6 +93,10 @@
 		return elementName || `Isotope ${index + 1}`;
 	}
 
+	function getIsotopeKey(index: number): string {
+		return `isotope:${index}`;
+	}
+
 	function getExplicitlySelectedIndices(): number[] {
 		if (!(selected instanceof Set) || selected.size === 0) {
 			return [];
@@ -100,7 +104,7 @@
 
 		const indices: number[] = [];
 		for (let i = 0; i < isotopeCount; i++) {
-			if (selected.has(getIsotopeLabel(i))) {
+			if (selected.has(getIsotopeKey(i))) {
 				indices.push(i);
 			}
 		}
@@ -109,7 +113,7 @@
 	}
 
 	function isIsotopeDisabled(index: number): boolean {
-		return disabledIsotopeLabels.has(getIsotopeLabel(index));
+		return disabledIsotopeLabels.has(getIsotopeKey(index));
 	}
 
 	function isIsotopeSelected(index: number): boolean {
@@ -197,14 +201,22 @@
 	}
 
 	function handleParsedMaestro(data: MaestroParsedData) {
-		materialInfo.liveTime = materialInfo.liveTime || data.liveTime;
-		materialInfo.realTime = materialInfo.realTime || data.realTime;
+		materialInfo.liveTime = data.liveTime;
+		materialInfo.realTime = data.realTime;
 		roiData = data.roiData;
+
+		selected = new Set<string>();
 		roiSelections = getOneToOneRoiIndices(data.roiData);
+
+		materialInfo.counts = materialInfo.counts.map(() => ({
+			grossCounts: 0,
+			netCounts: 0,
+			uncertainty: 0
+		}));
 
 		if (canEditToggles) {
 			const matchedLabels = roiSelections
-				.map((roiIndex, isoIndex) => (roiIndex >= 0 ? getIsotopeLabel(isoIndex) : null))
+				.map((roiIndex, isoIndex) => (roiIndex >= 0 ? getIsotopeKey(isoIndex) : null))
 				.filter((label): label is string => Boolean(label));
 			selected = new Set(matchedLabels);
 		}
@@ -268,7 +280,10 @@
 
 {#if canEditToggles}
 	<IsotopeEnable
-		isotopes={Array.from({ length: isotopeCount }, (_, i) => getIsotopeLabel(i))}
+		isotopeOptions={Array.from({ length: isotopeCount }, (_, i) => ({
+			value: getIsotopeKey(i),
+			label: getIsotopeLabel(i)
+		}))}
 		disabledIsotopes={disabledIsotopeLabels}
 		bind:selected={selected}
 	/>

@@ -5,6 +5,11 @@ import type { MaterialIsotopeComputed } from './types.js';
 import { getAll as isoGA } from './isotopeMath.ts';
 import { getAll as matGA } from './MaterialMath.ts';
 
+function getNetCountsAtIndex(material: BaseMaterialInfo, isoIndex: number): number {
+	const countData = material.counts?.[isoIndex];
+	return countData?.netCounts ?? 0;
+}
+
 function getSaturationFactor(
 	material: BaseMaterialInfo,
 	isotope: IsotopeInfo,
@@ -29,20 +34,32 @@ function getShortDD(material: BaseMaterialInfo, isotope: IsotopeInfo, isoIndex: 
 	const matAll = matGA(material);
 	const decayConst = isoAll.decayConstant;
 	const deadTimeSeconds = matAll.deadTime;
+	if (deadTimeSeconds === 0) {
+		return 0;
+	}
 	const first_factor = Math.exp(decayConst * deadTimeSeconds) - 1;
-	const second_factor = material.counts[isoIndex].netCounts / deadTimeSeconds;
+	const second_factor = getNetCountsAtIndex(material, isoIndex) / deadTimeSeconds;
 	const third_factor = 1 - Math.exp(-decayConst * material.liveTime);
+	if (third_factor === 0) {
+		return 0;
+	}
 	return (first_factor * second_factor) / third_factor;
 }
 
 function getMixedDD(material: BaseMaterialInfo, isotope: IsotopeInfo, isoIndex: number): number {
 	const isoAll = isoGA(isotope);
 	// a = net counts * decay constant
-	const a = material.counts[isoIndex].netCounts * isoAll.decayConstant;
+	const a = getNetCountsAtIndex(material, isoIndex) * isoAll.decayConstant;
 	// b = real time / live time
+	if (material.liveTime === 0) {
+		return 0;
+	}
 	const b = material.realTime / material.liveTime;
 	// c = 1 - EXP(-decay constant * real time)
 	const c = 1 - Math.exp(-isoAll.decayConstant * material.realTime);
+	if (c === 0) {
+		return 0;
+	}
 	return (a * b) / c;
 }
 
@@ -51,7 +68,10 @@ function getSimpleDD(material: BaseMaterialInfo, isotope: IsotopeInfo, isoIndex:
 	const isoAll = isoGA(isotope);
 	const decayConst = isoAll.decayConstant;
 	const denominator = 1 - Math.exp(-decayConst * material.liveTime);
-	return material.counts[isoIndex].netCounts / denominator;
+	if (denominator === 0) {
+		return 0;
+	}
+	return getNetCountsAtIndex(material, isoIndex) / denominator;
 }
 
 function getFuncDD(material: BaseMaterialInfo, isotope: IsotopeInfo, isoIndex: number): number {

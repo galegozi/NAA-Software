@@ -6,6 +6,30 @@ import { getAll as matIsoGA } from './MaterialIsotopeMath.ts';
 import { getAll as MMGA } from './MultiMaterialMath.ts';
 import { getAll as matGA } from './MaterialMath.ts';
 
+function getNumberAtIndex(values: number[] | undefined, index: number): number {
+	const value = values?.[index];
+	return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function getUnitAtIndex(
+	values: ReferenceMaterial['concentrationUnits'] | undefined,
+	index: number
+): ReferenceMaterial['concentrationUnits'][number] {
+	return values?.[index];
+}
+
+function getKnownConcentrationUncertaintyPercent(
+	refMaterial: ReferenceMaterial,
+	isotopeIndex: number
+): number {
+	const knownConcentration = getNumberAtIndex(refMaterial.knownConcentration, isotopeIndex);
+	if (knownConcentration <= 0) {
+		return 0;
+	}
+	const knownUncertainty = getNumberAtIndex(refMaterial.knownUncertainty, isotopeIndex);
+	return (knownUncertainty / knownConcentration) * 100;
+}
+
 function getSaturationFactorRatio(
 	refMaterial: ReferenceMaterial,
 	unkMaterial: UnknownMaterial,
@@ -53,7 +77,7 @@ function getUnknownConcentration(
 ): number {
 	const multimaterial = MMGA(refMaterial, unkMaterial);
 	const result =
-		refMaterial.knownConcentration[isotopeIndex] *
+		getNumberAtIndex(refMaterial.knownConcentration, isotopeIndex) *
 		getDeadTimeCorrectionRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
 		getSaturationFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
 		getDecayCorrectionFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
@@ -74,17 +98,15 @@ function getUnknownConcentrationUncertainty(
 	// L5 is reference material known concentration uncertainty
 	let refComp = matGA(refMaterial);
 	let unkComp = matGA(unkMaterial);
-
-	let rawKnownUncertainty = refMaterial.knownUncertainty[isotopeIndex];
-	if (refMaterial.concentrationUnits[isotopeIndex] === 'ppm') {
-		// convert to percent
-		rawKnownUncertainty = rawKnownUncertainty / 1000000 * 100;
-	}
+	const knownConcentrationUncertaintyPercent = getKnownConcentrationUncertaintyPercent(
+		refMaterial,
+		isotopeIndex
+	);
 
 	return Math.sqrt(
-		Math.pow(refComp.countUncertaintyPercent[isotopeIndex], 2) +
-		Math.pow(unkComp.countUncertaintyPercent[isotopeIndex], 2) +
-		Math.pow(rawKnownUncertainty, 2)
+		Math.pow(getNumberAtIndex(refComp.countUncertaintyPercent, isotopeIndex), 2) +
+		Math.pow(getNumberAtIndex(unkComp.countUncertaintyPercent, isotopeIndex), 2) +
+		Math.pow(knownConcentrationUncertaintyPercent, 2)
 	);
 }
 

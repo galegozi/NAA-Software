@@ -12,7 +12,8 @@ export function createIsotopeInfo(): IsotopeInfo {
 		elementName: '',
 		isotopeName: '',
 		energy: 0,
-		halfLife: 0
+		halfLife: 0,
+		linkedReference: 0
 	};
 }
 

@@ -103,17 +103,33 @@
 		newIsotopeCount: number,
 		newReferenceCount: number
 	) {
-		const existingMap = [...isotopeReferenceMap];
-		isotopeReferenceMap = Array.from({ length: newIsotopeCount }, (_, i) => {
-			const currentValue = existingMap[i];
-			if (currentValue !== undefined && currentValue < newReferenceCount) {
-				return currentValue;
+		const nextMap = Array.from({ length: newIsotopeCount }, (_, i) => {
+			const linkedReference = isotopeInfo[i]?.linkedReference;
+			if (
+				linkedReference !== undefined &&
+				linkedReference >= 0 &&
+				linkedReference < newReferenceCount
+			) {
+				return linkedReference;
 			}
+
 			const autoIndex = materials.reference.findIndex(
 				(ref) => (ref.knownConcentration?.[i] ?? 0) > 0
 			);
 			return autoIndex >= 0 ? autoIndex : 0;
 		});
+
+		isotopeReferenceMap = nextMap;
+
+		const needsIsotopeSync = nextMap.some(
+			(linkedReference, index) => isotopeInfo[index]?.linkedReference !== linkedReference
+		);
+		if (needsIsotopeSync) {
+			isotopeInfo = isotopeInfo.map((iso, index) => ({
+				...iso,
+				linkedReference: nextMap[index] ?? 0
+			}));
+		}
 	}
 
 	function updateIsotopeData(newCount: number) {
@@ -121,9 +137,16 @@
 
 		// Preserve existing isotope data, only add/remove as needed
 		const existingIsotopeInfo = [...isotopeInfo];
-		isotopeInfo = Array.from({ length: isotopeCount }, (_, i) =>
-			i < existingIsotopeInfo.length ? existingIsotopeInfo[i] : createIsotopeInfo()
-		);
+		isotopeInfo = Array.from({ length: isotopeCount }, (_, i) => {
+			if (i < existingIsotopeInfo.length) {
+				const existingIso = existingIsotopeInfo[i];
+				return {
+					...existingIso,
+					linkedReference: existingIso.linkedReference ?? 0
+				};
+			}
+			return createIsotopeInfo();
+		});
 
 		// Preserve component references for existing isotopes
 		const existingIsoRef = [...isoRef];
@@ -242,22 +265,36 @@
 		materials.reference.map((ref) => materials.unknown.map((unk) => MMGA(ref, unk)))
 	);
 
+	function getIsotopeSelectionKey(index: number): string {
+		return `isotope:${index}`;
+	}
+
+	function getLinkedReferenceIndex(index: number): number {
+		const linkedReference = isotopeInfo[index]?.linkedReference;
+		if (
+			linkedReference !== undefined &&
+			linkedReference >= 0 &&
+			linkedReference < referenceCount
+		) {
+			return linkedReference;
+		}
+		return 0;
+	}
+
 	$effect(() => {
 		const currentMap = isotopeReferenceMap ?? [];
 		const nextMap = Array.from({ length: isotopeCount }, (_, index) => {
-			const iso = isotopeInfo[index];
-			const elementName = iso?.elementName?.trim?.() ?? '';
-			const label = elementName || `Isotope ${index + 1}`;
+			const selectionKey = getIsotopeSelectionKey(index);
 
 			const selectedRefIndex = referenceIsotopeSelections.findIndex(
-				(selection) => selection instanceof Set && selection.has(label)
+				(selection) => selection instanceof Set && selection.has(selectionKey)
 			);
 
 			if (selectedRefIndex >= 0 && selectedRefIndex < referenceCount) {
 				return selectedRefIndex;
 			}
 
-			const fallback = currentMap[index] ?? 0;
+			const fallback = isotopeInfo[index]?.linkedReference ?? 0;
 			return fallback >= 0 && fallback < referenceCount ? fallback : 0;
 		});
 
@@ -268,11 +305,21 @@
 		if (changed) {
 			isotopeReferenceMap = nextMap;
 		}
+
+		const needsIsotopeSync = nextMap.some(
+			(linkedReference, index) => isotopeInfo[index]?.linkedReference !== linkedReference
+		);
+		if (needsIsotopeSync) {
+			isotopeInfo = isotopeInfo.map((iso, index) => ({
+				...iso,
+				linkedReference: nextMap[index] ?? 0
+			}));
+		}
 	});
 
 	let everythingComp = $derived(
 		isotopeInfo.map((iso, index) => {
-			const referenceIndex = isotopeReferenceMap[index] ?? 0;
+			const referenceIndex = getLinkedReferenceIndex(index);
 			const reference = materials.reference[referenceIndex] ?? materials.reference[0];
 			return materials.unknown.map((unk) => EGA(reference, unk, iso, index));
 		})
@@ -460,7 +507,7 @@
 		const unitsRow = [
 			'Units',
 			...isotopeInfo.flatMap((_, index) => {
-				const referenceIndex = isotopeReferenceMap[index] ?? 0;
+				const referenceIndex = getLinkedReferenceIndex(index);
 				const reference = materials.reference[referenceIndex] ?? materials.reference[0];
 				return [escapeCSV(reference?.concentrationUnits[index] || ''), '%'];
 			})
@@ -698,7 +745,7 @@
 						{#each isotopeInfo as _, index}
 							<td class="border border-gray-400 px-4 py-2">
 								{(() => {
-									const referenceIndex = isotopeReferenceMap[index] ?? 0;
+										const referenceIndex = getLinkedReferenceIndex(index);
 									const unit =
 										materials.reference[referenceIndex]?.concentrationUnits?.[index] ??
 										materials.reference[0]?.concentrationUnits?.[index] ??

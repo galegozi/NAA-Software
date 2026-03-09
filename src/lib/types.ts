@@ -7,6 +7,7 @@ export interface IsotopeInfo {
 	isotopeName: string;
 	energy: number;
 	halfLife: number;
+	linkedReference: number;
 }
 
 export interface CountData {
