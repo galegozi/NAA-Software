@@ -70,7 +70,7 @@ export function getReferenceMatchStep(isotopeCount: number, referenceCount = 1):
  * Calculate the step number for unknown count input
  */
 export function getUnknownCountStep(isotopeCount: number, referenceCount = 1): number {
-	return getReferenceMatchStep(isotopeCount, referenceCount) + 1;
+	return getReferenceInfoStartStep(isotopeCount) + referenceCount;
 }
 
 /**
@@ -132,7 +132,6 @@ export function getStepType(
 		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
 	const referenceCountStep = getReferenceCountStep(isotopeCount);
 	const referenceInfoStartStep = getReferenceInfoStartStep(isotopeCount);
-	const referenceMatchStep = getReferenceMatchStep(isotopeCount, referenceCount);
 	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount);
 	const reviewStep = getReviewStep(isotopeCount, referenceCount, resolvedUnknownCount);
 
@@ -141,10 +140,9 @@ export function getStepType(
 	}
 
 	if (step === referenceCountStep) return StepType.REFERENCE_COUNT;
-	if (step >= referenceInfoStartStep && step < referenceMatchStep) {
+	if (step >= referenceInfoStartStep && step < unknownCountStep) {
 		return StepType.REFERENCE_INFO;
 	}
-	if (step === referenceMatchStep) return StepType.REFERENCE_MATCH;
 	if (step === unknownCountStep) return StepType.UNKNOWN_COUNT;
 
 	if (step > unknownCountStep && step < reviewStep) {
@@ -169,14 +167,12 @@ export function getUserFacingStepNumber(
 	const { referenceCount, unknownCount: resolvedUnknownCount } =
 		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
 	const referenceCountStep = getReferenceCountStep(isotopeCount);
-	const referenceMatchStep = getReferenceMatchStep(isotopeCount, referenceCount);
 	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount);
 	const reviewStep = getReviewStep(isotopeCount, referenceCount, resolvedUnknownCount);
 
 	if (step >= STEP_CONSTANTS.ISOTOPE_INFO_START && step < reviewStep) return step;
 	if (step === reviewStep) return step;
 	if (step === referenceCountStep) return step;
-	if (step === referenceMatchStep) return step;
 	if (step === unknownCountStep) return step;
 	return step;
 }
@@ -251,7 +247,6 @@ unknownCount?: number
 		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
 	const referenceCountStep = getReferenceCountStep(isotopeCount);
 	const referenceInfoStartStep = getReferenceInfoStartStep(isotopeCount);
-	const referenceMatchStep = getReferenceMatchStep(isotopeCount, referenceCount);
 	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount);
 
 	// From isotope info steps
@@ -266,20 +261,16 @@ unknownCount?: number
 		return 'Back: Last Isotope Information';
 	}
 
-	if (step >= referenceInfoStartStep && step < referenceMatchStep) {
+	if (step >= referenceInfoStartStep && step < unknownCountStep) {
 		if (step === referenceInfoStartStep) {
 			return 'Back: Number of Reference Materials';
 		}
 		return 'Back: Previous Reference Material';
 	}
 
-	if (step === referenceMatchStep) {
-		return 'Back: Last Reference Material';
-	}
-
 	// From unknown count
 	if (step === unknownCountStep) {
-		return 'Back: Reference Matching';
+		return 'Back: Last Reference Material';
 	}
 
 	// From unknown info steps
@@ -315,7 +306,6 @@ unknownCount?: number
 		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
 	const referenceCountStep = getReferenceCountStep(isotopeCount);
 	const referenceInfoStartStep = getReferenceInfoStartStep(isotopeCount);
-	const referenceMatchStep = getReferenceMatchStep(isotopeCount, referenceCount);
 	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount);
 	const reviewStep = getReviewStep(isotopeCount, referenceCount, resolvedUnknownCount);
 
@@ -342,17 +332,13 @@ unknownCount?: number
 			: 'Next: Reference Material 1 Information';
 	}
 
-	if (step >= referenceInfoStartStep && step < referenceMatchStep) {
+	if (step >= referenceInfoStartStep && step < unknownCountStep) {
 		const currentRefIndex = step - referenceInfoStartStep;
 		const nextRefIndex = currentRefIndex + 1;
 
 		if (nextRefIndex < referenceCount) {
 			return `Next: Reference Material ${nextRefIndex + 1} Information`;
 		}
-		return 'Next: Match Isotopes to References';
-	}
-
-	if (step === referenceMatchStep) {
 		return 'Next: Number of Unknown Materials';
 	}
 

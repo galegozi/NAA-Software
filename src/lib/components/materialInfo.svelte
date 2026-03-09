@@ -1,11 +1,10 @@
 <script lang="ts">
-    import IsotopeEnable from './isotopeEnable.svelte';
+	import IsotopeEnable from './isotopeEnable.svelte';
 
 	import type { MaestroParsedData, MaestroRoiEntry } from '$lib/NAAMath/types.js';
 	import MaestroUpload from './maestroUpload.svelte';
 
 	let {
-
 		isotopeCount,
 		materialInfo = $bindable({
 			NETL_code: '',
@@ -24,14 +23,11 @@
 			dtType: undefined
 		}),
 		getRoiIndex,
-		isotopeInfo = [],
-	// toggles supplied by parent (refMatInfo); default to all visible and editable
-	isotopeToggles = Array.from({ length: isotopeCount }, () => true),
-	canEditToggles = true,
-	isReference = false,
-	selected = null
-} = $props();
-
+		isotopeInfo = $bindable([]),
+		canEditToggles = $bindable(false),
+		disabledIsotopeLabels = new Set<string>(),
+		selected = $bindable(new Set<string>())
+	} = $props();
 
 	$effect(() => {
 		const currentCounts = materialInfo.counts ?? [];
@@ -60,7 +56,11 @@
 		const entry = roiData[roiIndex]!;
 		materialInfo.counts = materialInfo.counts.map((count: any, idx: number) =>
 			idx === isoIndex
-				? { grossCounts: entry.grossCounts, netCounts: entry.netCounts, uncertainty: entry.uncertainty }
+				? {
+						grossCounts: entry.grossCounts,
+						netCounts: entry.netCounts,
+						uncertainty: entry.uncertainty
+					}
 				: count
 		);
 	}
@@ -88,12 +88,127 @@
 		applyRoiSelection(isoIndex, roiIndex);
 	}
 
+	function getIsotopeLabel(index: number): string {
+		const elementName = isotopeInfo?.[index]?.elementName?.trim?.() ?? '';
+		return elementName || `Isotope ${index + 1}`;
+	}
+
+	function getExplicitlySelectedIndices(): number[] {
+		if (!(selected instanceof Set) || selected.size === 0) {
+			return [];
+		}
+
+		const indices: number[] = [];
+		for (let i = 0; i < isotopeCount; i++) {
+			if (selected.has(getIsotopeLabel(i))) {
+				indices.push(i);
+			}
+		}
+
+		return indices;
+	}
+
+	function isIsotopeDisabled(index: number): boolean {
+		return disabledIsotopeLabels.has(getIsotopeLabel(index));
+	}
+
+	function isIsotopeSelected(index: number): boolean {
+		if (!(selected instanceof Set) || selected.size === 0) {
+			return true;
+		}
+
+		const explicitlySelectedIndices = getExplicitlySelectedIndices();
+		if (explicitlySelectedIndices.length === 0) {
+			return true;
+		}
+
+		return explicitlySelectedIndices.includes(index);
+	}
+
+	function shouldShowIsotope(index: number): boolean {
+		if (!canEditToggles) {
+			return true;
+		}
+		if (isIsotopeDisabled(index)) {
+			return false;
+		}
+		return isIsotopeSelected(index);
+	}
+
+	function getMatchingIsotopeIndices(): number[] {
+		if (selected instanceof Set && selected.size > 0) {
+			const indices = getExplicitlySelectedIndices().filter((index) => !isIsotopeDisabled(index));
+			if (indices.length > 0) {
+				return indices;
+			}
+		}
+
+		return Array.from({ length: isotopeCount }, (_, i) => i).filter((index) => !isIsotopeDisabled(index));
+	}
+
+	function getOneToOneRoiIndices(roiEntries: MaestroRoiEntry[]): number[] {
+		const selections = Array.from({ length: isotopeCount }, () => -1);
+		const isotopeIndices = getMatchingIsotopeIndices();
+
+		if (!roiEntries.length || !isotopeIndices.length) {
+			return selections;
+		}
+
+		const availableRoi = new Set<number>(roiEntries.map((_, i) => i));
+		const prioritizedIsotopes = isotopeIndices
+			.map((isoIndex) => {
+				const targetEnergy = Number(isotopeInfo?.[isoIndex]?.energy);
+				let bestDiff = Infinity;
+				if (Number.isFinite(targetEnergy)) {
+					for (let i = 0; i < roiEntries.length; i++) {
+						const diff = Math.abs(targetEnergy - roiEntries[i].centroid);
+						if (diff < bestDiff) {
+							bestDiff = diff;
+						}
+					}
+				}
+				return { isoIndex, bestDiff, targetEnergy };
+			})
+			.sort((a, b) => a.bestDiff - b.bestDiff);
+
+		for (const { isoIndex, targetEnergy } of prioritizedIsotopes) {
+			if (!Number.isFinite(targetEnergy) || availableRoi.size === 0) {
+				continue;
+			}
+
+			let bestRoiIndex = -1;
+			let bestDiff = Infinity;
+
+			for (const roiIndex of availableRoi) {
+				const diff = Math.abs(targetEnergy - roiEntries[roiIndex].centroid);
+				if (diff < bestDiff) {
+					bestDiff = diff;
+					bestRoiIndex = roiIndex;
+				}
+			}
+
+			if (bestRoiIndex >= 0) {
+				selections[isoIndex] = bestRoiIndex;
+				availableRoi.delete(bestRoiIndex);
+			}
+		}
+
+		return selections;
+	}
+
 	function handleParsedMaestro(data: MaestroParsedData) {
 		materialInfo.liveTime = materialInfo.liveTime || data.liveTime;
 		materialInfo.realTime = materialInfo.realTime || data.realTime;
-		const roiIndex = getRoiIndex(data.roiData);
 		roiData = data.roiData;
-		roiSelections = roiIndex.map((index: number) => (index === undefined ? -1 : index));
+		roiSelections = getOneToOneRoiIndices(data.roiData);
+
+		if (canEditToggles) {
+			const matchedLabels = roiSelections
+				.map((roiIndex, isoIndex) => (roiIndex >= 0 ? getIsotopeLabel(isoIndex) : null))
+				.filter((label): label is string => Boolean(label));
+			selected = new Set(matchedLabels);
+		}
+
 		applyAllRoiSelections(roiSelections);
 	}
 
@@ -150,6 +265,14 @@
 		showErrors = false;
 	}
 </script>
+
+{#if canEditToggles}
+	<IsotopeEnable
+		isotopes={Array.from({ length: isotopeCount }, (_, i) => getIsotopeLabel(i))}
+		disabledIsotopes={disabledIsotopeLabels}
+		bind:selected={selected}
+	/>
+{/if}
 
 <MaestroUpload onParsed={handleParsedMaestro} />
 <br />
@@ -266,53 +389,47 @@
 </label>
 <br />
 {#each { length: isotopeCount } as _, index}
-    <!-- Toggle visibility for this isotope -->
-    <label class="checkbox label" style="margin-bottom:0.5rem; display:flex; align-items:center;">
-        <input type="checkbox" bind:checked={isotopeToggles[index]} />
-        <span style="margin-left:0.5rem;">{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`}</span>
-    </label>
-    {#if isotopeToggles[index]}
-    <h3 class="text-xl font-bold">{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Counts</h3>
-    <label class="label">
-        <span>Gross Counts</span>
-		<input
-			class="input w-50"
-			type="number"
-			bind:value={materialInfo.counts[index].grossCounts}
-			placeholder="e.g., 5000"
-			min="0"
-			required
-		/>
-	</label>
-	<label class="label">
-		<span>Net Counts</span>
-		<input
-			class="input w-50"
-			type="number"
-			bind:value={materialInfo.counts[index].netCounts}
-			placeholder="e.g., 4500"
-			min="0"
-			required
-		/>
-	</label>
-	<label class="label">
-		<span>Uncertainty (in counts)</span>
-		<input
-			class="input w-50"
-			type="number"
-			bind:value={materialInfo.counts[index].uncertainty}
-			placeholder="e.g., 67.08"
-			min="0"
-			required
-		/>
-	</label>
+	{#if shouldShowIsotope(index)}
+		<h3 class="text-xl font-bold">
+			{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Counts
+		</h3>
+		<label class="label">
+			<span>Gross Counts</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].grossCounts}
+				placeholder="e.g., 5000"
+				min="0"
+				required
+			/>
+		</label>
+		<label class="label">
+			<span>Net Counts</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].netCounts}
+				placeholder="e.g., 4500"
+				min="0"
+				required
+			/>
+		</label>
+		<label class="label">
+			<span>Uncertainty (in counts)</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].uncertainty}
+				placeholder="e.g., 67.08"
+				min="0"
+				required
+			/>
+		</label>
 	{/if}
-<br />
+	<br />
 {/each}
 <br />
-{#if isReference}
-    <IsotopeEnable isotopes={isotopeInfo.map(i => i?.isotopeName ?? '')} bind:selected={selected} />
-{/if}
 
 <label class="label">
 	<span>Dead Time Correction Type</span>

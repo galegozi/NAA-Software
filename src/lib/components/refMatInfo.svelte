@@ -28,7 +28,9 @@
 			knownUncertainty: []
 		}),
 		getRoiIndex,
-		isotopeInfo = []
+		isotopeInfo = [],
+		selected = $bindable<Set<string>>(new Set<string>()),
+		usedIsotopeLabels = new Set<string>()
 	} = $props();
 
 	// Initialize/rescale arrays reactively while preserving existing values
@@ -70,6 +72,43 @@
 	});
 
 	let matInfoRef: any;
+	const isReference = true;
+	const canEditToggles = isReference;
+
+	$effect(() => {
+		if (!(selected instanceof Set)) {
+			selected = new Set<string>();
+		}
+		if (usedIsotopeLabels.size === 0 || selected.size === 0) {
+			return;
+		}
+		const cleaned = new Set<string>();
+		for (let i = 0; i < isotopeCount; i++) {
+			const label = getIsotopeLabel(i);
+			if (selected.has(label) && !usedIsotopeLabels.has(label)) {
+				cleaned.add(label);
+			}
+		}
+		if (cleaned.size !== selected.size) {
+			selected = cleaned;
+		}
+	});
+
+	function getIsotopeLabel(index: number): string {
+		const elementName = isotopeInfo?.[index]?.elementName?.trim?.() ?? '';
+		return elementName || `Isotope ${index + 1}`;
+	}
+
+	function isIsotopeEnabled(index: number): boolean {
+		const label = getIsotopeLabel(index);
+		if (usedIsotopeLabels.has(label)) {
+			return false;
+		}
+		if (!(selected instanceof Set) || selected.size === 0) {
+			return true;
+		}
+		return selected.has(label);
+	}
 
 	export function validateRefMatInfo(): boolean {
 		const errors = getValidationErrors();
@@ -88,6 +127,9 @@
 
 		// Validate known concentration and uncertainty
 		for (let i = 0; i < isotopeCount; i++) {
+			if (!isIsotopeEnabled(i)) {
+				continue;
+			}
 			if (refMatInfo.knownConcentration[i] <= 0) {
 				errors.push(`Isotope ${i + 1}: Known Concentration must be greater than 0`);
 			}
@@ -117,49 +159,60 @@
 	}
 </script>
 
-<MaterialInfo bind:this={matInfoRef} bind:materialInfo={refMatInfo} {getRoiIndex} {isotopeCount} />
+<MaterialInfo
+	bind:this={matInfoRef}
+	bind:materialInfo={refMatInfo}
+	{getRoiIndex}
+	{isotopeCount}
+	{isotopeInfo}
+	{canEditToggles}
+	disabledIsotopeLabels={usedIsotopeLabels}
+	bind:selected
+/>
 <br /><br />
 
 {#each { length: isotopeCount } as _, index}
-	<h3 class="text-xl font-bold">{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Known Concentration</h3>
-	<label class="label">
-		<span>Known Concentration</span>
-		<input
-			class="input w-50"
-			type="number"
-			bind:value={refMatInfo.knownConcentration[index]}
-			placeholder="e.g., 0.35"
-			min="0"
-			required
-		/>
-		{#if showErrors && refMatInfo.knownConcentration[index] <= 0}
-			<span class="field-error">Known Concentration must be greater than 0</span>
-		{/if}
-	</label>
-	<label class="label">
-		<span>Known Uncertainty</span>
-		<input
-			class="input w-50"
-			type="number"
-			bind:value={refMatInfo.knownUncertainty[index]}
-			placeholder="e.g., 0.006"
-			min="0"
-			step="any"
-			required
-		/>
-		{#if showErrors && refMatInfo.knownUncertainty[index] < 0}
-			<span class="field-error">Known Uncertainty cannot be negative</span>
-		{/if}
-	</label>
-	<label class="label">
-	<span>Reference Material Concentration Units</span>
-	<select class="select w-50" bind:value={refMatInfo.concentrationUnits[index]}>
-		<option value={undefined} disabled selected>Select units</option>
-		<option value="percentage">Percentage (%)</option>
-		<option value="ppm">Parts per million (ppm)</option>
-	</select>
-</label>
-	<br />
+	{#if isIsotopeEnabled(index)}
+		<h3 class="text-xl font-bold">{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Known Concentration</h3>
+		<label class="label">
+			<span>Known Concentration</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={refMatInfo.knownConcentration[index]}
+				placeholder="e.g., 0.35"
+				min="0"
+				required
+			/>
+			{#if showErrors && refMatInfo.knownConcentration[index] <= 0}
+				<span class="field-error">Known Concentration must be greater than 0</span>
+			{/if}
+		</label>
+		<label class="label">
+			<span>Known Uncertainty</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={refMatInfo.knownUncertainty[index]}
+				placeholder="e.g., 0.006"
+				min="0"
+				step="any"
+				required
+			/>
+			{#if showErrors && refMatInfo.knownUncertainty[index] < 0}
+				<span class="field-error">Known Uncertainty cannot be negative</span>
+			{/if}
+		</label>
+		<label class="label">
+			<span>Reference Material Concentration Units</span>
+			<select class="select w-50" bind:value={refMatInfo.concentrationUnits[index]}>
+				<option value={undefined} disabled selected>Select units</option>
+				<option value="percentage">Percentage (%)</option>
+				<option value="ppm">Parts per million (ppm)</option>
+			</select>
+		</label>
+		<br />
+	{/if}
 {/each}
 
 <style>

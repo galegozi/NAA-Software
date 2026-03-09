@@ -3,13 +3,17 @@
     // Props:
     //   isotopes: string[] - list of isotope names to display
     //   selected: Set<string> (bindable) - currently selected isotopes
-    import { onMount } from 'svelte';
-
-    export let isotopes: string[] = [];
-    // expose a bindable set so parent can read/write selection
-    export let selected: Set<string> = new Set();
+    let {
+        isotopes = $bindable<string[]>([]),
+        selected = $bindable<Set<string>>(new Set<string>()),
+        disabled = false,
+        disabledIsotopes = new Set<string>()
+    } = $props();
 
     function toggle(isotope: string) {
+        if (disabled || disabledIsotopes.has(isotope)) {
+            return;
+        }
         if (selected.has(isotope)) {
             selected.delete(isotope);
         } else {
@@ -28,7 +32,8 @@
             <label class="checkbox label">
                 <input type="checkbox"
                     checked={selected.has(iso)}
-                    on:change={() => toggle(iso)} />
+                    disabled={disabled || disabledIsotopes.has(iso)}
+                    onchange={() => toggle(iso)} />
                 {iso}
             </label>
         {/each}

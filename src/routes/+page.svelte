@@ -27,7 +27,8 @@
 	import {
 		APP_VERSION,
 		getIsotopeIndex,
-		getReferenceMatchStep,
+		getUnknownCountStep,
+		getUnknownInfoStartStep,
 		getNextButtonText,
 		getBackButtonText,
 		getStepTitle,
@@ -159,6 +160,11 @@
 			i < existingRefs.length ? existingRefs[i] : undefined
 		);
 
+		const existingSelections = [...referenceIsotopeSelections];
+		referenceIsotopeSelections = Array.from({ length: referenceCount }, (_, i) =>
+			i < existingSelections.length ? existingSelections[i] : new Set<string>()
+		);
+
 		updateIsotopeReferenceMap(isotopeCount, referenceCount);
 	}
 
@@ -196,20 +202,19 @@
 	// step 2 to 1 + isotopeCount: isotope information
 	// step 2 + isotopeCount: number of references
 	// step 3 + isotopeCount to 2 + isotopeCount + referenceCount: reference information
-	// step 3 + isotopeCount + referenceCount: isotope-reference matching
-	// step 4 + isotopeCount + referenceCount: number of unknowns
-	// step 5 + isotopeCount + referenceCount to 4 + isotopeCount + referenceCount + unknownCount:
+	// step 3 + isotopeCount + referenceCount: number of unknowns
+	// step 4 + isotopeCount + referenceCount to 3 + isotopeCount + referenceCount + unknownCount:
 	// unknown material information
-	// step 5 + isotopeCount + referenceCount + unknownCount: review
+	// step 4 + isotopeCount + referenceCount + unknownCount: review
 	let referenceCount = $state(1);
 	let refIdx = $derived(
-		step >= isotopeCount + 3 && step < getReferenceMatchStep(isotopeCount, referenceCount)
+		step >= isotopeCount + 3 && step < getUnknownCountStep(isotopeCount, referenceCount)
 			? step - (isotopeCount + 3)
 			: -1
 	);
 	let unknownIdx = $derived(
-		step >= getReferenceMatchStep(isotopeCount, referenceCount) + 2
-			? step - (getReferenceMatchStep(isotopeCount, referenceCount) + 2)
+		step >= getUnknownInfoStartStep(isotopeCount, referenceCount)
+			? step - getUnknownInfoStartStep(isotopeCount, referenceCount)
 			: -1
 	);
 	let unknownCount = $state(1);
@@ -217,6 +222,7 @@
 		reference: [undefined] as (RefMatInfo | undefined)[],
 		unknown: [undefined] as (MaterialInfo | undefined)[]
 	});
+	let referenceIsotopeSelections = $state<Set<string>[]>([new Set<string>()]);
 	let materials = $state({
 		reference: [createReferenceMaterial(1)],
 		unknown: [createUnknownMaterial(1)]
@@ -235,6 +241,35 @@
 	let multiMatComp = $derived(
 		materials.reference.map((ref) => materials.unknown.map((unk) => MMGA(ref, unk)))
 	);
+
+	$effect(() => {
+		const currentMap = isotopeReferenceMap ?? [];
+		const nextMap = Array.from({ length: isotopeCount }, (_, index) => {
+			const iso = isotopeInfo[index];
+			const elementName = iso?.elementName?.trim?.() ?? '';
+			const label = elementName || `Isotope ${index + 1}`;
+
+			const selectedRefIndex = referenceIsotopeSelections.findIndex(
+				(selection) => selection instanceof Set && selection.has(label)
+			);
+
+			if (selectedRefIndex >= 0 && selectedRefIndex < referenceCount) {
+				return selectedRefIndex;
+			}
+
+			const fallback = currentMap[index] ?? 0;
+			return fallback >= 0 && fallback < referenceCount ? fallback : 0;
+		});
+
+		const changed =
+			nextMap.length !== currentMap.length ||
+			nextMap.some((value, index) => value !== currentMap[index]);
+
+		if (changed) {
+			isotopeReferenceMap = nextMap;
+		}
+	});
+
 	let everythingComp = $derived(
 		isotopeInfo.map((iso, index) => {
 			const referenceIndex = isotopeReferenceMap[index] ?? 0;
@@ -264,6 +299,21 @@
 
 	// Validation state
 	let validationErrors: string[] = $state([]);
+
+	function getUsedIsotopeLabels(referenceIndex: number): Set<string> {
+		const used = new Set<string>();
+		for (let i = 0; i < referenceIsotopeSelections.length; i++) {
+			if (i === referenceIndex) {
+				continue;
+			}
+			const selection = referenceIsotopeSelections[i];
+			if (!selection) continue;
+			for (const label of selection) {
+				used.add(label);
+			}
+		}
+		return used;
+	}
 
 	function validateCurrentStep(): boolean {
 		validationErrors = [];
@@ -321,19 +371,8 @@
 			}
 		}
 
-		// Validate isotope-reference matching step
-		if (step === getReferenceMatchStep(isotopeCount, referenceCount)) {
-			const invalidSelections = isotopeReferenceMap.some(
-				(refIndex) => refIndex === undefined || refIndex < 0 || refIndex >= referenceCount
-			);
-			if (invalidSelections) {
-				validationErrors = ['Please assign each isotope to a valid reference material'];
-				return false;
-			}
-		}
-
 		// Validate unknown count step
-		if (step === getReferenceMatchStep(isotopeCount, referenceCount) + 1) {
+		if (step === getUnknownCountStep(isotopeCount, referenceCount)) {
 			if (!Number.isInteger(unknownCount) || unknownCount < 1) {
 				validationErrors = ['Please enter a positive integer for the number of unknown materials'];
 				return false;
@@ -363,12 +402,6 @@
 		return true;
 	}
 
-	function getReferenceLabel(index: number): string {
-		const ref = materials.reference[index];
-		const labelBase = ref?.NETL_code || ref?.sampleName;
-		return labelBase ? `${labelBase}` : `Reference ${index + 1}`;
-	}
-
 	const next = () => {
 		// Prevent navigating beyond the final review step
 		if (step >= totalSteps) return;
@@ -385,10 +418,11 @@
 			}
 		}
 
-		step++;
+		step = Math.min(step + 1, totalSteps);
 	};
 	const prev = () => {
-		if (step > 0) step--;
+		if (step <= 0) return;
+		step = Math.max(step - 1, 0);
 	};
 
 	function downloadTableAsCSV() {
@@ -569,7 +603,10 @@
 			<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
 			<RefMatInfo
 				{isotopeCount}
+				{isotopeInfo}
+				usedIsotopeLabels={getUsedIsotopeLabels(refIdx)}
 				getRoiIndex={getRoiIndexFn}
+				bind:selected={referenceIsotopeSelections[refIdx]}
 				bind:refMatInfo={materials.reference[refIdx]}
 				bind:this={matRefs.reference[refIdx]}
 			/>
@@ -583,41 +620,6 @@
 				data={matIsoComp.map((item) => item.reference[refIdx])}
 			/>
 
-			<button type="button" onclick={prev}>{backButtonText}</button>
-			&nbsp;&nbsp;
-			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if step === getReferenceMatchStep(isotopeCount, referenceCount)}
-			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<p>
-				Match each isotope to a reference material. Each isotope can use only one reference, but
-				references can serve multiple isotopes.
-			</p>
-			<br />
-			{#each isotopeInfo as iso, index}
-				<label class="label">
-					<span>
-						Isotope {index + 1} ({iso.isotopeName || 'Unnamed'}) Reference
-					</span>
-					<select
-						class="select w-80"
-						value={isotopeReferenceMap[index] ?? 0}
-						onchange={(event) => {
-							const target = event.target as HTMLSelectElement;
-							const value = Number(target.value);
-							isotopeReferenceMap = isotopeReferenceMap.map((refIndex, i) =>
-								i === index ? value : refIndex
-							);
-						}}
-					>
-						{#each materials.reference as _, refIndex}
-							<option value={refIndex}>
-								{getReferenceLabel(refIndex)}
-							</option>
-						{/each}
-					</select>
-				</label>
-			{/each}
-			<br />
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
@@ -639,6 +641,7 @@
 			<br /><br />
 			<MaterialInfo
 				{isotopeCount}
+				{isotopeInfo}
 				getRoiIndex={getRoiIndexFn}
 				bind:this={matRefs.unknown[unknownIdx]}
 				bind:materialInfo={materials.unknown[unknownIdx]}
