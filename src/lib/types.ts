@@ -8,12 +8,16 @@ export interface IsotopeInfo {
 	energy: number;
 	halfLife: number;
 	linkedReference: number;
+	unit: string;
 }
 
 export interface CountData {
 	grossCounts: number;
 	netCounts: number;
 	uncertainty: number;
+	grossCountsPositionalCorrectionFactor: number;
+	netCountsPositionalCorrectionFactor: number;
+	uncertaintyPositionalCorrectionFactor: number;
 }
 
 /**
@@ -30,6 +34,8 @@ export interface BaseMaterialInfo {
 	sampleName: string;
 	mass: number;
 	irradiationTime: number;
+	irradiationEnd: string;
+	measurementStartTime: string;
 	decayTime: number;
 	liveTime: number;
 	realTime: number;

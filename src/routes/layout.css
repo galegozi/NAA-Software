@@ -5,3 +5,15 @@
 @import '@skeletonlabs/skeleton';
 @import '@skeletonlabs/skeleton-svelte';
 @import '@skeletonlabs/skeleton/themes/cerberus';
+
+:root {
+  /* Set a larger base font size (default is usually 16px) */
+  font-size: 25px; 
+}
+
+body {
+  /* Alternatively, target body to ensure all elements inherit */
+  font-size: 1.25rem; 
+  line-height: 1.5;
+}
+

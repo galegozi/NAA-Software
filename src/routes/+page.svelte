@@ -54,7 +54,14 @@
 		updatedReference.counts = Array.from({ length: newIsotopeCount }, (_, i) =>
 			i < existingRefCounts.length
 				? existingRefCounts[i]
-				: { grossCounts: 0, netCounts: 0, uncertainty: 0 }
+				: {
+						grossCounts: 0,
+						netCounts: 0,
+						uncertainty: 0,
+						grossCountsPositionalCorrectionFactor: 1,
+						netCountsPositionalCorrectionFactor: 1,
+						uncertaintyPositionalCorrectionFactor: 1
+					}
 		);
 
 		const existingKnownConcentration = Array.isArray(reference.knownConcentration)
@@ -94,15 +101,21 @@
 		return {
 			...unknown,
 			counts: Array.from({ length: newIsotopeCount }, (_, i) =>
-				i < existingCounts.length ? existingCounts[i] : { grossCounts: 0, netCounts: 0, uncertainty: 0 }
+				i < existingCounts.length
+					? existingCounts[i]
+					: {
+							grossCounts: 0,
+							netCounts: 0,
+							uncertainty: 0,
+							grossCountsPositionalCorrectionFactor: 1,
+							netCountsPositionalCorrectionFactor: 1,
+							uncertaintyPositionalCorrectionFactor: 1
+						}
 			)
 		};
 	}
 
-	function updateIsotopeReferenceMap(
-		newIsotopeCount: number,
-		newReferenceCount: number
-	) {
+	function updateIsotopeReferenceMap(newIsotopeCount: number, newReferenceCount: number) {
 		const nextMap = Array.from({ length: newIsotopeCount }, (_, i) => {
 			const linkedReference = isotopeInfo[i]?.linkedReference;
 			if (
@@ -193,23 +206,23 @@
 
 	function updateUnknownData(newCount: number) {
 		unknownCount = newCount;
-		
+
 		// Preserve existing unknown materials, only add/remove as needed
 		const existingUnknowns = [...materials.unknown];
 		const existingRefs = [...matRefs.unknown];
-		
+
 		materials.unknown = Array.from({ length: unknownCount }, (_, i) =>
-			i < existingUnknowns.length 
-				? existingUnknowns[i] 
-				: createUnknownMaterial(isotopeCount)
+			i < existingUnknowns.length ? existingUnknowns[i] : createUnknownMaterial(isotopeCount)
 		);
-		
+
 		matRefs.unknown = Array.from({ length: unknownCount }, (_, i) =>
 			i < existingRefs.length ? existingRefs[i] : undefined
 		);
 	}
 
 	let step = $state(0);
+
+	let title = $state('NAA Analysis');
 
 	// isotope information
 	let isoIndex = $derived(getIsotopeIndex(step));
@@ -271,11 +284,7 @@
 
 	function getLinkedReferenceIndex(index: number): number {
 		const linkedReference = isotopeInfo[index]?.linkedReference;
-		if (
-			linkedReference !== undefined &&
-			linkedReference >= 0 &&
-			linkedReference < referenceCount
-		) {
+		if (linkedReference !== undefined && linkedReference >= 0 && linkedReference < referenceCount) {
 			return linkedReference;
 		}
 		return 0;
@@ -516,14 +525,31 @@
 
 		// Add data rows for each unknown material
 		materials.unknown.forEach((unk, uIndex) => {
+			const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`;
 			const row = [
-				escapeCSV(unk.NETL_code || `Unknown ${uIndex + 1}`),
+				escapeCSV(unknownLabel),
 				...isotopeInfo.flatMap((_, iIndex) => [
 					escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)),
-					escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute, 2))
+					escapeCSV(
+						truncateToSigFigs(
+							everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute,
+							2
+						)
+					)
 				])
 			];
 			csvRows.push(row.join(','));
+
+			const detectionLimitRow = [
+				escapeCSV(`${unknownLabel} Conc Det Lim`),
+				...isotopeInfo.flatMap((_, iIndex) => [
+					escapeCSV(
+						truncateToSigFigs(everythingComp[iIndex][uIndex].concentrationDetectionLimit, 3)
+					),
+					escapeCSV('')
+				])
+			];
+			csvRows.push(detectionLimitRow.join(','));
 		});
 
 		// Create CSV string
@@ -533,11 +559,11 @@
 		const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
 		const link = document.createElement('a');
 		const url = URL.createObjectURL(blob);
-		
+
 		link.setAttribute('href', url);
-		link.setAttribute('download', 'naa_concentrations.csv');
+		link.setAttribute('download', `${title}.csv`);
 		link.style.visibility = 'hidden';
-		
+
 		document.body.appendChild(link);
 		link.click();
 		document.body.removeChild(link);
@@ -560,14 +586,17 @@
 </script>
 
 <svelte:head>
-	<title>NAA Analysis</title>
+	<title>{title}</title>
 </svelte:head>
 
 <svelte:window onkeydown={handleKeyPress} />
 
 <div style="padding: 5%">
-	<h1 class="text-3xl font-bold">NAA Analysis - Version {APP_VERSION}</h1>
+	<h1 class="text-3xl font-bold">NAA Analysis Software - Version {APP_VERSION}</h1>
 	<br />
+	<h2 class="text-2xl font-bold">Current Experiment: {title}</h2>
+	<br />
+
 
 	{#if showProgress}
 		<ProgressIndicator currentStep={step} {totalSteps} percentage={progressPercentage} />
@@ -580,7 +609,35 @@
 		}}
 	>
 		{#if stepType === StepType.WELCOME}
+			<p>Welcome to the NAA Analysis software!</p>
+			<br />
+			<!--Add a field to bind to title-->
+			<label class="label">
+				<span>To start, please enter an experiment title:</span>
+				<input class="input w-50" type="text" bind:value={title} />
+			</label>
+			<br />
+			<p>Here is what is included in this software:</p>
+			<ul class="ml-6 list-outside list-disc">
+				<li>
+					Complete analysis for:
+					<ul class="mt-1 ml-6 list-outside list-disc">
+						<li>Any number of isotopes</li>
+						<li>Any number of reference materials</li>
+						<li>Any number of unknown materials</li>
+						<li>Uploading from a Maestro .rpt file</li>
+						<li>A table displaying concentrations and uncertainties with a CSV download link</li>
+					</ul>
+				</li>
+			</ul>
+			<br />
+			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
+			<br />
 			<p>
+				In this version (5.0 alpha) the primary developmental focus is on the reference materials,
+				using a library instead of a single standard. There are other minor revisions included here.
+			</p>
+			<!-- <p>
 				This version includes a complete analysis process for a single isotope, a single standard,
 				and a single unknown sample. It also includes uploading from a Maestro .rpt file to
 				auto-fill gross counts, net counts, and uncertainty.
@@ -607,19 +664,22 @@
 			<ol class="list-inside list-decimal">
 				<li>Version 5.0: Add the option for a standard library instead of just one standard.</li>
 			</ol>
+			<br /> -->
 			<br />
 			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
 			<ul class="list-inside list-disc">
 				<li>Exporting reports</li>
-				<li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li>
-				<li>Correct the matching to ensure it works with interference</li>
-				<li>Font size adjustment</li>
+				<!-- <li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li> -->
+				<li>Interference Adjustment</li>
+				<!-- <li>Font size adjustment</li> -->
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
 		{:else if stepType === StepType.ISOTOPE_COUNT}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<PageCounter pageType="isotopes" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
+			<br />
+			<PageCounter pageType="elements" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
+			<br />
 			<button type="button" onclick={next}> {nextButtonText} </button>
 		{:else if stepType === StepType.ISOTOPE_INFO}
 			<!--For each step, show this. All of this should be in step 2, but there should be an indication of which isotope is being filled out. Ensure that the forward and back buttons work correctly.-->
@@ -632,10 +692,15 @@
 			<br /><br />
 			<IsotopeInfo bind:this={isoRef[isoIndex]} bind:isotopeInfo={isotopeInfo[isoIndex]} />
 			<br />
-			<ComputedDisplay
-				title="Computed Isotope Information for Isotope {isoIndex + 1}"
-				data={isoComp[isoIndex]}
-			/>
+			<details>
+				<summary>Expand for debug information</summary>
+				<ComputedDisplay
+					title="Computed Isotope Information for Isotope {isoIndex + 1}"
+					data={isoComp[isoIndex]}
+				/>
+			</details>
+
+			<br />
 
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
@@ -670,10 +735,7 @@
 				bind:this={matRefs.reference[refIdx]}
 			/>
 
-			<ComputedDisplay
-				title="Reference Material Information"
-				data={matComp.reference[refIdx]}
-			/>
+			<ComputedDisplay title="Reference Material Information" data={matComp.reference[refIdx]} />
 			<ComputedDisplay
 				title="Reference and Isotope Information"
 				data={matIsoComp.map((item) => item.reference[refIdx])}
@@ -739,13 +801,11 @@
 				</thead>
 				<tbody>
 					<tr>
-						<td class="border border-gray-400 px-4 py-2 font-bold">
-							Units
-						</td>
+						<td class="border border-gray-400 px-4 py-2 font-bold"> Units </td>
 						{#each isotopeInfo as _, index}
 							<td class="border border-gray-400 px-4 py-2">
 								{(() => {
-										const referenceIndex = getLinkedReferenceIndex(index);
+									const referenceIndex = getLinkedReferenceIndex(index);
 									const unit =
 										materials.reference[referenceIndex]?.concentrationUnits?.[index] ??
 										materials.reference[0]?.concentrationUnits?.[index] ??
@@ -756,13 +816,27 @@
 						{/each}
 					</tr>
 					{#each materials.unknown as unk, uIndex}
+						{@const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`}
 						<tr>
 							<td class="border border-gray-400 px-4 py-2 font-bold">
-								{unk.NETL_code}
+								{unknownLabel}
 							</td>
 							{#each isotopeInfo as _, iIndex}
 								<td class="border border-gray-400 px-4 py-2">
-									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)} ± {truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute, 2)}
+									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)} ± {truncateToSigFigs(
+										everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute,
+										2
+									)}
+								</td>
+							{/each}
+						</tr>
+						<tr>
+							<td class="border border-gray-400 px-4 py-2 font-bold">
+								{unknownLabel} Conc Det Lim
+							</td>
+							{#each isotopeInfo as _, iIndex}
+								<td class="border border-gray-400 px-4 py-2">
+									{truncateToSigFigs(everythingComp[iIndex][uIndex].concentrationDetectionLimit, 3)}
 								</td>
 							{/each}
 						</tr>
@@ -770,7 +844,7 @@
 				</tbody>
 			</table>
 			<br />
-			<button type="button" class="btn variant-filled-primary" onclick={downloadTableAsCSV}>
+			<button type="button" class="variant-filled-primary btn" onclick={downloadTableAsCSV}>
 				Download Table as CSV
 			</button>
 			<br /><br />

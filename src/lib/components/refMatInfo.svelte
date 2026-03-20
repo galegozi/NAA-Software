@@ -10,6 +10,8 @@
 			sampleName: '',
 			mass: 0,
 			irradiationTime: 0,
+			irradiationEnd: '',
+			measurementStartTime: '',
 			decayTime: 0,
 			liveTime: 0,
 			realTime: 0,
@@ -17,7 +19,10 @@
 			counts: Array.from({ length: isotopeCount }, () => ({
 				grossCounts: 0,
 				netCounts: 0,
-				uncertainty: 0
+				uncertainty: 0,
+				grossCountsPositionalCorrectionFactor: 1,
+				netCountsPositionalCorrectionFactor: 1,
+				uncertaintyPositionalCorrectionFactor: 1
 			})),
 			dtType: undefined,
 

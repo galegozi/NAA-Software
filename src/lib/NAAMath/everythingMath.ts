@@ -6,6 +6,10 @@ import { getAll as matIsoGA } from './MaterialIsotopeMath.ts';
 import { getAll as MMGA } from './MultiMaterialMath.ts';
 import { getAll as matGA } from './MaterialMath.ts';
 
+function getFactor(value: number | undefined): number {
+	return typeof value === 'number' && Number.isFinite(value) ? value : 1;
+}
+
 function getNumberAtIndex(values: number[] | undefined, index: number): number {
 	const value = values?.[index];
 	return typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -121,6 +125,21 @@ function getNumUnknownConcUncertainty(
 	return (percUncertainty / 100) * unkConc;
 }
 
+function getConcentrationDetectionLimit(
+	refMaterial: ReferenceMaterial,
+	unkMaterial: UnknownMaterial,
+	isotope: IsotopeInfo,
+	isotopeIndex: number
+): number {
+	// predicted concentration * count detection limit (the detection limit already computed) / net counts
+	let predConc = getUnknownConcentration(refMaterial, unkMaterial, isotope, isotopeIndex);
+	let countDetLimit = matGA(unkMaterial).detectionLimit[isotopeIndex];
+	const countData = unkMaterial.counts[isotopeIndex];
+	let netCounts =
+		(countData?.netCounts ?? 0) * getFactor(countData?.netCountsPositionalCorrectionFactor);
+	return (predConc * countDetLimit) / netCounts;
+}
+
 export function getAll(
 	refMaterial: ReferenceMaterial,
 	unkMaterial: UnknownMaterial,
@@ -154,6 +173,12 @@ export function getAll(
 			isotopeIndex
 		),
 		unknownConcentrationUncertaintyAbsolute: getNumUnknownConcUncertainty(
+			refMaterial,
+			unkMaterial,
+			isotope,
+			isotopeIndex
+		),
+		concentrationDetectionLimit: getConcentrationDetectionLimit(
 			refMaterial,
 			unkMaterial,
 			isotope,

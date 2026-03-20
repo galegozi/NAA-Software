@@ -14,6 +14,7 @@ import type {
  * Result from isotope computations
  */
 export interface IsotopeComputed {
+	halfLifeSeconds: number;
 	decayConstant: number;
 }
 
@@ -58,6 +59,7 @@ export interface EverythingComputed {
 	unknownConcentration: number;
 	unknownConcentrationUncertainty: number;
 	unknownConcentrationUncertaintyAbsolute: number;
+	concentrationDetectionLimit: number;
 }
 
 /**
@@ -79,4 +81,5 @@ export interface MaestroParsedData {
 	roiData: MaestroRoiEntry[];
 	realTime: number;
 	liveTime: number;
+	startTime: Date | null;
 }

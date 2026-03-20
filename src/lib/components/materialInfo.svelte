@@ -11,6 +11,8 @@
 			sampleName: '',
 			mass: 0,
 			irradiationTime: 0,
+			irradiationEnd: '',
+			measurementStartTime: '',
 			decayTime: 0,
 			liveTime: 0,
 			realTime: 0,
@@ -18,9 +20,13 @@
 			counts: Array.from({ length: isotopeCount }, () => ({
 				grossCounts: 0,
 				netCounts: 0,
-				uncertainty: 0
+				uncertainty: 0,
+				grossCountsPositionalCorrectionFactor: 1,
+				netCountsPositionalCorrectionFactor: 1,
+				uncertaintyPositionalCorrectionFactor: 1
 			})),
-			dtType: undefined
+			dtType: undefined,
+
 		}),
 		getRoiIndex,
 		isotopeInfo = $bindable([]),
@@ -33,7 +39,17 @@
 		const currentCounts = materialInfo.counts ?? [];
 		if (currentCounts.length !== isotopeCount) {
 			const newCounts = Array.from({ length: isotopeCount }, (_, i) => {
-				return currentCounts[i] || { grossCounts: 0, netCounts: 0, uncertainty: 0 };
+				const existing = currentCounts[i];
+				return {
+					grossCounts: existing?.grossCounts ?? 0,
+					netCounts: existing?.netCounts ?? 0,
+					uncertainty: existing?.uncertainty ?? 0,
+					grossCountsPositionalCorrectionFactor:
+						existing?.grossCountsPositionalCorrectionFactor ?? 1,
+					netCountsPositionalCorrectionFactor: existing?.netCountsPositionalCorrectionFactor ?? 1,
+					uncertaintyPositionalCorrectionFactor:
+						existing?.uncertaintyPositionalCorrectionFactor ?? 1
+				};
 			});
 			materialInfo.counts = newCounts;
 		}
@@ -49,6 +65,89 @@
 		}
 	});
 
+	$effect(() => {
+		const measurementStartTime = normalizeDateTimeLocal(materialInfo.measurementStartTime);
+		const irradiationEnd = normalizeDateTimeLocal(materialInfo.irradiationEnd);
+
+		if (measurementStartTime !== materialInfo.measurementStartTime) {
+			materialInfo.measurementStartTime = measurementStartTime;
+		}
+
+		if (irradiationEnd !== materialInfo.irradiationEnd) {
+			materialInfo.irradiationEnd = irradiationEnd;
+		}
+
+		if (!measurementStartTime || !irradiationEnd) {
+			return;
+		}
+
+		const measurementStartDate = parseDateTimeInput(measurementStartTime);
+		const irradiationEndDate = parseDateTimeInput(irradiationEnd);
+
+		if (!measurementStartDate || !irradiationEndDate) {
+			return;
+		}
+
+		const computedDecayTime =
+			(measurementStartDate.getTime() - irradiationEndDate.getTime()) / 1000;
+		const inputDecayTime = Number(materialInfo.decayTime);
+
+		if (!Number.isFinite(computedDecayTime)) {
+			return;
+		}
+
+		if (computedDecayTime > 0) {
+			materialInfo.decayTime = computedDecayTime;
+			return;
+		}
+
+		if (!(Number.isFinite(inputDecayTime) && inputDecayTime > 0)) {
+			materialInfo.decayTime = computedDecayTime;
+		}
+	});
+
+	function parseDateTimeInput(value: string): Date | null {
+		const trimmed = value?.trim();
+		if (!trimmed) {
+			return null;
+		}
+
+		const localMatch = trimmed.match(
+			/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/
+		);
+
+		if (localMatch) {
+			const year = Number(localMatch[1]);
+			const month = Number(localMatch[2]);
+			const day = Number(localMatch[3]);
+			const hour = Number(localMatch[4]);
+			const minute = Number(localMatch[5]);
+			const second = Number(localMatch[6] ?? '0');
+			const parsed = new Date(year, month - 1, day, hour, minute, second, 0);
+			return isNaN(parsed.getTime()) ? null : parsed;
+		}
+
+		const parsed = new Date(trimmed);
+		return isNaN(parsed.getTime()) ? null : parsed;
+	}
+
+	function formatDateTimeLocal(date: Date): string {
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		const hours = String(date.getHours()).padStart(2, '0');
+		const minutes = String(date.getMinutes()).padStart(2, '0');
+		return `${year}-${month}-${day}T${hours}:${minutes}`;
+	}
+
+	function normalizeDateTimeLocal(value: string): string {
+		const parsed = parseDateTimeInput(value);
+		if (!parsed) {
+			return value?.trim?.() ?? '';
+		}
+		return formatDateTimeLocal(parsed);
+	}
+
 	function applyRoiSelection(isoIndex: number, roiIndex: number) {
 		if (!roiData || roiIndex < 0 || !roiData[roiIndex]) {
 			return;
@@ -59,7 +158,13 @@
 				? {
 						grossCounts: entry.grossCounts,
 						netCounts: entry.netCounts,
-						uncertainty: entry.uncertainty
+						uncertainty: entry.uncertainty,
+						grossCountsPositionalCorrectionFactor:
+							count?.grossCountsPositionalCorrectionFactor ?? 1,
+						netCountsPositionalCorrectionFactor:
+							count?.netCountsPositionalCorrectionFactor ?? 1,
+						uncertaintyPositionalCorrectionFactor:
+							count?.uncertaintyPositionalCorrectionFactor ?? 1
 					}
 				: count
 		);
@@ -76,7 +181,10 @@
 			return {
 				grossCounts: entry.grossCounts,
 				netCounts: entry.netCounts,
-				uncertainty: entry.uncertainty
+				uncertainty: entry.uncertainty,
+				grossCountsPositionalCorrectionFactor: count?.grossCountsPositionalCorrectionFactor ?? 1,
+				netCountsPositionalCorrectionFactor: count?.netCountsPositionalCorrectionFactor ?? 1,
+				uncertaintyPositionalCorrectionFactor: count?.uncertaintyPositionalCorrectionFactor ?? 1
 			};
 		});
 	}
@@ -203,6 +311,9 @@
 	function handleParsedMaestro(data: MaestroParsedData) {
 		materialInfo.liveTime = data.liveTime;
 		materialInfo.realTime = data.realTime;
+		materialInfo.measurementStartTime = data.startTime
+			? `${data.startTime.getFullYear()}-${String(data.startTime.getMonth() + 1).padStart(2, '0')}-${String(data.startTime.getDate()).padStart(2, '0')}T${String(data.startTime.getHours()).padStart(2, '0')}:${String(data.startTime.getMinutes()).padStart(2, '0')}`
+			: '';
 		roiData = data.roiData;
 
 		selected = new Set<string>();
@@ -211,7 +322,10 @@
 		materialInfo.counts = materialInfo.counts.map(() => ({
 			grossCounts: 0,
 			netCounts: 0,
-			uncertainty: 0
+			uncertainty: 0,
+			grossCountsPositionalCorrectionFactor: 1,
+			netCountsPositionalCorrectionFactor: 1,
+			uncertaintyPositionalCorrectionFactor: 1
 		}));
 
 		if (canEditToggles) {
@@ -347,6 +461,22 @@
 	{/if}
 </label>
 <label class="label">
+	<span>Irradiation End</span>
+	<input
+		class="input w-50"
+		type="datetime-local"
+		bind:value={materialInfo.irradiationEnd}
+	/>
+</label>
+<label class="label">
+	<span>Measurement Start Time</span>
+	<input
+		class="input w-50"
+		type="datetime-local"
+		bind:value={materialInfo.measurementStartTime}
+	/>
+</label>
+<label class="label">
 	<span>Decay Time (in seconds, s)</span>
 	<input
 		class="input w-50"
@@ -441,6 +571,39 @@
 				required
 			/>
 		</label>
+		<label class="label">
+			<span>Gross Counts Positional Correction Factor</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].grossCountsPositionalCorrectionFactor}
+				placeholder="e.g., 1"
+				step="any"
+				required
+			/>
+		</label>
+		<label class="label">
+			<span>Net Counts Positional Correction Factor</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].netCountsPositionalCorrectionFactor}
+				placeholder="e.g., 1"
+				step="any"
+				required
+			/>
+		</label>
+		<label class="label">
+			<span>Uncertainty Positional Correction Factor</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].uncertaintyPositionalCorrectionFactor}
+				placeholder="e.g., 1"
+				step="any"
+				required
+			/>
+		</label>
 	{/if}
 	<br />
 {/each}
@@ -453,9 +616,8 @@
 		bind:value={materialInfo.dtType}
 		required
 	>
-		<option value={undefined} disabled selected>Select correction type</option>
 		<option value="short">Short Lived Only</option>
-		<option value="simple">Simple: Only using the net counts, decay constant, and live time</option>
+		<option value="simple" selected>Simple: Only using the net counts, decay constant, and live time</option>
 		<option value="Deprecated" disabled>Deprecated Options</option>
 		<option value="mixed">Mixed (deprecated): Short Lived in presence of Long Lived</option>
 		<!--(net counts)/(1-e^(-decay constant * live time))-->

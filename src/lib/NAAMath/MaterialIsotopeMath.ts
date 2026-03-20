@@ -5,9 +5,14 @@ import type { MaterialIsotopeComputed } from './types.js';
 import { getAll as isoGA } from './isotopeMath.ts';
 import { getAll as matGA } from './MaterialMath.ts';
 
+function getFactor(value: number | undefined): number {
+	return typeof value === 'number' && Number.isFinite(value) ? value : 1;
+}
+
 function getNetCountsAtIndex(material: BaseMaterialInfo, isoIndex: number): number {
 	const countData = material.counts?.[isoIndex];
-	return countData?.netCounts ?? 0;
+	const netCounts = countData?.netCounts ?? 0;
+	return netCounts * getFactor(countData?.netCountsPositionalCorrectionFactor);
 }
 
 function getSaturationFactor(
