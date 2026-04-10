@@ -62,3 +62,19 @@ export interface Materials {
 export interface RoiData {
 	centroid: number;
 }
+
+export interface HalfLife {
+	number: number;
+	unit: "seconds" | "minutes" | "hours" | "days" | "weeks" | "years";
+}
+
+export interface IsotopeCatalogItem {
+	id: string;
+	elementName: string;
+	shortName: string;
+	massNumber: number;
+	suffix: string;
+	energies: number[];
+	halfLife: HalfLife;
+	halfLifeSeconds: number;
+}

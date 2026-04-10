@@ -1,0 +1,15 @@
+{
+	"name": "naa-software-api",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"main": "src/functions/*.js",
+	"scripts": {
+		"start": "func start",
+		"test": "node --test"
+	},
+	"dependencies": {
+		"@azure/cosmos": "^4.9.2",
+		"@azure/functions": "^4.7.3"
+		}
+}

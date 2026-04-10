@@ -1,5 +1,4 @@
 <script lang="ts">
-	import type { PageData } from './$types.js';
 	import IsotopeInfo from '$lib/components/isotopeInfo.svelte';
 	import MaterialInfo from '$lib/components/materialInfo.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
@@ -39,8 +38,6 @@
 		getProgressPercentage,
 		getReviewStep
 	} from '$lib/utils/stepUtils.js';
-
-	let { data }: { data: PageData } = $props();
 
 	// Using findRoiIndices from naaUtils
 
@@ -659,7 +656,7 @@
 			<PageCounter pageType="elements" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
 			<br />
 			<br />
-			<IsotopeViewer data={data} />
+			<IsotopeViewer />
 			<br />
 			<br />
 			<button type="button" onclick={prev}>{backButtonText}</button>

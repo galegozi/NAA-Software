@@ -43,3 +43,44 @@ npm run build
 You can preview the production build with `npm run preview`.
 
 > To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+
+## Azure Static Web Apps + Cosmos DB
+
+This project now includes an integrated Azure Functions backend under `api/` for use with Azure Static Web Apps.
+
+### What it exposes
+
+- `GET /api/isotopes`
+
+The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
+
+### Backend configuration
+
+Set these application settings in Azure Static Web Apps:
+
+- `COSMOSDB_ENDPOINT`
+- `COSMOSDB_KEY`
+- `COSMOSDB_DATABASE`
+- `COSMOSDB_CONTAINER`
+- `COSMOSDB_QUERY` (optional, defaults to `SELECT * FROM c`)
+
+The included sample file is `api/local.settings.sample.json`.
+
+### Local development
+
+Install the API dependencies:
+
+```sh
+cd api
+npm install
+```
+
+To run the integrated Static Web App locally, use the Azure Static Web Apps CLI or Azure Functions Core Tools with the Svelte app and the `api/` folder together.
+
+### Azure deployment settings
+
+Use these Azure Static Web Apps settings:
+
+- App location: `/`
+- API location: `api`
+- Output location: `build`
