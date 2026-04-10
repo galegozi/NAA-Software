@@ -54,6 +54,14 @@ This project now includes an integrated Azure Functions backend under `api/` for
 
 The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
 
+### API access control
+
+The integrated Azure Functions endpoint is protected at the Static Web Apps layer in `staticwebapp.config.json` and is limited to the `developer` role.
+
+For integrated Static Web Apps APIs, the function itself should remain `authLevel: 'anonymous'` because Static Web Apps performs the authorization before forwarding the request. Setting the function to `function` or `admin` is not the right model for SWA-integrated APIs.
+
+Important limitation: because this app is a static frontend, any browser user who is allowed to use the app can also call the same `/api/...` endpoint from the browser. If you need the Cosmos query to be inaccessible to end users entirely, that work must move to a server-rendered/backend-controlled path instead of a client-side fetch.
+
 ### Backend configuration
 
 Set these application settings in Azure Static Web Apps:

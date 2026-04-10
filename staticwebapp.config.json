@@ -1,4 +1,14 @@
 {
+	"routes": [
+		{
+			"route": "/api/isotopes",
+			"allowedRoles": ["developer"]
+		},
+		{
+			"route": "/api/*",
+			"allowedRoles": ["developer"]
+		}
+	],
 	"navigationFallback": {
 		"rewrite": "/index.html",
 		"exclude": ["/api/*", "/app/*", "/favicon.svg"]
