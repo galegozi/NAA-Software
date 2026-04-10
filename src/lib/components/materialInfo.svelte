@@ -1,5 +1,7 @@
 <script lang="ts">
-	import type { MaestroParsedData } from '$lib/NAAMath/types.js';
+	import IsotopeEnable from './isotopeEnable.svelte';
+
+	import type { MaestroParsedData, MaestroRoiEntry } from '$lib/NAAMath/types.js';
 	import MaestroUpload from './maestroUpload.svelte';
 
 	let {
@@ -9,6 +11,8 @@
 			sampleName: '',
 			mass: 0,
 			irradiationTime: 0,
+			irradiationEnd: '',
+			measurementStartTime: '',
 			decayTime: 0,
 			liveTime: 0,
 			realTime: 0,
@@ -16,32 +20,322 @@
 			counts: Array.from({ length: isotopeCount }, () => ({
 				grossCounts: 0,
 				netCounts: 0,
-				uncertainty: 0
+				uncertainty: 0,
+				grossCountsPositionalCorrectionFactor: 1,
+				netCountsPositionalCorrectionFactor: 1,
+				uncertaintyPositionalCorrectionFactor: 1
 			})),
-			dtType: undefined
+			dtType: undefined,
+
 		}),
-		getRoiIndex
+		getRoiIndex,
+		isotopeInfo = $bindable([]),
+		canEditToggles = $bindable(false),
+		disabledIsotopeLabels = new Set<string>(),
+		selected = $bindable(new Set<string>())
 	} = $props();
 
 	$effect(() => {
 		const currentCounts = materialInfo.counts ?? [];
 		if (currentCounts.length !== isotopeCount) {
 			const newCounts = Array.from({ length: isotopeCount }, (_, i) => {
-				return currentCounts[i] || { grossCounts: 0, netCounts: 0, uncertainty: 0 };
+				const existing = currentCounts[i];
+				return {
+					grossCounts: existing?.grossCounts ?? 0,
+					netCounts: existing?.netCounts ?? 0,
+					uncertainty: existing?.uncertainty ?? 0,
+					grossCountsPositionalCorrectionFactor:
+						existing?.grossCountsPositionalCorrectionFactor ?? 1,
+					netCountsPositionalCorrectionFactor: existing?.netCountsPositionalCorrectionFactor ?? 1,
+					uncertaintyPositionalCorrectionFactor:
+						existing?.uncertaintyPositionalCorrectionFactor ?? 1
+				};
 			});
 			materialInfo.counts = newCounts;
 		}
 	});
 
+	let roiData = $state<MaestroRoiEntry[] | null>(null);
+	let roiSelections = $state<number[]>([]);
+
+	$effect(() => {
+		const currentSelections = roiSelections ?? [];
+		if (currentSelections.length !== isotopeCount) {
+			roiSelections = Array.from({ length: isotopeCount }, (_, i) => currentSelections[i] ?? -1);
+		}
+	});
+
+	$effect(() => {
+		const measurementStartTime = normalizeDateTimeLocal(materialInfo.measurementStartTime);
+		const irradiationEnd = normalizeDateTimeLocal(materialInfo.irradiationEnd);
+
+		if (measurementStartTime !== materialInfo.measurementStartTime) {
+			materialInfo.measurementStartTime = measurementStartTime;
+		}
+
+		if (irradiationEnd !== materialInfo.irradiationEnd) {
+			materialInfo.irradiationEnd = irradiationEnd;
+		}
+
+		if (!measurementStartTime || !irradiationEnd) {
+			return;
+		}
+
+		const measurementStartDate = parseDateTimeInput(measurementStartTime);
+		const irradiationEndDate = parseDateTimeInput(irradiationEnd);
+
+		if (!measurementStartDate || !irradiationEndDate) {
+			return;
+		}
+
+		const computedDecayTime =
+			(measurementStartDate.getTime() - irradiationEndDate.getTime()) / 1000;
+		const inputDecayTime = Number(materialInfo.decayTime);
+
+		if (!Number.isFinite(computedDecayTime)) {
+			return;
+		}
+
+		if (computedDecayTime > 0) {
+			materialInfo.decayTime = computedDecayTime;
+			return;
+		}
+
+		if (!(Number.isFinite(inputDecayTime) && inputDecayTime > 0)) {
+			materialInfo.decayTime = computedDecayTime;
+		}
+	});
+
+	function parseDateTimeInput(value: string): Date | null {
+		const trimmed = value?.trim();
+		if (!trimmed) {
+			return null;
+		}
+
+		const localMatch = trimmed.match(
+			/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/
+		);
+
+		if (localMatch) {
+			const year = Number(localMatch[1]);
+			const month = Number(localMatch[2]);
+			const day = Number(localMatch[3]);
+			const hour = Number(localMatch[4]);
+			const minute = Number(localMatch[5]);
+			const second = Number(localMatch[6] ?? '0');
+			const parsed = new Date(year, month - 1, day, hour, minute, second, 0);
+			return isNaN(parsed.getTime()) ? null : parsed;
+		}
+
+		const parsed = new Date(trimmed);
+		return isNaN(parsed.getTime()) ? null : parsed;
+	}
+
+	function formatDateTimeLocal(date: Date): string {
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		const hours = String(date.getHours()).padStart(2, '0');
+		const minutes = String(date.getMinutes()).padStart(2, '0');
+		return `${year}-${month}-${day}T${hours}:${minutes}`;
+	}
+
+	function normalizeDateTimeLocal(value: string): string {
+		const parsed = parseDateTimeInput(value);
+		if (!parsed) {
+			return value?.trim?.() ?? '';
+		}
+		return formatDateTimeLocal(parsed);
+	}
+
+	function applyRoiSelection(isoIndex: number, roiIndex: number) {
+		if (!roiData || roiIndex < 0 || !roiData[roiIndex]) {
+			return;
+		}
+		const entry = roiData[roiIndex]!;
+		materialInfo.counts = materialInfo.counts.map((count: any, idx: number) =>
+			idx === isoIndex
+				? {
+						grossCounts: entry.grossCounts,
+						netCounts: entry.netCounts,
+						uncertainty: entry.uncertainty,
+						grossCountsPositionalCorrectionFactor:
+							count?.grossCountsPositionalCorrectionFactor ?? 1,
+						netCountsPositionalCorrectionFactor:
+							count?.netCountsPositionalCorrectionFactor ?? 1,
+						uncertaintyPositionalCorrectionFactor:
+							count?.uncertaintyPositionalCorrectionFactor ?? 1
+					}
+				: count
+		);
+	}
+
+	function applyAllRoiSelections(selections: number[]) {
+		if (!roiData) return;
+		materialInfo.counts = materialInfo.counts.map((count: any, idx: number) => {
+			const roiIndex = selections[idx];
+			if (roiIndex === undefined || roiIndex < 0 || !roiData![roiIndex]) {
+				return count;
+			}
+			const entry = roiData![roiIndex];
+			return {
+				grossCounts: entry.grossCounts,
+				netCounts: entry.netCounts,
+				uncertainty: entry.uncertainty,
+				grossCountsPositionalCorrectionFactor: count?.grossCountsPositionalCorrectionFactor ?? 1,
+				netCountsPositionalCorrectionFactor: count?.netCountsPositionalCorrectionFactor ?? 1,
+				uncertaintyPositionalCorrectionFactor: count?.uncertaintyPositionalCorrectionFactor ?? 1
+			};
+		});
+	}
+
+	function handleRoiSelectionChange(isoIndex: number, event: Event) {
+		const target = event.target as HTMLSelectElement;
+		const roiIndex = Number(target.value);
+		roiSelections = roiSelections.map((value, idx) => (idx === isoIndex ? roiIndex : value));
+		applyRoiSelection(isoIndex, roiIndex);
+	}
+
+	function getIsotopeLabel(index: number): string {
+		const elementName = isotopeInfo?.[index]?.elementName?.trim?.() ?? '';
+		return elementName || `Isotope ${index + 1}`;
+	}
+
+	function getIsotopeKey(index: number): string {
+		return `isotope:${index}`;
+	}
+
+	function getExplicitlySelectedIndices(): number[] {
+		if (!(selected instanceof Set) || selected.size === 0) {
+			return [];
+		}
+
+		const indices: number[] = [];
+		for (let i = 0; i < isotopeCount; i++) {
+			if (selected.has(getIsotopeKey(i))) {
+				indices.push(i);
+			}
+		}
+
+		return indices;
+	}
+
+	function isIsotopeDisabled(index: number): boolean {
+		return disabledIsotopeLabels.has(getIsotopeKey(index));
+	}
+
+	function isIsotopeSelected(index: number): boolean {
+		if (!(selected instanceof Set) || selected.size === 0) {
+			return true;
+		}
+
+		const explicitlySelectedIndices = getExplicitlySelectedIndices();
+		if (explicitlySelectedIndices.length === 0) {
+			return true;
+		}
+
+		return explicitlySelectedIndices.includes(index);
+	}
+
+	function shouldShowIsotope(index: number): boolean {
+		if (!canEditToggles) {
+			return true;
+		}
+		if (isIsotopeDisabled(index)) {
+			return false;
+		}
+		return isIsotopeSelected(index);
+	}
+
+	function getMatchingIsotopeIndices(): number[] {
+		if (selected instanceof Set && selected.size > 0) {
+			const indices = getExplicitlySelectedIndices().filter((index) => !isIsotopeDisabled(index));
+			if (indices.length > 0) {
+				return indices;
+			}
+		}
+
+		return Array.from({ length: isotopeCount }, (_, i) => i).filter((index) => !isIsotopeDisabled(index));
+	}
+
+	function getOneToOneRoiIndices(roiEntries: MaestroRoiEntry[]): number[] {
+		const selections = Array.from({ length: isotopeCount }, () => -1);
+		const isotopeIndices = getMatchingIsotopeIndices();
+
+		if (!roiEntries.length || !isotopeIndices.length) {
+			return selections;
+		}
+
+		const availableRoi = new Set<number>(roiEntries.map((_, i) => i));
+		const prioritizedIsotopes = isotopeIndices
+			.map((isoIndex) => {
+				const targetEnergy = Number(isotopeInfo?.[isoIndex]?.energy);
+				let bestDiff = Infinity;
+				if (Number.isFinite(targetEnergy)) {
+					for (let i = 0; i < roiEntries.length; i++) {
+						const diff = Math.abs(targetEnergy - roiEntries[i].centroid);
+						if (diff < bestDiff) {
+							bestDiff = diff;
+						}
+					}
+				}
+				return { isoIndex, bestDiff, targetEnergy };
+			})
+			.sort((a, b) => a.bestDiff - b.bestDiff);
+
+		for (const { isoIndex, targetEnergy } of prioritizedIsotopes) {
+			if (!Number.isFinite(targetEnergy) || availableRoi.size === 0) {
+				continue;
+			}
+
+			let bestRoiIndex = -1;
+			let bestDiff = Infinity;
+
+			for (const roiIndex of availableRoi) {
+				const diff = Math.abs(targetEnergy - roiEntries[roiIndex].centroid);
+				if (diff < bestDiff) {
+					bestDiff = diff;
+					bestRoiIndex = roiIndex;
+				}
+			}
+
+			if (bestRoiIndex >= 0) {
+				selections[isoIndex] = bestRoiIndex;
+				availableRoi.delete(bestRoiIndex);
+			}
+		}
+
+		return selections;
+	}
+
 	function handleParsedMaestro(data: MaestroParsedData) {
-		materialInfo.liveTime = materialInfo.liveTime || data.liveTime;
-		materialInfo.realTime = materialInfo.realTime || data.realTime;
-		const roiIndex = getRoiIndex(data.roiData);
-		materialInfo.counts = roiIndex.map((index: number) => ({
-			grossCounts: data.roiData[index].grossCounts,
-			netCounts: data.roiData[index].netCounts,
-			uncertainty: data.roiData[index].uncertainty
+		materialInfo.liveTime = data.liveTime;
+		materialInfo.realTime = data.realTime;
+		materialInfo.measurementStartTime = data.startTime
+			? `${data.startTime.getFullYear()}-${String(data.startTime.getMonth() + 1).padStart(2, '0')}-${String(data.startTime.getDate()).padStart(2, '0')}T${String(data.startTime.getHours()).padStart(2, '0')}:${String(data.startTime.getMinutes()).padStart(2, '0')}`
+			: '';
+		roiData = data.roiData;
+
+		selected = new Set<string>();
+		roiSelections = getOneToOneRoiIndices(data.roiData);
+
+		materialInfo.counts = materialInfo.counts.map(() => ({
+			grossCounts: 0,
+			netCounts: 0,
+			uncertainty: 0,
+			grossCountsPositionalCorrectionFactor: 1,
+			netCountsPositionalCorrectionFactor: 1,
+			uncertaintyPositionalCorrectionFactor: 1
 		}));
+
+		if (canEditToggles) {
+			const matchedLabels = roiSelections
+				.map((roiIndex, isoIndex) => (roiIndex >= 0 ? getIsotopeKey(isoIndex) : null))
+				.filter((label): label is string => Boolean(label));
+			selected = new Set(matchedLabels);
+		}
+
+		applyAllRoiSelections(roiSelections);
 	}
 
 	export function validateMaterialInfo(): boolean {
@@ -97,6 +391,17 @@
 		showErrors = false;
 	}
 </script>
+
+{#if canEditToggles}
+	<IsotopeEnable
+		isotopeOptions={Array.from({ length: isotopeCount }, (_, i) => ({
+			value: getIsotopeKey(i),
+			label: getIsotopeLabel(i)
+		}))}
+		disabledIsotopes={disabledIsotopeLabels}
+		bind:selected={selected}
+	/>
+{/if}
 
 <MaestroUpload onParsed={handleParsedMaestro} />
 <br />
@@ -156,6 +461,22 @@
 	{/if}
 </label>
 <label class="label">
+	<span>Irradiation End</span>
+	<input
+		class="input w-50"
+		type="datetime-local"
+		bind:value={materialInfo.irradiationEnd}
+	/>
+</label>
+<label class="label">
+	<span>Measurement Start Time</span>
+	<input
+		class="input w-50"
+		type="datetime-local"
+		bind:value={materialInfo.measurementStartTime}
+	/>
+</label>
+<label class="label">
 	<span>Decay Time (in seconds, s)</span>
 	<input
 		class="input w-50"
@@ -213,43 +534,81 @@
 </label>
 <br />
 {#each { length: isotopeCount } as _, index}
-	<h3 class="text-xl font-bold">Isotope {index + 1} Counts</h3>
-	<label class="label">
-		<span>Gross Counts</span>
-		<input
-			class="input w-50"
-			type="number"
-			bind:value={materialInfo.counts[index].grossCounts}
-			placeholder="e.g., 5000"
-			min="0"
-			required
-		/>
-	</label>
-	<label class="label">
-		<span>Net Counts</span>
-		<input
-			class="input w-50"
-			type="number"
-			bind:value={materialInfo.counts[index].netCounts}
-			placeholder="e.g., 4500"
-			min="0"
-			required
-		/>
-	</label>
-	<label class="label">
-		<span>Uncertainty (in counts)</span>
-		<input
-			class="input w-50"
-			type="number"
-			bind:value={materialInfo.counts[index].uncertainty}
-			placeholder="e.g., 67.08"
-			min="0"
-			required
-		/>
-	</label>
+	{#if shouldShowIsotope(index)}
+		<h3 class="text-xl font-bold">
+			{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Counts
+		</h3>
+		<label class="label">
+			<span>Gross Counts</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].grossCounts}
+				placeholder="e.g., 5000"
+				min="0"
+				required
+			/>
+		</label>
+		<label class="label">
+			<span>Net Counts</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].netCounts}
+				placeholder="e.g., 4500"
+				min="0"
+				required
+			/>
+		</label>
+		<label class="label">
+			<span>Uncertainty (in counts)</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].uncertainty}
+				placeholder="e.g., 67.08"
+				min="0"
+				required
+			/>
+		</label>
+		<label class="label">
+			<span>Gross Counts Positional Correction Factor</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].grossCountsPositionalCorrectionFactor}
+				placeholder="e.g., 1"
+				step="any"
+				required
+			/>
+		</label>
+		<label class="label">
+			<span>Net Counts Positional Correction Factor</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].netCountsPositionalCorrectionFactor}
+				placeholder="e.g., 1"
+				step="any"
+				required
+			/>
+		</label>
+		<label class="label">
+			<span>Uncertainty Positional Correction Factor</span>
+			<input
+				class="input w-50"
+				type="number"
+				bind:value={materialInfo.counts[index].uncertaintyPositionalCorrectionFactor}
+				placeholder="e.g., 1"
+				step="any"
+				required
+			/>
+		</label>
+	{/if}
 	<br />
 {/each}
 <br />
+
 <label class="label">
 	<span>Dead Time Correction Type</span>
 	<select
@@ -257,9 +616,8 @@
 		bind:value={materialInfo.dtType}
 		required
 	>
-		<option value={undefined} disabled selected>Select correction type</option>
 		<option value="short">Short Lived Only</option>
-		<option value="simple">Simple: Only using the net counts, decay constant, and live time</option>
+		<option value="simple" selected>Simple: Only using the net counts, decay constant, and live time</option>
 		<option value="Deprecated" disabled>Deprecated Options</option>
 		<option value="mixed">Mixed (deprecated): Short Lived in presence of Long Lived</option>
 		<!--(net counts)/(1-e^(-decay constant * live time))-->

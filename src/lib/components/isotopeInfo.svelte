@@ -6,7 +6,9 @@
 			elementName: '',
 			isotopeName: '',
 			energy: 0,
-			halfLife: 0
+			halfLife: 0,
+			linkedReference: 0,
+			unit: 'seconds'
 		})
 	} = $props();
 
@@ -80,7 +82,7 @@
 	{/if}
 </label>
 <label class="label">
-	<span>Half Life (in seconds, s)</span>
+	<span>Half Life</span>
 	<input
 		class="input w-50"
 		type="number"
@@ -92,6 +94,21 @@
 	{#if showErrors && isotopeInfo.halfLife <= 0}
 		<span class="field-error">Half-life must be greater than 0</span>
 	{/if}
+</label>
+<label>
+	<span>Half Life Unit</span>
+	<select
+		class="select input w-50 bg-surface-50-950 text-surface-950-50"
+		bind:value={isotopeInfo.unit}
+		required
+	>
+		<option value="seconds" selected>Seconds</option>
+		<option value="minutes">Minutes</option>
+		<option value="hours">Hours</option>
+		<option value="days">Days</option>
+		<option value="weeks">Weeks</option>
+		<option value="years">Years</option>
+	</select>
 </label>
 
 <style>

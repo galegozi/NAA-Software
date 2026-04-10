@@ -12,7 +12,11 @@
 	import { getAll as MMGA } from '../lib/NAAMath/MultiMaterialMath.ts';
 	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
 
-	import type { IsotopeInfo as IsotopeInfoType, ReferenceMaterial } from '$lib/types.js';
+	import type {
+		IsotopeInfo as IsotopeInfoType,
+		ReferenceMaterial,
+		UnknownMaterial
+	} from '$lib/types.js';
 	import {
 		createIsotopeInfo,
 		createReferenceMaterial,
@@ -23,7 +27,8 @@
 	import {
 		APP_VERSION,
 		getIsotopeIndex,
-		getUnknownIndex,
+		getUnknownCountStep,
+		getUnknownInfoStartStep,
 		getNextButtonText,
 		getBackButtonText,
 		getStepTitle,
@@ -35,97 +40,189 @@
 
 	// Using findRoiIndices from naaUtils
 
+	function resizeReferenceMaterial(
+		reference: ReferenceMaterial,
+		newIsotopeCount: number
+	): ReferenceMaterial {
+		const baseReference = createReferenceMaterial(newIsotopeCount);
+		const updatedReference: ReferenceMaterial = {
+			...baseReference,
+			...reference
+		};
+
+		const existingRefCounts = reference.counts || [];
+		updatedReference.counts = Array.from({ length: newIsotopeCount }, (_, i) =>
+			i < existingRefCounts.length
+				? existingRefCounts[i]
+				: {
+						grossCounts: 0,
+						netCounts: 0,
+						uncertainty: 0,
+						grossCountsPositionalCorrectionFactor: 1,
+						netCountsPositionalCorrectionFactor: 1,
+						uncertaintyPositionalCorrectionFactor: 1
+					}
+		);
+
+		const existingKnownConcentration = Array.isArray(reference.knownConcentration)
+			? reference.knownConcentration
+			: [];
+		const existingKnownUncertainty = Array.isArray(reference.knownUncertainty)
+			? reference.knownUncertainty
+			: [];
+		const existingUnits = Array.isArray(reference.concentrationUnits)
+			? reference.concentrationUnits
+			: [];
+
+		updatedReference.knownConcentration = Array.from({ length: newIsotopeCount }, (_, i) =>
+			existingKnownConcentration[i] !== undefined
+				? existingKnownConcentration[i]
+				: baseReference.knownConcentration[i]
+		);
+
+		updatedReference.knownUncertainty = Array.from({ length: newIsotopeCount }, (_, i) =>
+			existingKnownUncertainty[i] !== undefined
+				? existingKnownUncertainty[i]
+				: baseReference.knownUncertainty[i]
+		);
+
+		updatedReference.concentrationUnits = Array.from({ length: newIsotopeCount }, (_, i) =>
+			existingUnits[i] !== undefined ? existingUnits[i] : baseReference.concentrationUnits[i]
+		);
+
+		return updatedReference;
+	}
+
+	function resizeUnknownMaterial(
+		unknown: UnknownMaterial,
+		newIsotopeCount: number
+	): UnknownMaterial {
+		const existingCounts = unknown.counts || [];
+		return {
+			...unknown,
+			counts: Array.from({ length: newIsotopeCount }, (_, i) =>
+				i < existingCounts.length
+					? existingCounts[i]
+					: {
+							grossCounts: 0,
+							netCounts: 0,
+							uncertainty: 0,
+							grossCountsPositionalCorrectionFactor: 1,
+							netCountsPositionalCorrectionFactor: 1,
+							uncertaintyPositionalCorrectionFactor: 1
+						}
+			)
+		};
+	}
+
+	function updateIsotopeReferenceMap(newIsotopeCount: number, newReferenceCount: number) {
+		const nextMap = Array.from({ length: newIsotopeCount }, (_, i) => {
+			const linkedReference = isotopeInfo[i]?.linkedReference;
+			if (
+				linkedReference !== undefined &&
+				linkedReference >= 0 &&
+				linkedReference < newReferenceCount
+			) {
+				return linkedReference;
+			}
+
+			const autoIndex = materials.reference.findIndex(
+				(ref) => (ref.knownConcentration?.[i] ?? 0) > 0
+			);
+			return autoIndex >= 0 ? autoIndex : 0;
+		});
+
+		isotopeReferenceMap = nextMap;
+
+		const needsIsotopeSync = nextMap.some(
+			(linkedReference, index) => isotopeInfo[index]?.linkedReference !== linkedReference
+		);
+		if (needsIsotopeSync) {
+			isotopeInfo = isotopeInfo.map((iso, index) => ({
+				...iso,
+				linkedReference: nextMap[index] ?? 0
+			}));
+		}
+	}
+
 	function updateIsotopeData(newCount: number) {
-		const previousCount = isotopeCount;
 		isotopeCount = newCount;
-		
+
 		// Preserve existing isotope data, only add/remove as needed
 		const existingIsotopeInfo = [...isotopeInfo];
-		isotopeInfo = Array.from({ length: isotopeCount }, (_, i) => 
-			i < existingIsotopeInfo.length ? existingIsotopeInfo[i] : createIsotopeInfo()
-		);
-		
+		isotopeInfo = Array.from({ length: isotopeCount }, (_, i) => {
+			if (i < existingIsotopeInfo.length) {
+				const existingIso = existingIsotopeInfo[i];
+				return {
+					...existingIso,
+					linkedReference: existingIso.linkedReference ?? 0
+				};
+			}
+			return createIsotopeInfo();
+		});
+
 		// Preserve component references for existing isotopes
 		const existingIsoRef = [...isoRef];
-		isoRef = Array.from({ length: isotopeCount }, (_, i) => 
+		isoRef = Array.from({ length: isotopeCount }, (_, i) =>
 			i < existingIsoRef.length ? existingIsoRef[i] : undefined
 		);
 
-		// Update reference material counts, preserving existing knownConcentration and knownUncertainty
-		const currentReference = materials.reference;
-		const newReferenceBase = createReferenceMaterial(isotopeCount);
-
-		// Preserve scalar / non-array properties from the current reference material
-		const updatedReference: ReferenceMaterial = {
-			...newReferenceBase,
-			...currentReference
-		};
-
-		// Preserve and resize the counts array for reference material
-		const existingRefCounts = currentReference.counts || [];
-		updatedReference.counts = Array.from({ length: isotopeCount }, (_, i) =>
-			i < existingRefCounts.length 
-				? existingRefCounts[i] 
-				: { grossCounts: 0, netCounts: 0, uncertainty: 0 }
-		);
-
-		// Carefully merge knownConcentration and knownUncertainty arrays so existing values are preserved
-		const existingKnownConcentration =
-			currentReference && Array.isArray(currentReference.knownConcentration)
-				? currentReference.knownConcentration
-				: [];
-		const existingKnownUncertainty =
-			currentReference && Array.isArray(currentReference.knownUncertainty)
-				? currentReference.knownUncertainty
-				: [];
-
-		updatedReference.knownConcentration = Array.from({ length: isotopeCount }, (_, i) =>
-			existingKnownConcentration[i] !== undefined
-				? existingKnownConcentration[i]
-				: newReferenceBase.knownConcentration[i]
-		);
-
-		updatedReference.knownUncertainty = Array.from({ length: isotopeCount }, (_, i) =>
-			existingKnownUncertainty[i] !== undefined
-				? existingKnownUncertainty[i]
-				: newReferenceBase.knownUncertainty[i]
-		);
-
-		materials.reference = updatedReference;
-		
-		// Update unknown materials counts, preserving existing count data
-		materials.unknown = materials.unknown.map((unk) => {
-			const existingCounts = unk.counts || [];
-			return {
-				...unk,
-				counts: Array.from({ length: isotopeCount }, (_, i) =>
-					i < existingCounts.length 
-						? existingCounts[i] 
-						: { grossCounts: 0, netCounts: 0, uncertainty: 0 }
-				)
-			};
+		// Update reference materials, preserving existing values
+		const existingReferences = [...materials.reference];
+		materials.reference = Array.from({ length: referenceCount }, (_, i) => {
+			const currentReference = existingReferences[i] || createReferenceMaterial(isotopeCount);
+			return resizeReferenceMaterial(currentReference, isotopeCount);
 		});
+
+		// Update unknown materials counts, preserving existing count data
+		materials.unknown = materials.unknown.map((unk) => resizeUnknownMaterial(unk, isotopeCount));
+
+		updateIsotopeReferenceMap(isotopeCount, referenceCount);
+	}
+
+	function updateReferenceData(newCount: number) {
+		referenceCount = newCount;
+
+		// Preserve existing references, only add/remove as needed
+		const existingReferences = [...materials.reference];
+		const existingRefs = [...matRefs.reference];
+		materials.reference = Array.from({ length: referenceCount }, (_, i) =>
+			i < existingReferences.length
+				? resizeReferenceMaterial(existingReferences[i], isotopeCount)
+				: createReferenceMaterial(isotopeCount)
+		);
+
+		matRefs.reference = Array.from({ length: referenceCount }, (_, i) =>
+			i < existingRefs.length ? existingRefs[i] : undefined
+		);
+
+		const existingSelections = [...referenceIsotopeSelections];
+		referenceIsotopeSelections = Array.from({ length: referenceCount }, (_, i) =>
+			i < existingSelections.length ? existingSelections[i] : new Set<string>()
+		);
+
+		updateIsotopeReferenceMap(isotopeCount, referenceCount);
 	}
 
 	function updateUnknownData(newCount: number) {
 		unknownCount = newCount;
-		
+
 		// Preserve existing unknown materials, only add/remove as needed
 		const existingUnknowns = [...materials.unknown];
 		const existingRefs = [...matRefs.unknown];
-		
+
 		materials.unknown = Array.from({ length: unknownCount }, (_, i) =>
-			i < existingUnknowns.length 
-				? existingUnknowns[i] 
-				: createUnknownMaterial(isotopeCount)
+			i < existingUnknowns.length ? existingUnknowns[i] : createUnknownMaterial(isotopeCount)
 		);
-		
+
 		matRefs.unknown = Array.from({ length: unknownCount }, (_, i) =>
 			i < existingRefs.length ? existingRefs[i] : undefined
 		);
 	}
 
 	let step = $state(0);
+
+	let title = $state('NAA Analysis');
 
 	// isotope information
 	let isoIndex = $derived(getIsotopeIndex(step));
@@ -137,45 +234,118 @@
 	// computed isotope information
 	let isoComp = $derived(isotopeInfo.map(isoGA));
 
-	//step 1 : number of isotopes
-	//step 2 to 1 + isotopeCount  : isotope information
-	//step 2 + isotopeCount : reference material information
-	//step 3 + isotope count: how many unknowns
-	//step 4 + isotope count to 3 + isotope count + unknownCount : unknown material information
-	//step 4 + isotope count + unknownCount : review
-	let unknownIdx = $derived(getUnknownIndex(step, isotopeCount));
+	// step 1: number of isotopes
+	// step 2 to 1 + isotopeCount: isotope information
+	// step 2 + isotopeCount: number of references
+	// step 3 + isotopeCount to 2 + isotopeCount + referenceCount: reference information
+	// step 3 + isotopeCount + referenceCount: number of unknowns
+	// step 4 + isotopeCount + referenceCount to 3 + isotopeCount + referenceCount + unknownCount:
+	// unknown material information
+	// step 4 + isotopeCount + referenceCount + unknownCount: review
+	let referenceCount = $state(1);
+	let refIdx = $derived(
+		step >= isotopeCount + 3 && step < getUnknownCountStep(isotopeCount, referenceCount)
+			? step - (isotopeCount + 3)
+			: -1
+	);
+	let unknownIdx = $derived(
+		step >= getUnknownInfoStartStep(isotopeCount, referenceCount)
+			? step - getUnknownInfoStartStep(isotopeCount, referenceCount)
+			: -1
+	);
 	let unknownCount = $state(1);
 	let matRefs = $state({
-		reference: undefined as RefMatInfo | undefined,
+		reference: [undefined] as (RefMatInfo | undefined)[],
 		unknown: [undefined] as (MaterialInfo | undefined)[]
 	});
+	let referenceIsotopeSelections = $state<Set<string>[]>([new Set<string>()]);
 	let materials = $state({
-		reference: createReferenceMaterial(1),
+		reference: [createReferenceMaterial(1)],
 		unknown: [createUnknownMaterial(1)]
 	});
+	let isotopeReferenceMap = $state<number[]>([0]);
 	let matComp = $derived({
-		reference: matGA(materials.reference),
+		reference: materials.reference.map((ref) => matGA(ref)),
 		unknown: materials.unknown.map((unk) => matGA(unk))
 	});
 	let matIsoComp = $derived(
 		isotopeInfo.map((iso, index) => ({
-			reference: matIsoGA(materials.reference, iso, index),
+			reference: materials.reference.map((ref) => matIsoGA(ref, iso, index)),
 			unknown: materials.unknown.map((unk) => matIsoGA(unk, iso, index))
 		}))
 	);
-	let multiMatComp = $derived(materials.unknown.map((unk) => MMGA(materials.reference, unk)));
-	let everythingComp = $derived(
-		isotopeInfo.map((iso, index) =>
-			materials.unknown.map((unk) => EGA(materials.reference, unk, iso, index))
-		)
+	let multiMatComp = $derived(
+		materials.reference.map((ref) => materials.unknown.map((unk) => MMGA(ref, unk)))
 	);
 
-	let nextButtonText = $derived(getNextButtonText(step, isotopeCount, unknownCount));
-	let backButtonText = $derived(getBackButtonText(step, isotopeCount, unknownCount));
-	let stepTitle = $derived(getStepTitle(step, isotopeCount, unknownCount));
-	let stepType = $derived(getStepType(step, isotopeCount, unknownCount));
-	let progressPercentage = $derived(getProgressPercentage(step, isotopeCount, unknownCount));
-	let totalSteps = $derived(getReviewStep(isotopeCount, unknownCount));
+	function getIsotopeSelectionKey(index: number): string {
+		return `isotope:${index}`;
+	}
+
+	function getLinkedReferenceIndex(index: number): number {
+		const linkedReference = isotopeInfo[index]?.linkedReference;
+		if (linkedReference !== undefined && linkedReference >= 0 && linkedReference < referenceCount) {
+			return linkedReference;
+		}
+		return 0;
+	}
+
+	$effect(() => {
+		const currentMap = isotopeReferenceMap ?? [];
+		const nextMap = Array.from({ length: isotopeCount }, (_, index) => {
+			const selectionKey = getIsotopeSelectionKey(index);
+
+			const selectedRefIndex = referenceIsotopeSelections.findIndex(
+				(selection) => selection instanceof Set && selection.has(selectionKey)
+			);
+
+			if (selectedRefIndex >= 0 && selectedRefIndex < referenceCount) {
+				return selectedRefIndex;
+			}
+
+			const fallback = isotopeInfo[index]?.linkedReference ?? 0;
+			return fallback >= 0 && fallback < referenceCount ? fallback : 0;
+		});
+
+		const changed =
+			nextMap.length !== currentMap.length ||
+			nextMap.some((value, index) => value !== currentMap[index]);
+
+		if (changed) {
+			isotopeReferenceMap = nextMap;
+		}
+
+		const needsIsotopeSync = nextMap.some(
+			(linkedReference, index) => isotopeInfo[index]?.linkedReference !== linkedReference
+		);
+		if (needsIsotopeSync) {
+			isotopeInfo = isotopeInfo.map((iso, index) => ({
+				...iso,
+				linkedReference: nextMap[index] ?? 0
+			}));
+		}
+	});
+
+	let everythingComp = $derived(
+		isotopeInfo.map((iso, index) => {
+			const referenceIndex = getLinkedReferenceIndex(index);
+			const reference = materials.reference[referenceIndex] ?? materials.reference[0];
+			return materials.unknown.map((unk) => EGA(reference, unk, iso, index));
+		})
+	);
+
+	let nextButtonText = $derived(
+		getNextButtonText(step, isotopeCount, referenceCount, unknownCount)
+	);
+	let backButtonText = $derived(
+		getBackButtonText(step, isotopeCount, referenceCount, unknownCount)
+	);
+	let stepTitle = $derived(getStepTitle(step, isotopeCount, referenceCount, unknownCount));
+	let stepType = $derived(getStepType(step, isotopeCount, referenceCount, unknownCount));
+	let progressPercentage = $derived(
+		getProgressPercentage(step, isotopeCount, referenceCount, unknownCount)
+	);
+	let totalSteps = $derived(getReviewStep(isotopeCount, referenceCount, unknownCount));
 	let showProgress = $derived(step > 0);
 
 	// Memoized function to prevent recreation on every render
@@ -185,6 +355,21 @@
 
 	// Validation state
 	let validationErrors: string[] = $state([]);
+
+	function getUsedIsotopeLabels(referenceIndex: number): Set<string> {
+		const used = new Set<string>();
+		for (let i = 0; i < referenceIsotopeSelections.length; i++) {
+			if (i === referenceIndex) {
+				continue;
+			}
+			const selection = referenceIsotopeSelections[i];
+			if (!selection) continue;
+			for (const label of selection) {
+				used.add(label);
+			}
+		}
+		return used;
+	}
 
 	function validateCurrentStep(): boolean {
 		validationErrors = [];
@@ -214,15 +399,26 @@
 			}
 		}
 
-		// Validate reference material step
-		if (step === 2 + isotopeCount) {
-			if (matRefs.reference && typeof matRefs.reference.validateRefMatInfo === 'function') {
-				const isValid = matRefs.reference.validateRefMatInfo();
+		// Validate reference count step
+		if (step === isotopeCount + 2) {
+			if (!Number.isInteger(referenceCount) || referenceCount < 1) {
+				validationErrors = [
+					'Please enter a positive integer for the number of reference materials'
+				];
+				return false;
+			}
+		}
+
+		// Validate reference material steps
+		if (refIdx >= 0 && refIdx < referenceCount) {
+			const currentRef = matRefs.reference[refIdx];
+			if (currentRef && typeof currentRef.validateRefMatInfo === 'function') {
+				const isValid = currentRef.validateRefMatInfo();
 				if (!isValid) {
-					if (typeof matRefs.reference.showValidationErrors === 'function') {
-						matRefs.reference.showValidationErrors();
+					if (typeof currentRef.showValidationErrors === 'function') {
+						currentRef.showValidationErrors();
 					}
-					const errors = matRefs.reference.getValidationErrors?.() || [
+					const errors = currentRef.getValidationErrors?.() || [
 						'Please fill in all required fields'
 					];
 					validationErrors = errors;
@@ -231,8 +427,8 @@
 			}
 		}
 
-		// Validate unknown count step (step 3 + isotopeCount)
-		if (step === 3 + isotopeCount) {
+		// Validate unknown count step
+		if (step === getUnknownCountStep(isotopeCount, referenceCount)) {
 			if (!Number.isInteger(unknownCount) || unknownCount < 1) {
 				validationErrors = ['Please enter a positive integer for the number of unknown materials'];
 				return false;
@@ -240,7 +436,7 @@
 		}
 
 		// Validate unknown material steps
-		if (unknownIdx >= 0 && unknownIdx < unknownCount) {
+		if (stepType === StepType.UNKNOWN_INFO && unknownIdx >= 0 && unknownIdx < unknownCount) {
 			if (
 				matRefs.unknown[unknownIdx] &&
 				typeof matRefs.unknown[unknownIdx]?.validateMaterialInfo === 'function'
@@ -262,6 +458,12 @@
 		return true;
 	}
 
+	function getReferenceLabel(index: number): string {
+		const ref = materials.reference[index];
+		const labelBase = ref?.NETL_code || ref?.sampleName;
+		return labelBase ? `${labelBase}` : `Reference ${index + 1}`;
+	}
+
 	const next = () => {
 		// Prevent navigating beyond the final review step
 		if (step >= totalSteps) return;
@@ -278,10 +480,11 @@
 			}
 		}
 
-		step++;
+		step = Math.min(step + 1, totalSteps);
 	};
 	const prev = () => {
-		if (step > 0) step--;
+		if (step <= 0) return;
+		step = Math.max(step - 1, 0);
 	};
 
 	function downloadTableAsCSV() {
@@ -300,23 +503,53 @@
 		};
 
 		// Create CSV header row with concentration and uncertainty columns
-		const headers = ['', ...isotopeInfo.flatMap(iso => [escapeCSV(iso.isotopeName), escapeCSV(`${iso.isotopeName} Uncertainty`)])];
+		const headers = [
+			'',
+			...isotopeInfo.flatMap((iso) => [
+				escapeCSV(iso.isotopeName),
+				escapeCSV(`${iso.isotopeName} Uncertainty`)
+			])
+		];
 		const csvRows = [headers.join(',')];
 
 		// Add units row
-		const unitsRow = ['Units', ...isotopeInfo.flatMap((_, index) => [escapeCSV(materials.reference.concentrationUnits[index] || ''), escapeCSV(materials.reference.concentrationUnits[index] || '')])];
+		const unitsRow = [
+			'Units',
+			...isotopeInfo.flatMap((_, index) => {
+				const referenceIndex = getLinkedReferenceIndex(index);
+				const reference = materials.reference[referenceIndex] ?? materials.reference[0];
+				return [escapeCSV(reference?.concentrationUnits[index] || ''), '%'];
+			})
+		];
 		csvRows.push(unitsRow.join(','));
 
 		// Add data rows for each unknown material
 		materials.unknown.forEach((unk, uIndex) => {
+			const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`;
 			const row = [
-				escapeCSV(unk.NETL_code || `Unknown ${uIndex + 1}`),
+				escapeCSV(unknownLabel),
 				...isotopeInfo.flatMap((_, iIndex) => [
 					escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)),
-					escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute, 2))
+					escapeCSV(
+						truncateToSigFigs(
+							everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute,
+							2
+						)
+					)
 				])
 			];
 			csvRows.push(row.join(','));
+
+			const detectionLimitRow = [
+				escapeCSV(`${unknownLabel} Conc Det Lim`),
+				...isotopeInfo.flatMap((_, iIndex) => [
+					escapeCSV(
+						truncateToSigFigs(everythingComp[iIndex][uIndex].concentrationDetectionLimit, 3)
+					),
+					escapeCSV('')
+				])
+			];
+			csvRows.push(detectionLimitRow.join(','));
 		});
 
 		// Create CSV string
@@ -326,11 +559,11 @@
 		const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
 		const link = document.createElement('a');
 		const url = URL.createObjectURL(blob);
-		
+
 		link.setAttribute('href', url);
-		link.setAttribute('download', 'naa_concentrations.csv');
+		link.setAttribute('download', `${title}.csv`);
 		link.style.visibility = 'hidden';
-		
+
 		document.body.appendChild(link);
 		link.click();
 		document.body.removeChild(link);
@@ -353,14 +586,17 @@
 </script>
 
 <svelte:head>
-	<title>NAA Analysis</title>
+	<title>{title}</title>
 </svelte:head>
 
 <svelte:window onkeydown={handleKeyPress} />
 
 <div style="padding: 5%">
-	<h1 class="text-3xl font-bold">NAA Analysis - Version {APP_VERSION}</h1>
+	<h1 class="text-3xl font-bold">NAA Analysis Software - Version {APP_VERSION}</h1>
 	<br />
+	<h2 class="text-2xl font-bold">Current Experiment: {title}</h2>
+	<br />
+
 
 	{#if showProgress}
 		<ProgressIndicator currentStep={step} {totalSteps} percentage={progressPercentage} />
@@ -372,8 +608,36 @@
 			handleSubmit();
 		}}
 	>
-		{#if step === 0}
+		{#if stepType === StepType.WELCOME}
+			<p>Welcome to the NAA Analysis software!</p>
+			<br />
+			<!--Add a field to bind to title-->
+			<label class="label">
+				<span>To start, please enter an experiment title:</span>
+				<input class="input w-50" type="text" bind:value={title} />
+			</label>
+			<br />
+			<p>Here is what is included in this software:</p>
+			<ul class="ml-6 list-outside list-disc">
+				<li>
+					Complete analysis for:
+					<ul class="mt-1 ml-6 list-outside list-disc">
+						<li>Any number of isotopes</li>
+						<li>Any number of reference materials</li>
+						<li>Any number of unknown materials</li>
+						<li>Uploading from a Maestro .rpt file</li>
+						<li>A table displaying concentrations and uncertainties with a CSV download link</li>
+					</ul>
+				</li>
+			</ul>
+			<br />
+			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
+			<br />
 			<p>
+				In this version (5.0 alpha) the primary developmental focus is on the reference materials,
+				using a library instead of a single standard. There are other minor revisions included here.
+			</p>
+			<!-- <p>
 				This version includes a complete analysis process for a single isotope, a single standard,
 				and a single unknown sample. It also includes uploading from a Maestro .rpt file to
 				auto-fill gross counts, net counts, and uncertainty.
@@ -400,21 +664,24 @@
 			<ol class="list-inside list-decimal">
 				<li>Version 5.0: Add the option for a standard library instead of just one standard.</li>
 			</ol>
+			<br /> -->
 			<br />
 			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
 			<ul class="list-inside list-disc">
 				<li>Exporting reports</li>
-				<li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li>
-				<li>Correct the matching to ensure it works with interference</li>
-				<li>Font size adjustment</li>
+				<!-- <li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li> -->
+				<li>Interference Adjustment</li>
+				<!-- <li>Font size adjustment</li> -->
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
-		{:else if step === 1}
+		{:else if stepType === StepType.ISOTOPE_COUNT}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<PageCounter pageType="isotopes" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
+			<br />
+			<PageCounter pageType="elements" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
+			<br />
 			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if isoIndex >= 0 && isoIndex < isotopeCount}
+		{:else if stepType === StepType.ISOTOPE_INFO}
 			<!--For each step, show this. All of this should be in step 2, but there should be an indication of which isotope is being filled out. Ensure that the forward and back buttons work correctly.-->
 			<!-- {#each { length: isotopeCount } as _, index} -->
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
@@ -425,17 +692,32 @@
 			<br /><br />
 			<IsotopeInfo bind:this={isoRef[isoIndex]} bind:isotopeInfo={isotopeInfo[isoIndex]} />
 			<br />
-			<ComputedDisplay
-				title="Computed Isotope Information for Isotope {isoIndex + 1}"
-				data={isoComp[isoIndex]}
-			/>
+			<details>
+				<summary>Expand for debug information</summary>
+				<ComputedDisplay
+					title="Computed Isotope Information for Isotope {isoIndex + 1}"
+					data={isoComp[isoIndex]}
+				/>
+			</details>
+
+			<br />
 
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
 			<br /><br />
 			<!-- {/each} -->
-		{:else if step === 2 + isotopeCount}
+		{:else if step === isotopeCount + 2}
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
+			<PageCounter
+				pageType="reference materials"
+				pageCount={referenceCount}
+				updateFxn={updateReferenceData}
+			/>
+			<button type="button" onclick={prev}>{backButtonText}</button>
+			&nbsp;&nbsp;
+			<button type="button" onclick={next}> {nextButtonText} </button>
+		{:else if refIdx >= 0 && refIdx < referenceCount}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>
 				This is where you enter information about the reference material. This is used when
@@ -445,21 +727,24 @@
 			<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
 			<RefMatInfo
 				{isotopeCount}
+				{isotopeInfo}
+				usedIsotopeLabels={getUsedIsotopeLabels(refIdx)}
 				getRoiIndex={getRoiIndexFn}
-				bind:refMatInfo={materials.reference}
-				bind:this={matRefs.reference}
+				bind:selected={referenceIsotopeSelections[refIdx]}
+				bind:refMatInfo={materials.reference[refIdx]}
+				bind:this={matRefs.reference[refIdx]}
 			/>
 
-			<ComputedDisplay title="Reference Material Information" data={matComp.reference} />
+			<ComputedDisplay title="Reference Material Information" data={matComp.reference[refIdx]} />
 			<ComputedDisplay
 				title="Reference and Isotope Information"
-				data={matIsoComp.map((item) => item.reference)}
+				data={matIsoComp.map((item) => item.reference[refIdx])}
 			/>
 
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if step === 3 + isotopeCount}
+		{:else if stepType === StepType.UNKNOWN_COUNT}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<PageCounter
 				pageType="unknown materials"
@@ -469,7 +754,7 @@
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if unknownIdx >= 0 && unknownIdx < unknownCount}
+		{:else if stepType === StepType.UNKNOWN_INFO}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>
 				This is where you enter information about the unknown material you are trying to understand.
@@ -477,6 +762,7 @@
 			<br /><br />
 			<MaterialInfo
 				{isotopeCount}
+				{isotopeInfo}
 				getRoiIndex={getRoiIndexFn}
 				bind:this={matRefs.unknown[unknownIdx]}
 				bind:materialInfo={materials.unknown[unknownIdx]}
@@ -495,7 +781,7 @@
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if unknownIdx === unknownCount}
+		{:else if stepType === StepType.REVIEW}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Please review all information you entered and see computed values below.</p>
 			<br /><br />
@@ -515,23 +801,42 @@
 				</thead>
 				<tbody>
 					<tr>
-						<td class="border border-gray-400 px-4 py-2 font-bold">
-							Units
-						</td>
+						<td class="border border-gray-400 px-4 py-2 font-bold"> Units </td>
 						{#each isotopeInfo as _, index}
 							<td class="border border-gray-400 px-4 py-2">
-								{materials.reference.concentrationUnits[index] === 'ppm' ? 'µg/g' : materials.reference.concentrationUnits[index] === 'percentage'? '%' : materials.reference.concentrationUnits[index]}
+								{(() => {
+									const referenceIndex = getLinkedReferenceIndex(index);
+									const unit =
+										materials.reference[referenceIndex]?.concentrationUnits?.[index] ??
+										materials.reference[0]?.concentrationUnits?.[index] ??
+										'';
+									return unit === 'ppm' ? 'µg/g' : unit === 'percentage' ? '%' : unit;
+								})()}
 							</td>
 						{/each}
 					</tr>
 					{#each materials.unknown as unk, uIndex}
+						{@const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`}
 						<tr>
 							<td class="border border-gray-400 px-4 py-2 font-bold">
-								{unk.NETL_code}
+								{unknownLabel}
 							</td>
 							{#each isotopeInfo as _, iIndex}
 								<td class="border border-gray-400 px-4 py-2">
-									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)} ± {truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute, 2)}
+									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)} ± {truncateToSigFigs(
+										everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute,
+										2
+									)}
+								</td>
+							{/each}
+						</tr>
+						<tr>
+							<td class="border border-gray-400 px-4 py-2 font-bold">
+								{unknownLabel} Conc Det Lim
+							</td>
+							{#each isotopeInfo as _, iIndex}
+								<td class="border border-gray-400 px-4 py-2">
+									{truncateToSigFigs(everythingComp[iIndex][uIndex].concentrationDetectionLimit, 3)}
 								</td>
 							{/each}
 						</tr>
@@ -539,7 +844,7 @@
 				</tbody>
 			</table>
 			<br />
-			<button type="button" class="btn variant-filled-primary" onclick={downloadTableAsCSV}>
+			<button type="button" class="variant-filled-primary btn" onclick={downloadTableAsCSV}>
 				Download Table as CSV
 			</button>
 			<br /><br />

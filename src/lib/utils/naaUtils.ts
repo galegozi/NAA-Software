@@ -12,7 +12,9 @@ export function createIsotopeInfo(): IsotopeInfo {
 		elementName: '',
 		isotopeName: '',
 		energy: 0,
-		halfLife: 0
+		halfLife: 0,
+		linkedReference: 0,
+		unit: 'seconds'
 	};
 }
 
@@ -23,7 +25,10 @@ export function createCountData(): CountData {
 	return {
 		grossCounts: 0,
 		netCounts: 0,
-		uncertainty: 0
+		uncertainty: 0,
+		grossCountsPositionalCorrectionFactor: 1,
+		netCountsPositionalCorrectionFactor: 1,
+		uncertaintyPositionalCorrectionFactor: 1
 	};
 }
 
@@ -43,6 +48,8 @@ export function createReferenceMaterial(isotopeCount: number): ReferenceMaterial
 		sampleName: '',
 		mass: 0,
 		irradiationTime: 0,
+		irradiationEnd: '',
+		measurementStartTime: '',
 		decayTime: 0,
 		liveTime: 0,
 		realTime: 0,
@@ -64,6 +71,8 @@ export function createUnknownMaterial(isotopeCount: number): UnknownMaterial {
 		sampleName: '',
 		mass: 0,
 		irradiationTime: 0,
+		irradiationEnd: '',
+		measurementStartTime: '',
 		decayTime: 0,
 		liveTime: 0,
 		realTime: 0,

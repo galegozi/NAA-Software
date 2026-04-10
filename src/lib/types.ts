@@ -7,12 +7,17 @@ export interface IsotopeInfo {
 	isotopeName: string;
 	energy: number;
 	halfLife: number;
+	linkedReference: number;
+	unit: string;
 }
 
 export interface CountData {
 	grossCounts: number;
 	netCounts: number;
 	uncertainty: number;
+	grossCountsPositionalCorrectionFactor: number;
+	netCountsPositionalCorrectionFactor: number;
+	uncertaintyPositionalCorrectionFactor: number;
 }
 
 /**
@@ -29,6 +34,8 @@ export interface BaseMaterialInfo {
 	sampleName: string;
 	mass: number;
 	irradiationTime: number;
+	irradiationEnd: string;
+	measurementStartTime: string;
 	decayTime: number;
 	liveTime: number;
 	realTime: number;
@@ -46,8 +53,10 @@ export interface ReferenceMaterial extends BaseMaterialInfo {
 export interface UnknownMaterial extends BaseMaterialInfo {}
 
 export interface Materials {
-	reference: ReferenceMaterial;
+	reference: ReferenceMaterial[];
 	unknown: UnknownMaterial[];
+	// Optional: map each isotope to a reference index
+	referenceIndexByIsotope?: number[];
 }
 
 export interface RoiData {

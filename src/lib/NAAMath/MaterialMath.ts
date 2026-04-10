@@ -3,6 +3,10 @@
 import type { BaseMaterialInfo } from '../types.js';
 import type { MaterialComputed } from './types.js';
 
+function getFactor(value: number | undefined): number {
+	return typeof value === 'number' && Number.isFinite(value) ? value : 1;
+}
+
 function computeDeadTime(material: BaseMaterialInfo): number {
 	const liveTime = material.liveTime;
 	const realTime = material.realTime;
@@ -16,7 +20,11 @@ function computeDeadTimeFraction(material: BaseMaterialInfo): number {
 }
 
 function computeBackgroundCounts(material: BaseMaterialInfo): number[] {
-	return material.counts.map((c) => c.grossCounts - c.netCounts);
+	return material.counts.map(
+		(c) =>
+			c.grossCounts * getFactor(c.grossCountsPositionalCorrectionFactor) -
+			c.netCounts * getFactor(c.netCountsPositionalCorrectionFactor)
+	);
 }
 
 function computeDetectionLimit(material: BaseMaterialInfo): number[] {
@@ -26,7 +34,12 @@ function computeDetectionLimit(material: BaseMaterialInfo): number[] {
 
 function computeCountUncertaintyPercent(material: BaseMaterialInfo): number[] {
 	// uncertainty / net counts * 100
-	return material.counts.map((c) => (c.uncertainty / c.netCounts) * 100);
+	return material.counts.map(
+		(c) =>
+			((c.uncertainty * getFactor(c.uncertaintyPositionalCorrectionFactor)) /
+				(c.netCounts * getFactor(c.netCountsPositionalCorrectionFactor))) *
+			100
+	);
 }
 
 export function getAll(material: BaseMaterialInfo): MaterialComputed {
