@@ -2,13 +2,27 @@
 	"routes": [
 		{
 			"route": "/api/isotopes",
-			"allowedRoles": ["developer"]
+			"allowedRoles": ["isotope-reader"]
 		},
 		{
 			"route": "/api/*",
-			"allowedRoles": ["developer"]
+			"allowedRoles": ["isotope-reader"]
+		},
+		{
+			"route": "/*",
+			"allowedRoles": ["isotope-reader"]
 		}
 	],
+	"responseOverrides": {
+		"401": {
+			"redirect": "/.auth/login/aad",
+			"statusCode": 302
+		},
+		"403": {
+			"rewrite": "/index.html",
+			"statusCode": 403
+		}
+	},
 	"navigationFallback": {
 		"rewrite": "/index.html",
 		"exclude": ["/api/*", "/app/*", "/favicon.svg"]

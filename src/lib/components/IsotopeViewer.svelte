@@ -38,6 +38,12 @@
 				}
 			});
 
+			if (response.status === 401 || response.status === 403) {
+				throw new Error(
+					'Sign in with an account that has been assigned the Static Web Apps role required to view isotope data.'
+				);
+			}
+
 			if (!response.ok) {
 				throw new Error(`Request failed with status ${response.status}`);
 			}
@@ -64,7 +70,7 @@
 		{#each items as item (item.id)}
 			<div>
 				<div>
-					<div>{item.elementName} ({item.shortName}-{item.massNumber})</div>
+					<div>{item.elementName} ({item.shortName}-{item.massNumber}{item.suffix})</div>
 					<div>{item.energies.length} energies</div>
 					<input hidden name="id" value={item.id} />
 				</div>

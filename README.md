@@ -56,7 +56,13 @@ The frontend isotope viewer calls `/api/isotopes` by default. You can override t
 
 ### API access control
 
-The integrated Azure Functions endpoint is protected at the Static Web Apps layer in `staticwebapp.config.json` and is limited to the `developer` role.
+The integrated Azure Functions endpoint is protected at the Static Web Apps layer in `staticwebapp.config.json` and is limited to the custom `isotope-reader` role.
+
+This is narrower than the built-in `authenticated` role. Only users explicitly assigned to `isotope-reader` can load the app or call `/api/isotopes`.
+
+To grant access, assign users invitations/roles in Azure Static Web Apps so their identity includes `isotope-reader` after sign-in.
+
+The current config also protects the app routes with the same role and redirects unauthenticated users to Azure AD sign-in.
 
 For integrated Static Web Apps APIs, the function itself should remain `authLevel: 'anonymous'` because Static Web Apps performs the authorization before forwarding the request. Setting the function to `function` or `admin` is not the right model for SWA-integrated APIs.
 
