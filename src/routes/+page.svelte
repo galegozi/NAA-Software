@@ -5,6 +5,7 @@
 	import PageCounter from '$lib/components/pageCounter.svelte';
 	import ComputedDisplay from '$lib/components/ComputedDisplay.svelte';
 	import ProgressIndicator from '$lib/components/ProgressIndicator.svelte';
+	import IsotopeViewer from '$lib/components/IsotopeViewer.svelte';
 
 	import { getAll as isoGA } from '../lib/NAAMath/isotopeMath.ts';
 	import { getAll as matGA } from '../lib/NAAMath/MaterialMath.ts';
@@ -37,6 +38,8 @@
 		getProgressPercentage,
 		getReviewStep
 	} from '$lib/utils/stepUtils.js';
+
+	import {loadIsotopes} from './+page.server.js';
 
 	// Using findRoiIndices from naaUtils
 
@@ -654,6 +657,11 @@
 			<br />
 			<PageCounter pageType="elements" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
 			<br />
+			<br />
+			<IsotopeViewer data={loadIsotopes()}/>
+			<br />
+			<br />
+			 <button type="button" onclick={prev}>{backButtonText}</button>
 			<button type="button" onclick={next}> {nextButtonText} </button>
 		{:else if stepType === StepType.ISOTOPE_INFO}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
