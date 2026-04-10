@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { PageData } from './$types.js';
 	import IsotopeInfo from '$lib/components/isotopeInfo.svelte';
 	import MaterialInfo from '$lib/components/materialInfo.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
@@ -39,7 +40,7 @@
 		getReviewStep
 	} from '$lib/utils/stepUtils.js';
 
-	import {loadIsotopes} from './+page.server.js';
+	let { data }: { data: PageData } = $props();
 
 	// Using findRoiIndices from naaUtils
 
@@ -600,7 +601,6 @@
 	<h2 class="text-2xl font-bold">Current Experiment: {title}</h2>
 	<br />
 
-
 	{#if showProgress}
 		<ProgressIndicator currentStep={step} {totalSteps} percentage={progressPercentage} />
 	{/if}
@@ -631,18 +631,19 @@
 						<li>A table displaying concentrations and uncertainties with a CSV download link</li>
 					</ul>
 				</li>
-				<li>
-					Automatic loading of isotope information from the database.
-				</li>
+				<li>Automatic loading of isotope information from the database.</li>
 			</ul>
 			<br />
 			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
 			<br />
 			<p>
-				In this version (v{APP_VERSION}), the main focus is to add loading of isotopes from a database.
+				In this version (v{APP_VERSION}), the main focus is to add loading of isotopes from a
+				database.
 			</p>
 			<br />
-			<h2 class="text-2xl font-bold">Future additions, not planned yet (note: can be implemented in any order):</h2>
+			<h2 class="text-2xl font-bold">
+				Future additions, not planned yet (note: can be implemented in any order):
+			</h2>
 			<ul class="list-inside list-disc">
 				<li>Authentication</li>
 				<li>Modifications to the database</li>
@@ -658,10 +659,11 @@
 			<PageCounter pageType="elements" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
 			<br />
 			<br />
-			<IsotopeViewer data={loadIsotopes()}/>
+			<IsotopeViewer data={data} />
 			<br />
 			<br />
-			 <button type="button" onclick={prev}>{backButtonText}</button>
+			<button type="button" onclick={prev}>{backButtonText}</button>
+			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
 		{:else if stepType === StepType.ISOTOPE_INFO}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>

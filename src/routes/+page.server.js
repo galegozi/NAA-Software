@@ -15,7 +15,8 @@ if (env.COSMOSDB_ENDPOINT && env.COSMOSDB_KEY) {
     });
 }
 
-export async function loadIsotopes() {
+/** @type {import('./$types.js').PageServerLoad} */
+export const load = async () => {
     console.log('SvelteKit load function processed a request.');
     
     const database = client?.database('NAA-db');
@@ -25,7 +26,7 @@ export async function loadIsotopes() {
     return {
         items: items
     };
-}
+};
 
 // export const actions = {
 //     delete: async ({ cookies, request }) => {
