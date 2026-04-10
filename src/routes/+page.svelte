@@ -611,7 +611,6 @@
 		{#if stepType === StepType.WELCOME}
 			<p>Welcome to the NAA Analysis software!</p>
 			<br />
-			<!--Add a field to bind to title-->
 			<label class="label">
 				<span>To start, please enter an experiment title:</span>
 				<input class="input w-50" type="text" bind:value={title} />
@@ -629,49 +628,24 @@
 						<li>A table displaying concentrations and uncertainties with a CSV download link</li>
 					</ul>
 				</li>
+				<li>
+					Automatic loading of isotope information from the database.
+				</li>
 			</ul>
 			<br />
 			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
 			<br />
 			<p>
-				In this version (5.0 alpha) the primary developmental focus is on the reference materials,
-				using a library instead of a single standard. There are other minor revisions included here.
-			</p>
-			<!-- <p>
-				This version includes a complete analysis process for a single isotope, a single standard,
-				and a single unknown sample. It also includes uploading from a Maestro .rpt file to
-				auto-fill gross counts, net counts, and uncertainty.
+				In this version (v{APP_VERSION}), the main focus is to add loading of isotopes from a database.
 			</p>
 			<br />
-			<p>Multiple isotopes and unknowns are in beta.</p>
-			<br />
-			<p>
-				The mixed dead time correction is deprecated. The simple correction option to replace it is
-				currently in beta.
-			</p>
-			<br />
-			<p>Version 4.1.1 is a refactor to improve code organization and maintainability.</p>
-			<br />
-			<p>Version 4.2 is a beta with a reporting table and concentration units, along with a CSV download link.</p>
-			<br />
-			<p>Version 4.2.1 includes improvements to significant figure handling in concentration displays.</p>
-			<br />
-			<p>Version 4.3 adds uncertainty calculations. For HTML table display use plus/minus, but for CSV use separate columns for value and uncertainty. It also includes fluence correction.</p>
-			<br />
-			<p>Version 4.4 adds minor fixes, such as the units, the isotope display, using the % symbol instead of the word "percentage", and fixes the uncertainty to show correctly.</p>
-			<br />
-			<h2 class="text-2xl font-bold">Future plans:</h2>
-			<ol class="list-inside list-decimal">
-				<li>Version 5.0: Add the option for a standard library instead of just one standard.</li>
-			</ol>
-			<br /> -->
-			<br />
-			<h2 class="text-2xl font-bold">Future additions, not planned yet:</h2>
+			<h2 class="text-2xl font-bold">Future additions, not planned yet (note: can be implemented in any order):</h2>
 			<ul class="list-inside list-disc">
+				<li>Authentication</li>
+				<li>Modifications to the database</li>
+				<li>Automatic loading of irradiation data.</li>
 				<li>Exporting reports</li>
-				<!-- <li>Half life in seconds, minutes, hours, days, years (using 1 yr = 365 days)</li> -->
 				<li>Interference Adjustment</li>
-				<!-- <li>Font size adjustment</li> -->
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
@@ -682,8 +656,6 @@
 			<br />
 			<button type="button" onclick={next}> {nextButtonText} </button>
 		{:else if stepType === StepType.ISOTOPE_INFO}
-			<!--For each step, show this. All of this should be in step 2, but there should be an indication of which isotope is being filled out. Ensure that the forward and back buttons work correctly.-->
-			<!-- {#each { length: isotopeCount } as _, index} -->
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>
 				This is where you enter information about isotope {isoIndex + 1}. This is used in the
@@ -706,7 +678,6 @@
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
 			<br /><br />
-			<!-- {/each} -->
 		{:else if step === isotopeCount + 2}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<PageCounter
