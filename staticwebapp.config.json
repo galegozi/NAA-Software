@@ -2,15 +2,15 @@
 	"routes": [
 		{
 			"route": "/api/isotopes",
-			"allowedRoles": ["isotope-reader"]
+			"allowedRoles": ["isotope_reader"]
 		},
 		{
 			"route": "/api/*",
-			"allowedRoles": ["isotope-reader"]
+			"allowedRoles": ["isotope_reader"]
 		},
 		{
 			"route": "/*",
-			"allowedRoles": ["isotope-reader"]
+			"allowedRoles": ["isotope_reader"]
 		}
 	],
 	"responseOverrides": {
