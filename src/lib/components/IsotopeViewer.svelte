@@ -1,21 +1,25 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { env } from '$env/dynamic/public';
 	import type { IsotopeCatalogItem, IsotopeInfo } from '$lib/types.js';
+	import { getIsotopeCatalogAccessMessage } from '$lib/utils/authEnvironment.js';
 
 	let {
 		selectedIsotopes = $bindable<IsotopeInfo[]>([])
 	} = $props();
 
-	let items: IsotopeCatalogItem[] = $state([]);
 	let isLoading = $state(false);
 	let errorMessage = $state('');
 	let searchTerm = $state('');
-	let selectedCatalogId = $state('');
-	let isDropdownExpanded = $state(false);
-	let activeSearch = $state('');
 	let lastFetchedSearch = '';
 	let lastFetchSequence = 0;
 	let cachedItems: IsotopeCatalogItem[] = $state([]);
+
+	type EnergyResultRow = {
+		id: string;
+		item: IsotopeCatalogItem;
+		energy: number;
+	};
 
 	function normalizeItems(payload: unknown): IsotopeCatalogItem[] {
 		if (Array.isArray(payload)) {
@@ -38,7 +42,7 @@
 		return `${item.shortName}-${item.massNumber}${item.suffix}`;
 	}
 
-	function matchesSearch(item: IsotopeCatalogItem, query: string): boolean {
+	function matchesSearch(item: IsotopeCatalogItem, energy: number, query: string): boolean {
 		const normalizedQuery = query.trim().toLowerCase();
 		if (!normalizedQuery) {
 			return true;
@@ -49,7 +53,8 @@
 			item.shortName,
 			String(item.massNumber),
 			getIsotopeName(item),
-			...item.energies.map(String)
+			String(energy),
+			`${energy} kev`
 		]
 			.join(' ')
 			.toLowerCase();
@@ -57,31 +62,41 @@
 		return searchHaystack.includes(normalizedQuery);
 	}
 
-	function toIsotopeInfo(item: IsotopeCatalogItem): IsotopeInfo {
+	function isEnergySearch(query: string): boolean {
+		return /^\d+(\.\d+)?(?:\s*kev)?$/i.test(query.trim());
+	}
+
+	function getFetchSearch(query: string): string {
+		const trimmedQuery = query.trim();
+		if (!trimmedQuery || isEnergySearch(trimmedQuery)) {
+			return '';
+		}
+
+		return trimmedQuery;
+	}
+
+	function toIsotopeInfo(item: IsotopeCatalogItem, energy: number): IsotopeInfo {
 		return {
 			elementName: item.elementName,
 			isotopeName: getIsotopeName(item),
-			energy: item.energies[0] ?? 0,
+			energy,
 			halfLife: item.halfLife.number || item.halfLifeSeconds,
 			linkedReference: 0,
 			unit: item.halfLife.unit
 		};
 	}
 
-	function getCatalogItem(isotope: IsotopeInfo): IsotopeCatalogItem | undefined {
-		return cachedItems.find(
-			(item) =>
-				item.elementName === isotope.elementName &&
-				getIsotopeName(item) === isotope.isotopeName
-		);
+	function isCatalogItemSelected(item: IsotopeCatalogItem): boolean {
+		return selectedIsotopes.some((isotope) => isotope.isotopeName === getIsotopeName(item));
 	}
 
 	async function loadItems(search: string) {
 		const apiUrl = env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
 		const requestUrl = new URL(apiUrl, window.location.origin);
-		requestUrl.searchParams.set('limit', '25');
+		const trimmedSearch = search.trim();
+		requestUrl.searchParams.set('limit', trimmedSearch ? '25' : '100');
 		if (search.trim()) {
-			requestUrl.searchParams.set('q', search.trim());
+			requestUrl.searchParams.set('q', trimmedSearch);
 		}
 
 		const fetchSequence = ++lastFetchSequence;
@@ -96,9 +111,8 @@
 			});
 
 			if (response.status === 401 || response.status === 403) {
-				throw new Error(
-					'Sign in with an account that has been assigned the Static Web Apps role required to view isotope data.'
-				);
+				const hostname = browser ? window.location.hostname : '';
+				throw new Error(getIsotopeCatalogAccessMessage(hostname));
 			}
 
 			if (!response.ok) {
@@ -110,10 +124,13 @@
 				return;
 			}
 
-			items = nextItems;
-			cachedItems = [...cachedItems.filter((cachedItem) => !nextItems.some((item) => item.id === cachedItem.id)), ...nextItems];
-			activeSearch = search;
-			lastFetchedSearch = search;
+			cachedItems = [
+				...cachedItems.filter(
+					(cachedItem) => !nextItems.some((item) => item.id === cachedItem.id)
+				),
+				...nextItems
+			];
+			lastFetchedSearch = trimmedSearch;
 		} catch (error) {
 			if (fetchSequence !== lastFetchSequence) {
 				return;
@@ -130,51 +147,56 @@
 		}
 	}
 
-	let filteredItems = $derived(items.filter((item) => matchesSearch(item, activeSearch)));
-	let selectedCatalogItem = $derived(
-		filteredItems.find((item) => item.id === selectedCatalogId) ?? filteredItems[0]
-	);
-	let selectedCatalogIsAlreadyAdded = $derived(
-		selectedCatalogItem
-			? selectedIsotopes.some((isotope) => isotope.isotopeName === getIsotopeName(selectedCatalogItem))
-			: false
-	);
+	let energyRows = $derived.by(() => {
+		const rows: EnergyResultRow[] = [];
 
-	$effect(() => {
-		if (!filteredItems.length) {
-			selectedCatalogId = '';
-			return;
+		for (const item of cachedItems) {
+			if (item.energies.length === 0) {
+				rows.push({
+					id: `${item.id}-no-energy`,
+					item,
+					energy: 0
+				});
+				continue;
+			}
+
+			for (const energy of item.energies) {
+				rows.push({
+					id: `${item.id}-${energy}`,
+					item,
+					energy
+				});
+			}
 		}
 
-		const hasSelectedItem = filteredItems.some((item) => item.id === selectedCatalogId);
-		if (!hasSelectedItem) {
-			selectedCatalogId = filteredItems[0].id;
-		}
+		return rows;
 	});
 
-	$effect(() => {
-		if (!isDropdownExpanded) {
-			return;
-		}
+	let filteredRows = $derived(
+		energyRows.filter((row) => matchesSearch(row.item, row.energy, searchTerm))
+	);
+	let visibleRows = $derived(filteredRows.slice(0, 25));
 
+	$effect(() => {
 		const nextSearch = searchTerm.trim();
-		if (nextSearch === lastFetchedSearch && items.length > 0) {
-			activeSearch = nextSearch;
+		const nextFetchSearch = getFetchSearch(nextSearch);
+		if (nextFetchSearch === lastFetchedSearch && cachedItems.length > 0) {
 			return;
 		}
 
 		const shouldFetchImmediately =
-			items.length === 0 ||
-			Math.abs(nextSearch.length - lastFetchedSearch.length) >= 3 ||
-			nextSearch.length < lastFetchedSearch.length;
+			cachedItems.length === 0 ||
+			nextFetchSearch.length === 0 ||
+			Math.abs(nextFetchSearch.length - lastFetchedSearch.length) >= 3 ||
+			nextFetchSearch.length < lastFetchedSearch.length;
 
 		if (shouldFetchImmediately) {
-			void loadItems(nextSearch);
+			void loadItems(nextFetchSearch);
 			return;
 		}
 
 		const timeoutId = window.setTimeout(() => {
-			void loadItems(nextSearch);
+			void loadItems(nextFetchSearch);
 		}, 100);
 
 		return () => {
@@ -182,12 +204,12 @@
 		};
 	});
 
-	function addSelectedIsotope() {
-		if (!selectedCatalogItem || selectedCatalogIsAlreadyAdded) {
+	function addSelectedIsotope(item: IsotopeCatalogItem, energy: number) {
+		if (isCatalogItemSelected(item)) {
 			return;
 		}
 
-		selectedIsotopes = [...selectedIsotopes, toIsotopeInfo(selectedCatalogItem)];
+		selectedIsotopes = [...selectedIsotopes, toIsotopeInfo(item, energy)];
 		searchTerm = '';
 	}
 
@@ -195,64 +217,68 @@
 		selectedIsotopes = selectedIsotopes.filter((_, isotopeIndex) => isotopeIndex !== index);
 	}
 
-	function updateSelectedEnergy(index: number, energyValue: string) {
-		const parsedEnergy = Number(energyValue);
-		selectedIsotopes = selectedIsotopes.map((isotope, isotopeIndex) =>
-			isotopeIndex === index
-				? {
-					...isotope,
-					energy: Number.isFinite(parsedEnergy) ? parsedEnergy : isotope.energy
-				}
-				: isotope
-		);
-	}
 </script>
 
 <div class="space-y-4">
-	<details bind:open={isDropdownExpanded} class="rounded border border-gray-300 p-4">
-		<summary class="cursor-pointer font-bold">Browse isotope catalog</summary>
-
-		<div class="mt-4 space-y-2">
+	<div class="rounded border border-gray-300 p-4">
+		<div class="space-y-3">
+			<h3 class="text-xl font-bold">Browse isotope catalog</h3>
 			<label class="label">
 				<span>Search isotope catalog</span>
 				<input
 					class="input w-full"
 					type="search"
-					placeholder="Search by element, isotope, mass number, or suffix"
+					placeholder="Search by element, isotope, mass number, suffix, or energy"
 					bind:value={searchTerm}
 				/>
 			</label>
 
-			{#if isLoading}
-				<p>Loading isotope catalog...</p>
-			{:else if errorMessage}
-				<p>Unable to load isotope catalog: {errorMessage}</p>
-			{:else if items.length > 0}
-				<label class="label">
-					<span>Available isotopes</span>
-					<select class="select input w-full bg-surface-50-950 text-surface-950-50" bind:value={selectedCatalogId}>
-						{#each filteredItems as item (item.id)}
-							<option value={item.id}>
-								{item.elementName} ({getIsotopeName(item)}) - {item.energies.length} energ{item.energies.length === 1 ? 'y' : 'ies'}
-							</option>
-						{/each}
-					</select>
-				</label>
+			<div class="max-h-80 space-y-2 overflow-y-auto rounded border border-gray-300 p-2">
+				{#if isLoading && cachedItems.length === 0}
+					<p class="p-2">Loading isotope catalog...</p>
+				{:else if errorMessage && cachedItems.length === 0}
+					<p class="p-2">Unable to load isotope catalog: {errorMessage}</p>
+				{:else if visibleRows.length > 0}
+					{#each visibleRows as row (row.id)}
+						{@const isAlreadySelected = isCatalogItemSelected(row.item)}
+						<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
+							<div class="flex items-start justify-between gap-4">
+								<div class="space-y-1">
+									<div class="font-bold">{row.item.elementName} ({getIsotopeName(row.item)})</div>
+									<div class="text-sm">Energy: {row.energy} keV</div>
+									<div class="text-sm">Half-life: {row.item.halfLife.number || row.item.halfLifeSeconds} {row.item.halfLife.unit}</div>
+								</div>
+								<button
+									class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
+									type="button"
+									onclick={() => addSelectedIsotope(row.item, row.energy)}
+									disabled={isAlreadySelected}
+								>
+									{isAlreadySelected ? 'Added' : 'Add'}
+								</button>
+							</div>
+						</div>
+					{/each}
+				{:else if searchTerm.trim()}
+					<p class="p-2">No isotope matches your search.</p>
+				{:else}
+					<p class="p-2">No isotopes are available yet.</p>
+				{/if}
+			</div>
 
-				<button
-					type="button"
-					onclick={addSelectedIsotope}
-					disabled={!selectedCatalogItem || selectedCatalogIsAlreadyAdded}
-				>
-					{selectedCatalogIsAlreadyAdded ? 'Already Added' : 'Add Isotope'}
-				</button>
-			{:else if searchTerm.trim() || activeSearch}
-				<p>No isotope matches your search.</p>
-			{:else}
-				<p>Start typing to search the database-backed isotope catalog.</p>
+			{#if filteredRows.length > visibleRows.length}
+				<p>Showing the first {visibleRows.length} matches. Keep typing to narrow the list.</p>
+			{/if}
+
+			{#if isLoading && cachedItems.length > 0}
+				<p>Refreshing isotope catalog...</p>
+			{/if}
+
+			{#if errorMessage && cachedItems.length > 0}
+				<p>Unable to refresh isotope catalog: {errorMessage}</p>
 			{/if}
 		</div>
-	</details>
+	</div>
 
 		<div class="space-y-3">
 			<h3 class="text-xl font-bold">Selected isotopes</h3>
@@ -260,31 +286,15 @@
 				<p>Select one or more isotopes to continue.</p>
 			{:else}
 				{#each selectedIsotopes as isotope, index (`${isotope.isotopeName}-${index}`)}
-					{@const catalogItem = getCatalogItem(isotope)}
 					<div class="rounded border border-gray-300 p-4">
 						<div class="flex items-start justify-between gap-4">
 							<div>
 								<div class="font-bold">{isotope.elementName} ({isotope.isotopeName})</div>
+								<div>Energy: {isotope.energy} keV</div>
 								<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
 							</div>
 							<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
 						</div>
-
-						{#if catalogItem && catalogItem.energies.length > 0}
-							<label class="label mt-3 block">
-								<span>Energy</span>
-								<select
-									class="select input w-full bg-surface-50-950 text-surface-950-50"
-									value={String(isotope.energy)}
-									onchange={(event) =>
-										updateSelectedEnergy(index, (event.currentTarget as HTMLSelectElement).value)}
-								>
-									{#each catalogItem.energies as energy (`${catalogItem.id}-${energy}`)}
-										<option value={energy}>{energy} keV</option>
-									{/each}
-								</select>
-							</label>
-						{/if}
 					</div>
 				{/each}
 			{/if}

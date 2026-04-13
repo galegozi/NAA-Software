@@ -27,6 +27,10 @@
 		truncateToSigFigs
 	} from '$lib/utils/naaUtils.js';
 	import {
+		getSignInErrorMessage,
+		isEnvironmentWithoutSignIn
+	} from '$lib/utils/authEnvironment.js';
+	import {
 		APP_VERSION,
 		getIsotopeIndex,
 		getReferenceInfoStartStep,
@@ -311,25 +315,6 @@
 		window.sessionStorage.removeItem(AUTH_STATE_STORAGE_KEY);
 	}
 
-	function isEnvironmentWithoutSignIn(hostname: string): boolean {
-		const normalizedHostname = hostname.toLowerCase();
-		return (
-			normalizedHostname === 'localhost' ||
-			normalizedHostname === '127.0.0.1' ||
-			normalizedHostname === '::1' ||
-			normalizedHostname.endsWith('.localhost') ||
-			normalizedHostname.endsWith('.github.io')
-		);
-	}
-
-	function getSignInUnavailableMessage(hostname: string): string {
-		if (isEnvironmentWithoutSignIn(hostname)) {
-			return 'Sign in is not available in this environment';
-		}
-
-		return 'There was an issue signing you in. Please try again later, or contact support if issues persist';
-	}
-
 	function restoreWizardState() {
 		if (!browser) {
 			return;
@@ -381,7 +366,7 @@
 		localAuthNotice = '';
 
 		const currentUrl = new URL(window.location.href);
-		const unavailableMessage = getSignInUnavailableMessage(currentUrl.hostname);
+		const unavailableMessage = getSignInErrorMessage(currentUrl.hostname);
 		const loginUrl = new URL('/.auth/login/aad', currentUrl.origin);
 		loginUrl.searchParams.set('post_login_redirect_uri', currentUrl.pathname + currentUrl.search + currentUrl.hash);
 
@@ -439,6 +424,10 @@
 	// step 4 + isotopeCount + referenceCount + unknownCount: review
 	let userIsAuthenticated = $state(false);
 	let localAuthNotice = $state('');
+	let currentHostname = $state(browser ? window.location.hostname : '');
+	let showSignInPrompt = $derived(
+		currentHostname !== '' && !isEnvironmentWithoutSignIn(currentHostname)
+	);
 	let referenceCount = $state(1);
 	let refIdx = $derived(
 		step >= getReferenceInfoStartStep(isotopeCount, userIsAuthenticated) &&
@@ -565,6 +554,7 @@
 			return;
 		}
 
+		currentHostname = window.location.hostname;
 		restoreWizardState();
 
 		let cancelled = false;
@@ -923,19 +913,21 @@
 			<button type="button" onclick={next}>Get Started</button>
 		{:else if stepType === StepType.ISOTOPE_COUNT && !userIsAuthenticated}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<p>Hate typing in isotope information? Sign in here.</p>
-			<br />
-			<button
-				type="button"
-				class="btn variant-filled-primary"
-				onclick={handleSignIn}
-			>
-				Sign In
-			</button>
-			{#if localAuthNotice}
-				<p class="mt-3 text-sm text-amber-700">{localAuthNotice}</p>
+			{#if showSignInPrompt}
+				<p>Hate typing in isotope information? Sign in here.</p>
+				<br />
+				<button
+					type="button"
+					class="btn variant-filled-primary"
+					onclick={handleSignIn}
+				>
+					Sign In
+				</button>
+				{#if localAuthNotice}
+					<p class="mt-3 text-sm text-amber-700">{localAuthNotice}</p>
+				{/if}
+				<br />
 			{/if}
-			<br />
 			<PageCounter pageType="elements" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
 			<br />
 			<button type="button" onclick={prev}>{backButtonText}</button>
