@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import IsotopeInfo from '$lib/components/isotopeInfo.svelte';
 	import MaterialInfo from '$lib/components/materialInfo.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
@@ -28,6 +29,7 @@
 	import {
 		APP_VERSION,
 		getIsotopeIndex,
+		getReferenceInfoStartStep,
 		getUnknownCountStep,
 		getUnknownInfoStartStep,
 		getNextButtonText,
@@ -39,7 +41,41 @@
 		getReviewStep
 	} from '$lib/utils/stepUtils.js';
 
+	const AUTH_STATE_STORAGE_KEY = 'naa-auth-redirect-state';
+
+	type PersistedWizardState = {
+		step: number;
+		title: string;
+		isotopeCount: number;
+		isotopeInfo: IsotopeInfoType[];
+		referenceCount: number;
+		unknownCount: number;
+		materials: {
+			reference: ReferenceMaterial[];
+			unknown: UnknownMaterial[];
+		};
+		referenceIsotopeSelections: string[][];
+		isotopeReferenceMap: number[];
+	};
+
 	// Using findRoiIndices from naaUtils
+
+	async function isUserAuthenticated(): Promise<boolean> {
+		// can the user get /api/isotopes?
+		const apiUrl = import.meta.env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
+		return fetch(apiUrl, {
+			headers: {
+				accept: 'application/json'
+			}
+		})
+			.then((response) => {
+				if (response.status === 401 || response.status === 403) {
+					return false;
+				}
+				return response.ok;
+			})
+			.catch(() => false);
+	}
 
 	function resizeReferenceMaterial(
 		reference: ReferenceMaterial,
@@ -221,6 +257,164 @@
 		);
 	}
 
+	function syncIsotopeDependentState(newCount: number) {
+		isotopeCount = newCount;
+
+		const existingIsoRef = [...isoRef];
+		isoRef = Array.from({ length: newCount }, (_, i) =>
+			i < existingIsoRef.length ? existingIsoRef[i] : undefined
+		);
+
+		const existingReferences = [...materials.reference];
+		materials.reference = Array.from({ length: referenceCount }, (_, i) => {
+			const currentReference = existingReferences[i] || createReferenceMaterial(newCount);
+			return resizeReferenceMaterial(currentReference, newCount);
+		});
+
+		materials.unknown = materials.unknown.map((unk) => resizeUnknownMaterial(unk, newCount));
+
+		updateIsotopeReferenceMap(newCount, referenceCount);
+	}
+
+	function getPersistedWizardState(): PersistedWizardState {
+		return {
+			step,
+			title,
+			isotopeCount,
+			isotopeInfo,
+			referenceCount,
+			unknownCount,
+			materials,
+			referenceIsotopeSelections: referenceIsotopeSelections.map((selection) =>
+				Array.from(selection ?? [])
+			),
+			isotopeReferenceMap
+		};
+	}
+
+	function persistWizardState() {
+		if (!browser) {
+			return;
+		}
+
+		window.sessionStorage.setItem(
+			AUTH_STATE_STORAGE_KEY,
+			JSON.stringify(getPersistedWizardState())
+		);
+	}
+
+	function clearPersistedWizardState() {
+		if (!browser) {
+			return;
+		}
+
+		window.sessionStorage.removeItem(AUTH_STATE_STORAGE_KEY);
+	}
+
+	function isEnvironmentWithoutSignIn(hostname: string): boolean {
+		const normalizedHostname = hostname.toLowerCase();
+		return (
+			normalizedHostname === 'localhost' ||
+			normalizedHostname === '127.0.0.1' ||
+			normalizedHostname === '::1' ||
+			normalizedHostname.endsWith('.localhost') ||
+			normalizedHostname.endsWith('.github.io')
+		);
+	}
+
+	function getSignInUnavailableMessage(hostname: string): string {
+		if (isEnvironmentWithoutSignIn(hostname)) {
+			return 'Sign in is not available in this environment';
+		}
+
+		return 'There was an issue signing you in. Please try again later, or contact support if issues persist';
+	}
+
+	function restoreWizardState() {
+		if (!browser) {
+			return;
+		}
+
+		const rawState = window.sessionStorage.getItem(AUTH_STATE_STORAGE_KEY);
+		if (!rawState) {
+			return;
+		}
+
+		try {
+			const savedState = JSON.parse(rawState) as PersistedWizardState;
+			step = savedState.step ?? 0;
+			title = savedState.title ?? 'NAA Analysis';
+			isotopeInfo = Array.isArray(savedState.isotopeInfo)
+				? savedState.isotopeInfo
+				: [createIsotopeInfo()];
+			referenceCount = savedState.referenceCount ?? 1;
+			unknownCount = savedState.unknownCount ?? 1;
+			materials = savedState.materials ?? {
+				reference: [createReferenceMaterial(isotopeInfo.length || 1)],
+				unknown: [createUnknownMaterial(isotopeInfo.length || 1)]
+			};
+			referenceIsotopeSelections = Array.isArray(savedState.referenceIsotopeSelections)
+				? savedState.referenceIsotopeSelections.map((selection) => new Set(selection))
+				: [new Set<string>()];
+			isotopeReferenceMap = Array.isArray(savedState.isotopeReferenceMap)
+				? savedState.isotopeReferenceMap
+				: [0];
+
+			isoRef = Array.from({ length: isotopeInfo.length }, () => undefined);
+			matRefs = {
+				reference: Array.from({ length: referenceCount }, () => undefined),
+				unknown: Array.from({ length: unknownCount }, () => undefined)
+			};
+			syncIsotopeDependentState(isotopeInfo.length);
+		} catch {
+			// Ignore invalid saved state and continue with the current in-memory defaults.
+		} finally {
+			window.sessionStorage.removeItem(AUTH_STATE_STORAGE_KEY);
+		}
+	}
+
+	async function handleSignIn() {
+		if (!browser) {
+			return;
+		}
+
+		localAuthNotice = '';
+
+		const currentUrl = new URL(window.location.href);
+		const unavailableMessage = getSignInUnavailableMessage(currentUrl.hostname);
+		const loginUrl = new URL('/.auth/login/aad', currentUrl.origin);
+		loginUrl.searchParams.set('post_login_redirect_uri', currentUrl.pathname + currentUrl.search + currentUrl.hash);
+
+		try {
+			const authAvailabilityResponse = await fetch('/.auth/me', {
+				method: 'GET',
+				cache: 'no-store',
+				headers: {
+					accept: 'application/json'
+				}
+			});
+
+			if (authAvailabilityResponse.status === 404) {
+				clearPersistedWizardState();
+				localAuthNotice = unavailableMessage;
+				return;
+			}
+
+			if (!authAvailabilityResponse.ok) {
+				clearPersistedWizardState();
+				localAuthNotice = unavailableMessage;
+				return;
+			}
+		} catch {
+			clearPersistedWizardState();
+			localAuthNotice = unavailableMessage;
+			return;
+		}
+
+		persistWizardState();
+		window.location.assign(loginUrl.toString());
+	}
+
 	let step = $state(0);
 
 	let title = $state('NAA Analysis');
@@ -243,15 +437,18 @@
 	// step 4 + isotopeCount + referenceCount to 3 + isotopeCount + referenceCount + unknownCount:
 	// unknown material information
 	// step 4 + isotopeCount + referenceCount + unknownCount: review
+	let userIsAuthenticated = $state(false);
+	let localAuthNotice = $state('');
 	let referenceCount = $state(1);
 	let refIdx = $derived(
-		step >= isotopeCount + 3 && step < getUnknownCountStep(isotopeCount, referenceCount)
-			? step - (isotopeCount + 3)
+		step >= getReferenceInfoStartStep(isotopeCount, userIsAuthenticated) &&
+		step < getUnknownCountStep(isotopeCount, referenceCount, userIsAuthenticated)
+			? step - getReferenceInfoStartStep(isotopeCount, userIsAuthenticated)
 			: -1
 	);
 	let unknownIdx = $derived(
-		step >= getUnknownInfoStartStep(isotopeCount, referenceCount)
-			? step - getUnknownInfoStartStep(isotopeCount, referenceCount)
+		step >= getUnknownInfoStartStep(isotopeCount, referenceCount, userIsAuthenticated)
+			? step - getUnknownInfoStartStep(isotopeCount, referenceCount, userIsAuthenticated)
 			: -1
 	);
 	let unknownCount = $state(1);
@@ -336,17 +533,23 @@
 	);
 
 	let nextButtonText = $derived(
-		getNextButtonText(step, isotopeCount, referenceCount, unknownCount)
+		getNextButtonText(step, isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
 	);
 	let backButtonText = $derived(
-		getBackButtonText(step, isotopeCount, referenceCount, unknownCount)
+		getBackButtonText(step, isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
 	);
-	let stepTitle = $derived(getStepTitle(step, isotopeCount, referenceCount, unknownCount));
-	let stepType = $derived(getStepType(step, isotopeCount, referenceCount, unknownCount));
+	let stepTitle = $derived(
+		getStepTitle(step, isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
+	);
+	let stepType = $derived(
+		getStepType(step, isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
+	);
 	let progressPercentage = $derived(
-		getProgressPercentage(step, isotopeCount, referenceCount, unknownCount)
+		getProgressPercentage(step, isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
 	);
-	let totalSteps = $derived(getReviewStep(isotopeCount, referenceCount, unknownCount));
+	let totalSteps = $derived(
+		getReviewStep(isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
+	);
 	let showProgress = $derived(step > 0);
 
 	// Memoized function to prevent recreation on every render
@@ -356,6 +559,54 @@
 
 	// Validation state
 	let validationErrors: string[] = $state([]);
+
+	$effect(() => {
+		if (!browser) {
+			return;
+		}
+
+		restoreWizardState();
+
+		let cancelled = false;
+
+		void isUserAuthenticated().then((isAuthenticated) => {
+			if (!cancelled) {
+				userIsAuthenticated = isAuthenticated;
+			}
+		});
+
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	$effect(() => {
+		if (!userIsAuthenticated) {
+			return;
+		}
+
+		const onlyHasBlankManualIsotope =
+			isotopeInfo.length === 1 &&
+			!isotopeInfo[0]?.elementName &&
+			!isotopeInfo[0]?.isotopeName &&
+			isotopeInfo[0]?.energy === 0 &&
+			isotopeInfo[0]?.halfLife === 0;
+
+		if (onlyHasBlankManualIsotope) {
+			isotopeInfo = [];
+			syncIsotopeDependentState(0);
+		}
+	});
+
+	$effect(() => {
+		if (!userIsAuthenticated) {
+			return;
+		}
+
+		if (isotopeInfo.length !== isotopeCount) {
+			syncIsotopeDependentState(isotopeInfo.length);
+		}
+	});
 
 	function getUsedIsotopeLabels(referenceIndex: number): Set<string> {
 		const used = new Set<string>();
@@ -375,8 +626,28 @@
 	function validateCurrentStep(): boolean {
 		validationErrors = [];
 
-		// Validate isotope count step (step 1)
-		if (step === 1) {
+		if (stepType === StepType.ISOTOPE_SELECT) {
+			if (isotopeCount < 1) {
+				validationErrors = ['Please select at least one isotope from the database'];
+				return false;
+			}
+
+			const hasInvalidSelection = isotopeInfo.some(
+				(isotope) =>
+					!isotope.elementName ||
+					!isotope.isotopeName ||
+					isotope.energy <= 0 ||
+					isotope.halfLife <= 0
+			);
+
+			if (hasInvalidSelection) {
+				validationErrors = ['One or more selected isotopes could not be loaded correctly'];
+				return false;
+			}
+		}
+
+		// Validate isotope count step
+		if (stepType === StepType.ISOTOPE_COUNT) {
 			if (!Number.isInteger(isotopeCount) || isotopeCount < 1) {
 				validationErrors = ['Please enter a positive integer for the number of isotopes'];
 				return false;
@@ -384,7 +655,7 @@
 		}
 
 		// Validate isotope info steps
-		if (isoIndex >= 0 && isoIndex < isotopeCount) {
+		if (stepType === StepType.ISOTOPE_INFO && isoIndex >= 0 && isoIndex < isotopeCount) {
 			if (isoRef[isoIndex] && typeof isoRef[isoIndex]?.validateIsotopeInfo === 'function') {
 				const isValid = isoRef[isoIndex]!.validateIsotopeInfo();
 				if (!isValid) {
@@ -401,7 +672,7 @@
 		}
 
 		// Validate reference count step
-		if (step === isotopeCount + 2) {
+		if (stepType === StepType.REFERENCE_COUNT) {
 			if (!Number.isInteger(referenceCount) || referenceCount < 1) {
 				validationErrors = [
 					'Please enter a positive integer for the number of reference materials'
@@ -429,7 +700,7 @@
 		}
 
 		// Validate unknown count step
-		if (step === getUnknownCountStep(isotopeCount, referenceCount)) {
+		if (stepType === StepType.UNKNOWN_COUNT) {
 			if (!Number.isInteger(unknownCount) || unknownCount < 1) {
 				validationErrors = ['Please enter a positive integer for the number of unknown materials'];
 				return false;
@@ -650,19 +921,27 @@
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
-		{:else if stepType === StepType.ISOTOPE_COUNT}
+		{:else if stepType === StepType.ISOTOPE_COUNT && !userIsAuthenticated}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
+			<p>Hate typing in isotope information? Sign in here.</p>
+			<br />
+			<button
+				type="button"
+				class="btn variant-filled-primary"
+				onclick={handleSignIn}
+			>
+				Sign In
+			</button>
+			{#if localAuthNotice}
+				<p class="mt-3 text-sm text-amber-700">{localAuthNotice}</p>
+			{/if}
 			<br />
 			<PageCounter pageType="elements" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
-			<br />
-			<br />
-			<IsotopeViewer />
-			<br />
 			<br />
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if stepType === StepType.ISOTOPE_INFO}
+		{:else if stepType === StepType.ISOTOPE_INFO && !userIsAuthenticated}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>
 				This is where you enter information about isotope {isoIndex + 1}. This is used in the
@@ -685,7 +964,19 @@
 			&nbsp;&nbsp;
 			<button type="button" onclick={next}> {nextButtonText} </button>
 			<br /><br />
-		{:else if step === isotopeCount + 2}
+		{:else if stepType === StepType.ISOTOPE_SELECT}
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
+			<p>
+				Search the isotope catalog and add the isotopes you want to analyze. The selected
+				entries replace the manual isotope count and isotope information steps.
+			</p>
+			<br />
+			<IsotopeViewer bind:selectedIsotopes={isotopeInfo} />
+			<br />
+			<button type="button" onclick={prev}>{backButtonText}</button>
+			&nbsp;&nbsp;
+			<button type="button" onclick={next}> {nextButtonText} </button>
+		{:else if stepType === StepType.REFERENCE_COUNT}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<PageCounter
 				pageType="reference materials"
