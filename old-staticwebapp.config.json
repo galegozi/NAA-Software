@@ -7,6 +7,10 @@
 		{
 			"route": "/api/*",
 			"allowedRoles": ["isotope_reader"]
+		},
+		{
+			"route": "/*",
+			"allowedRoles": ["isotope_reader"]
 		}
 	],
 	"responseOverrides": {
