@@ -1,5 +1,13 @@
 {
 	"routes": [
+		{
+			"route": "/api/isotopes",
+			"allowedRoles": ["isotope_reader"]
+		},
+		{
+			"route": "/api/*",
+			"allowedRoles": ["isotope_reader"]
+		}
 	],
 	"responseOverrides": {
 		"401": {
