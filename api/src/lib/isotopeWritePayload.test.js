@@ -50,6 +50,25 @@ test('normalizeIsotopeWritePayload rejects invalid half-life units', () => {
 		/unit/i
 	);
 });
+
+test('normalizeIsotopeWritePayload infers the element name from the symbol', () => {
+	const document = normalizeIsotopeWritePayload(
+		{
+			shortName: 'cd',
+			massNumber: 115,
+			energies: [527.9],
+			halfLife: {
+				number: 2.228,
+				unit: 'days'
+			}
+		},
+		principal
+	);
+
+	assert.equal(document.elementName, 'Cadmium');
+	assert.equal(document.shortName, 'Cd');
+});
+
 test('mergeIsotopeWrite appends unique energies to an existing isotope', () => {
 	const merged = mergeIsotopeWrite(
 		{

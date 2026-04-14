@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
+import { lookupElementName, normalizeElementSymbol } from './elementNames.js';
+
 const HALF_LIFE_UNIT_TO_SECONDS = {
 	seconds: 1,
 	minutes: 60,
@@ -131,8 +133,12 @@ export function normalizeIsotopeWritePayload(payload, principal) {
 		throw new Error('Request body must be a JSON object.');
 	}
 
-	const elementName = requireString(payload.elementName, 'elementName', 120);
-	const shortName = requireString(payload.shortName, 'shortName', 32);
+	const shortName = normalizeElementSymbol(requireString(payload.shortName, 'shortName', 32));
+	const elementName =
+		normalizeOptionalString(payload.elementName, 'elementName', 120) || lookupElementName(shortName);
+	if (!elementName) {
+		throw new Error("'elementName' is required unless it can be inferred from 'shortName'.");
+	}
 	const massNumber = normalizeMassNumber(payload.massNumber);
 	const suffix = normalizeOptionalString(payload.suffix, 'suffix', 32);
 	const energies = normalizeEnergies(payload.energies);

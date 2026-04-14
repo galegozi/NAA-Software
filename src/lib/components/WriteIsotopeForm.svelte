@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { IsotopeWriteForm } from '$lib/types.js';
+	import { lookupElementName } from '../utils/elementNames.js';
 
 	let {
 		formData = $bindable<IsotopeWriteForm>({
@@ -14,10 +15,15 @@
 	} = $props();
 
 	let showErrors = $state(false);
+	let inferredElementName = $derived(lookupElementName(formData.shortName));
+
+	function hasElementName(): boolean {
+		return formData.elementName.trim() !== '' || inferredElementName !== '';
+	}
 
 	export function validateWriteIsotopeForm(): boolean {
 		return (
-			formData.elementName.trim() !== '' &&
+			hasElementName() &&
 			formData.shortName.trim() !== '' &&
 			Number.isInteger(formData.massNumber) &&
 			formData.massNumber > 0 &&
@@ -29,7 +35,7 @@
 	export function getValidationErrors(): string[] {
 		const errors: string[] = [];
 
-		if (!formData.elementName.trim()) errors.push('Element name is required');
+		if (!hasElementName()) errors.push('Element name is required or must be inferable from the symbol');
 		if (!formData.shortName.trim()) errors.push('Element short name is required');
 		if (!Number.isInteger(formData.massNumber) || formData.massNumber <= 0) {
 			errors.push('Mass number must be a positive integer');
@@ -56,10 +62,12 @@
 		type="text"
 		placeholder="e.g., Gold, Sodium"
 		bind:value={formData.elementName}
-		required
 	/>
-	{#if showErrors && !formData.elementName.trim()}
-		<span class="field-error">Element name is required</span>
+	{#if !formData.elementName.trim() && inferredElementName}
+		<span class="field-note">Will save as {inferredElementName} based on the symbol.</span>
+	{/if}
+	{#if showErrors && !hasElementName()}
+		<span class="field-error">Element name is required unless the symbol can be recognized</span>
 	{/if}
 </label>
 
@@ -152,6 +160,13 @@
 </label>
 
 <style>
+	.field-note {
+		color: rgb(180 83 9);
+		font-size: 0.875rem;
+		margin-top: 0.25rem;
+		display: block;
+	}
+
 	.field-error {
 		color: #ef4444;
 		font-size: 0.875rem;

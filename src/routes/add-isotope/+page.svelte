@@ -2,6 +2,12 @@
 	import { browser } from '$app/environment';
 	import WriteIsotopeForm from '$lib/components/WriteIsotopeForm.svelte';
 	import type { IsotopeWriteForm } from '$lib/types.js';
+	import { lookupElementName } from '../../lib/utils/elementNames.js';
+	import {
+		parseIsotopeWriteUpload,
+		type ParsedIsotopeUploadItem,
+		type ParsedIsotopeUploadResult
+	} from '../../lib/utils/isotopeWriteUpload.js';
 	import {
 		getSignInErrorMessage,
 		isEnvironmentWithoutSignIn
@@ -16,6 +22,18 @@
 
 	type AuthEnvelope = {
 		clientPrincipal?: ClientPrincipal | null;
+	};
+
+	type IsotopeWriteRequest = {
+		elementName: string;
+		shortName: string;
+		massNumber: number;
+		suffix: string;
+		energies: number[];
+		halfLife: {
+			number: number;
+			unit: IsotopeWriteForm['unit'];
+		};
 	};
 
 	const WRITER_ROLE = 'isotope_writer';
@@ -39,6 +57,13 @@
 	let authMessage = $state('');
 	let submitMessage = $state('');
 	let submitError = $state('');
+	let uploadFiles = $state<FileList | undefined>(undefined);
+	let uploadFileName = $state('');
+	let uploadParseError = $state('');
+	let uploadResult = $state<ParsedIsotopeUploadResult | null>(null);
+	let uploadMessage = $state('');
+	let uploadError = $state('');
+	let isUploading = $state(false);
 	let currentHostname = $state('');
 	let authSupported = $state(false);
 	let principal = $state<ClientPrincipal | null>(null);
@@ -82,6 +107,68 @@
 		}
 
 		return null;
+	}
+
+	function resolveElementName(formData: Pick<IsotopeWriteForm, 'elementName' | 'shortName'>): string {
+		return formData.elementName.trim() || lookupElementName(formData.shortName);
+	}
+
+	function buildManualPayload(formData: IsotopeWriteForm): IsotopeWriteRequest {
+		const elementName = resolveElementName(formData);
+		if (!elementName) {
+			throw new Error('Element name is required unless the short symbol can be recognized.');
+		}
+
+		return {
+			elementName,
+			shortName: formData.shortName.trim(),
+			massNumber: formData.massNumber,
+			suffix: formData.suffix.trim(),
+			energies: [formData.energy],
+			halfLife: {
+				number: formData.halfLife,
+				unit: formData.unit
+			}
+		};
+	}
+
+	function buildUploadPayload(item: ParsedIsotopeUploadItem): IsotopeWriteRequest {
+		return {
+			elementName: item.elementName,
+			shortName: item.shortName,
+			massNumber: item.massNumber,
+			suffix: '',
+			energies: item.energies,
+			halfLife: {
+				number: item.halfLife.number,
+				unit: item.halfLife.unit
+			}
+		};
+	}
+
+	async function saveIsotope(payload: IsotopeWriteRequest) {
+		const response = await fetch('/api/isotopes', {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				accept: 'application/json'
+			},
+			body: JSON.stringify(payload)
+		});
+
+		const body = await response.json().catch(() => null);
+
+		if (!response.ok) {
+			if (response.status === 401 || response.status === 403) {
+				await refreshAuthState();
+			}
+
+			throw new Error(body?.error || `Request failed with status ${response.status}`);
+		}
+
+		return {
+			created: Boolean(body?.created)
+		};
 	}
 
 	async function refreshAuthState() {
@@ -187,36 +274,9 @@
 		isSubmitting = true;
 
 		try {
-			const response = await fetch('/api/isotopes', {
-				method: 'POST',
-				headers: {
-					'content-type': 'application/json',
-					accept: 'application/json'
-				},
-				body: JSON.stringify({
-					elementName: isotopeForm.elementName,
-					shortName: isotopeForm.shortName,
-					massNumber: isotopeForm.massNumber,
-					suffix: isotopeForm.suffix,
-					energies: [isotopeForm.energy],
-					halfLife: {
-						number: isotopeForm.halfLife,
-						unit: isotopeForm.unit
-					}
-				})
-			});
+			const payload = await saveIsotope(buildManualPayload(isotopeForm));
 
-			const payload = await response.json().catch(() => null);
-
-			if (!response.ok) {
-				if (response.status === 401 || response.status === 403) {
-					await refreshAuthState();
-				}
-
-				throw new Error(payload?.error || `Request failed with status ${response.status}`);
-			}
-
-			submitMessage = payload?.created
+			submitMessage = payload.created
 				? 'Isotope added successfully.'
 				: 'Existing isotope updated successfully. Any new energy was appended.';
 			isotopeForm = createWriteIsotopeForm();
@@ -225,6 +285,78 @@
 			submitError = error instanceof Error ? error.message : 'Unable to save isotope.';
 		} finally {
 			isSubmitting = false;
+		}
+	}
+
+	async function handleUploadChange() {
+		uploadParseError = '';
+		uploadError = '';
+		uploadMessage = '';
+		uploadResult = null;
+		uploadFileName = '';
+
+		const file = uploadFiles?.[0];
+		if (!file) {
+			return;
+		}
+
+		uploadFileName = file.name;
+
+		try {
+			const content = await file.text();
+			uploadResult = parseIsotopeWriteUpload(content);
+		} catch (error) {
+			uploadParseError = error instanceof Error ? error.message : 'Unable to parse the uploaded file.';
+		}
+	}
+
+	async function submitUploadedIsotopes() {
+		uploadError = '';
+		uploadMessage = '';
+
+		if (!writerAccess) {
+			uploadError = `Your account is signed in, but it does not have the '${WRITER_ROLE}' role required to save isotope data.`;
+			return;
+		}
+
+		if (!uploadResult || uploadResult.items.length === 0) {
+			uploadError = 'Upload a file with at least one valid isotope row before saving.';
+			return;
+		}
+
+		isUploading = true;
+
+		let createdCount = 0;
+		let updatedCount = 0;
+		const failures: string[] = [];
+
+		try {
+			for (const item of uploadResult.items) {
+				try {
+					const result = await saveIsotope(buildUploadPayload(item));
+					if (result.created) {
+						createdCount += 1;
+					} else {
+						updatedCount += 1;
+					}
+				} catch (error) {
+					const label = `${item.shortName}-${item.massNumber}`;
+					const message = error instanceof Error ? error.message : 'Unknown error';
+					failures.push(`${label}: ${message}`);
+
+					if (message.includes('role required') || message.includes('Not authenticated')) {
+						break;
+					}
+				}
+			}
+
+			if (failures.length > 0) {
+				uploadError = `Saved ${createdCount + updatedCount} isotope records, but ${failures.length} failed. ${failures.slice(0, 3).join(' | ')}`;
+			} else {
+				uploadMessage = `Saved ${uploadResult.items.length} isotope records from ${uploadResult.sourceLineCount} rows. ${createdCount} created, ${updatedCount} updated.`;
+			}
+		} finally {
+			isUploading = false;
 		}
 	}
 
@@ -310,6 +442,7 @@
 
 				<div class="writer-page__helper">
 					<p>Provide the element short name, integer mass number, and optional suffix separately.</p>
+					<p>If the full element name is left blank, the app will infer it from a recognized symbol.</p>
 					<p>All numeric fields accept decimals except for mass number, which stays an integer.</p>
 					<p>Submitting the same isotope with a new energy will append that energy to the stored list.</p>
 				</div>
@@ -332,6 +465,92 @@
 					</button>
 				</div>
 			</form>
+
+			<div class="writer-upload">
+				<div class="writer-upload__header">
+					<div>
+						<h3>Upload isotope rows</h3>
+						<p>
+							Accepted format: <code>Cd-115B D 2.2280 527.9</code>. The trailing letter is
+							treated as a variant marker and only contributes another energy for the same isotope.
+						</p>
+					</div>
+				</div>
+
+				<label class="writer-upload__picker">
+					<span>Select a text file</span>
+					<input type="file" accept=".txt,.dat,.csv" bind:files={uploadFiles} onchange={handleUploadChange} />
+				</label>
+
+				<div class="writer-page__helper">
+					<p>The full element name is inferred from the symbol in each row.</p>
+					<p>Variant letters like <code>A</code> or <code>B</code> are ignored for isotope identity and grouped into one record.</p>
+					<p>Rows for the same isotope must agree on half-life value and unit.</p>
+				</div>
+
+				{#if uploadParseError}
+					<p class="writer-page__feedback writer-page__feedback--error">{uploadParseError}</p>
+				{/if}
+
+				{#if uploadResult}
+					<div class="writer-upload__summary">
+						<p><strong>File:</strong> {uploadFileName}</p>
+						<p><strong>Parsed rows:</strong> {uploadResult.sourceLineCount}</p>
+						<p><strong>Grouped isotopes:</strong> {uploadResult.items.length}</p>
+						{#if uploadResult.ignoredVariantCount > 0}
+							<p>
+								<strong>Ignored variant letters:</strong> {uploadResult.ignoredVariantCount}
+							</p>
+						{/if}
+					</div>
+
+					<div class="writer-upload__table-wrap">
+						<table class="writer-upload__table">
+							<thead>
+								<tr>
+									<th>Isotope</th>
+									<th>Element</th>
+									<th>Half-life</th>
+									<th>Energies</th>
+									<th>Lines</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each uploadResult.items as item (`${item.shortName}-${item.massNumber}`)}
+									<tr>
+										<td>{item.shortName}-{item.massNumber}</td>
+										<td>{item.elementName}</td>
+										<td>{item.halfLife.number} {item.halfLife.unit}</td>
+										<td>{item.energies.join(', ')}</td>
+										<td>{item.lineNumbers.join(', ')}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+
+					{#if uploadError}
+						<p class="writer-page__feedback writer-page__feedback--error">{uploadError}</p>
+					{/if}
+
+					{#if uploadMessage}
+						<p class="writer-page__feedback writer-page__feedback--success">{uploadMessage}</p>
+					{/if}
+
+					<div class="writer-form__actions">
+						<button
+							type="button"
+							class="btn variant-filled-primary"
+							disabled={isUploading || isSubmitting || !writerAccess}
+							onclick={() => {
+								void submitUploadedIsotopes();
+							}}
+						>
+							{isUploading ? 'Saving Upload...' : 'Save Uploaded Isotopes'}
+						</button>
+					</div>
+				{/if}
+			</div>
 		</div>
 	{/if}
 </section>
@@ -505,6 +724,68 @@
 		justify-content: flex-start;
 	}
 
+	.writer-upload {
+		margin-top: 2rem;
+		padding-top: 1.5rem;
+		border-top: 1px solid var(--writer-card-border);
+		display: grid;
+		gap: 1rem;
+	}
+
+	.writer-upload__header h3,
+	.writer-upload__header p,
+	.writer-upload__summary p {
+		margin: 0;
+	}
+
+	.writer-upload__header p,
+	.writer-upload__summary {
+		margin-top: 0.4rem;
+	}
+
+	.writer-upload__picker {
+		display: grid;
+		gap: 0.5rem;
+		font-weight: 600;
+	}
+
+	.writer-upload__picker input {
+		font-weight: 400;
+	}
+
+	.writer-upload__summary {
+		display: grid;
+		gap: 0.35rem;
+		padding: 1rem 1.1rem;
+		border-radius: 1rem;
+		background: rgb(15 23 42 / 0.04);
+	}
+
+	.writer-upload__table-wrap {
+		overflow-x: auto;
+	}
+
+	.writer-upload__table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.95rem;
+	}
+
+	.writer-upload__table th,
+	.writer-upload__table td {
+		padding: 0.75rem;
+		border-bottom: 1px solid var(--writer-card-border);
+		text-align: left;
+		vertical-align: top;
+	}
+
+	.writer-upload__table th {
+		font-size: 0.82rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--writer-accent);
+	}
+
 	code {
 		padding: 0.1rem 0.35rem;
 		border-radius: 0.4rem;
@@ -534,6 +815,10 @@
 			--writer-notice-text: rgb(253 230 138);
 			--writer-code-bg: rgb(255 255 255 / 0.08);
 			--writer-code-text: rgb(241 245 249);
+		}
+
+		.writer-upload__summary {
+			background: rgb(255 255 255 / 0.05);
 		}
 	}
 

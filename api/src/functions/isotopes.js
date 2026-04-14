@@ -164,14 +164,12 @@ async function findExistingIsotope(container, item) {
 		query: `
 			SELECT TOP 1 * FROM c
 			WHERE (
-				LOWER(c.elementName) = @elementName
-				AND LOWER(c.shortName) = @shortName
+				LOWER(c.shortName) = @shortName
 				AND c.massNumber = @massNumber
 				AND LOWER(c.suffix) = @suffix
 			)
 		`,
 		parameters: [
-			{ name: '@elementName', value: item.elementName.toLowerCase() },
 			{ name: '@shortName', value: item.shortName.toLowerCase() },
 			{ name: '@massNumber', value: item.massNumber },
 			{ name: '@suffix', value: item.suffix.toLowerCase() }
