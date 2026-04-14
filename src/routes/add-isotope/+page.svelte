@@ -57,6 +57,39 @@
 		};
 	}
 
+	function isClientPrincipal(value: unknown): value is ClientPrincipal {
+		return typeof value === 'object' && value !== null;
+	}
+
+	function extractClientPrincipal(payload: unknown): ClientPrincipal | null {
+		if (Array.isArray(payload)) {
+			for (const entry of payload) {
+				if (isClientPrincipal(entry) && isClientPrincipal((entry as AuthEnvelope).clientPrincipal)) {
+					return (entry as AuthEnvelope).clientPrincipal ?? null;
+				}
+
+				if (isClientPrincipal(entry) && ('userId' in entry || 'userDetails' in entry || 'userRoles' in entry)) {
+					return entry as ClientPrincipal;
+				}
+			}
+
+			return null;
+		}
+
+		if (isClientPrincipal(payload) && isClientPrincipal((payload as AuthEnvelope).clientPrincipal)) {
+			return (payload as AuthEnvelope).clientPrincipal ?? null;
+		}
+
+		if (
+			isClientPrincipal(payload) &&
+			('userId' in payload || 'userDetails' in payload || 'userRoles' in payload)
+		) {
+			return payload as ClientPrincipal;
+		}
+
+		return null;
+	}
+
 	async function refreshAuthState() {
 		if (!browser) {
 			return;
@@ -96,8 +129,8 @@
 			}
 
 			authSupported = true;
-			const payload = (await response.json()) as AuthEnvelope[];
-			principal = payload[0]?.clientPrincipal ?? null;
+			const payload = await response.json();
+			principal = extractClientPrincipal(payload);
 		} catch {
 			authSupported = true;
 			principal = null;
@@ -145,6 +178,11 @@
 	async function submitIsotope() {
 		submitMessage = '';
 		submitError = '';
+
+		if (!writerAccess) {
+			submitError = `Your account is signed in, but it does not have the '${WRITER_ROLE}' role required to save isotope data.`;
+			return;
+		}
 
 		if (!isotopeFormRef?.validateIsotopeInfo()) {
 			isotopeFormRef?.showValidationErrors();
@@ -252,14 +290,6 @@
 				<p class="writer-page__notice">{authMessage}</p>
 			{/if}
 		</div>
-	{:else if !writerAccess}
-		<div class="writer-card writer-card--warning">
-			<h2>Writer role required</h2>
-			<p>
-				You are signed in as {principal?.userDetails || 'this account'}, but that account does not
-				have the <code>{WRITER_ROLE}</code> role.
-			</p>
-		</div>
 	{:else}
 		<div class="writer-card">
 			<div class="writer-card__header">
@@ -275,6 +305,13 @@
 					<strong>{principal?.userDetails || principal?.userId || 'Unknown user'}</strong>
 				</div>
 			</div>
+
+			{#if !writerAccess}
+				<div class="writer-page__feedback writer-page__feedback--warning" role="status">
+					This account is signed in, but it does not have the <code>{WRITER_ROLE}</code> role.
+					You can view and fill out the form, but saving is disabled until that role is assigned.
+				</div>
+			{/if}
 
 			<form
 				class="writer-form"
@@ -299,7 +336,11 @@
 				{/if}
 
 				<div class="writer-form__actions">
-					<button type="submit" class="btn variant-filled-primary" disabled={isSubmitting}>
+					<button
+						type="submit"
+						class="btn variant-filled-primary"
+						disabled={isSubmitting || !writerAccess}
+					>
 						{isSubmitting ? 'Saving...' : 'Save Isotope'}
 					</button>
 				</div>
@@ -458,6 +499,12 @@
 		background: var(--writer-success-bg);
 		color: var(--writer-success-text);
 		border: 1px solid var(--writer-success-border);
+	}
+
+	.writer-page__feedback--warning {
+		background: var(--writer-helper-bg);
+		color: var(--writer-text);
+		border: 1px solid var(--writer-helper-border);
 	}
 
 	.writer-page__notice {
