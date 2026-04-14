@@ -310,13 +310,32 @@
 
 <style>
 	.writer-page {
+		--writer-text: rgb(15 23 42);
+		--writer-muted: rgb(51 65 85);
+		--writer-accent: rgb(71 85 105);
+		--writer-card-bg: rgb(255 252 245 / 0.96);
+		--writer-card-border: rgb(15 23 42 / 0.08);
+		--writer-card-shadow: 0 28px 60px rgb(15 23 42 / 0.12);
+		--writer-warning-border: rgb(245 158 11 / 0.28);
+		--writer-identity-bg: rgb(15 23 42 / 0.05);
+		--writer-helper-bg: #fff7e7;
+		--writer-helper-border: rgb(245 158 11 / 0.18);
+		--writer-error-bg: rgb(254 242 242);
+		--writer-error-text: rgb(153 27 27);
+		--writer-error-border: rgb(248 113 113 / 0.28);
+		--writer-success-bg: rgb(240 253 244);
+		--writer-success-text: rgb(22 101 52);
+		--writer-success-border: rgb(74 222 128 / 0.25);
+		--writer-notice-text: rgb(180 83 9);
+		--writer-code-bg: rgb(15 23 42 / 0.08);
+		--writer-code-text: inherit;
 		padding: 3rem 5% 0;
 		display: grid;
 		gap: 1.5rem;
 	}
 
 	.writer-page__hero {
-		color: rgb(15 23 42);
+		color: var(--writer-text);
 		max-width: 42rem;
 	}
 
@@ -326,7 +345,7 @@
 		font-weight: 700;
 		letter-spacing: 0.12em;
 		text-transform: uppercase;
-		color: rgb(71 85 105);
+		color: var(--writer-accent);
 	}
 
 	.writer-page__title {
@@ -344,7 +363,7 @@
 		justify-content: center;
 		width: 1.1em;
 		height: 1.1em;
-		color: rgb(71 85 105);
+		color: var(--writer-accent);
 	}
 
 	.writer-page__title-icon svg {
@@ -356,20 +375,21 @@
 	.writer-page__summary {
 		margin: 1rem 0 0;
 		font-size: 1rem;
-		color: rgb(51 65 85);
+		color: var(--writer-muted);
 	}
 
 	.writer-card {
-		background: rgb(255 252 245 / 0.96);
-		border: 1px solid rgb(15 23 42 / 0.08);
+		background: var(--writer-card-bg);
+		border: 1px solid var(--writer-card-border);
 		border-radius: 1.5rem;
 		padding: 1.5rem;
-		box-shadow: 0 28px 60px rgb(15 23 42 / 0.12);
+		box-shadow: var(--writer-card-shadow);
 		max-width: 52rem;
+		color: var(--writer-text);
 	}
 
 	.writer-card--warning {
-		border-color: rgb(245 158 11 / 0.28);
+		border-color: var(--writer-warning-border);
 	}
 
 	.writer-card__header {
@@ -396,7 +416,7 @@
 		gap: 0.25rem;
 		padding: 0.9rem 1rem;
 		border-radius: 1rem;
-		background: rgb(15 23 42 / 0.05);
+		background: var(--writer-identity-bg);
 		font-size: 0.9rem;
 	}
 
@@ -408,8 +428,8 @@
 	.writer-page__helper {
 		padding: 1rem 1.1rem;
 		border-radius: 1rem;
-		background: #fff7e7;
-		border: 1px solid rgb(245 158 11 / 0.18);
+		background: var(--writer-helper-bg);
+		border: 1px solid var(--writer-helper-border);
 		font-size: 0.95rem;
 	}
 
@@ -429,21 +449,21 @@
 	}
 
 	.writer-page__feedback--error {
-		background: rgb(254 242 242);
-		color: rgb(153 27 27);
-		border: 1px solid rgb(248 113 113 / 0.28);
+		background: var(--writer-error-bg);
+		color: var(--writer-error-text);
+		border: 1px solid var(--writer-error-border);
 	}
 
 	.writer-page__feedback--success {
-		background: rgb(240 253 244);
-		color: rgb(22 101 52);
-		border: 1px solid rgb(74 222 128 / 0.25);
+		background: var(--writer-success-bg);
+		color: var(--writer-success-text);
+		border: 1px solid var(--writer-success-border);
 	}
 
 	.writer-page__notice {
 		margin-top: 0.85rem;
 		font-size: 0.95rem;
-		color: rgb(180 83 9);
+		color: var(--writer-notice-text);
 	}
 
 	.writer-form__actions {
@@ -454,8 +474,33 @@
 	code {
 		padding: 0.1rem 0.35rem;
 		border-radius: 0.4rem;
-		background: rgb(15 23 42 / 0.08);
+		background: var(--writer-code-bg);
+		color: var(--writer-code-text);
 		font-size: 0.92em;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		.writer-page {
+			--writer-text: rgb(226 232 240);
+			--writer-muted: rgb(203 213 225);
+			--writer-accent: rgb(148 163 184);
+			--writer-card-bg: rgb(15 23 42 / 0.82);
+			--writer-card-border: rgb(148 163 184 / 0.18);
+			--writer-card-shadow: 0 20px 48px rgb(0 0 0 / 0.28);
+			--writer-warning-border: rgb(245 158 11 / 0.34);
+			--writer-identity-bg: rgb(255 255 255 / 0.06);
+			--writer-helper-bg: rgb(120 53 15 / 0.22);
+			--writer-helper-border: rgb(245 158 11 / 0.3);
+			--writer-error-bg: rgb(69 10 10 / 0.45);
+			--writer-error-text: rgb(254 202 202);
+			--writer-error-border: rgb(248 113 113 / 0.3);
+			--writer-success-bg: rgb(20 83 45 / 0.4);
+			--writer-success-text: rgb(187 247 208);
+			--writer-success-border: rgb(74 222 128 / 0.28);
+			--writer-notice-text: rgb(253 230 138);
+			--writer-code-bg: rgb(255 255 255 / 0.08);
+			--writer-code-text: rgb(241 245 249);
+		}
 	}
 
 	@media (max-width: 640px) {
