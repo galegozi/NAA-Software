@@ -1,5 +1,10 @@
 {
 	"routes": [
+		{
+			"route": "/api/isotopes",
+			"methods": ["POST"],
+			"allowedRoles": ["isotope_writer"]
+		}
 	],
 	"responseOverrides": {
 		"401": {

@@ -51,22 +51,52 @@ This project now includes an integrated Azure Functions backend under `api/` for
 ### What it exposes
 
 - `GET /api/isotopes`
+- `POST /api/isotopes`
 
 The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
 
 ### API access control
 
-The integrated Azure Functions endpoint is protected at the Static Web Apps layer in `staticwebapp.config.json` and is limited to the custom `isotope-reader` role.
+The integrated Azure Functions endpoint stays at `authLevel: 'anonymous'`, because Azure Static Web Apps is the layer that authenticates and authorizes requests before forwarding them to the function.
 
-This is narrower than the built-in `authenticated` role. Only users explicitly assigned to `isotope-reader` can load the app or call `/api/isotopes`.
+`POST /api/isotopes` is locked down in two places:
 
-To grant access, assign users invitations/roles in Azure Static Web Apps so their identity includes `isotope-reader` after sign-in.
+- `staticwebapp.config.json` allows only the custom `isotope_writer` role to call that method.
+- The function independently validates the forwarded `x-ms-client-principal` header and rejects callers that do not have the same role.
 
-The current config also protects the app routes with the same role and redirects unauthenticated users to Azure AD sign-in.
+That second check matters because it prevents an accidental config regression from silently opening write access.
 
-For integrated Static Web Apps APIs, the function itself should remain `authLevel: 'anonymous'` because Static Web Apps performs the authorization before forwarding the request. Setting the function to `function` or `admin` is not the right model for SWA-integrated APIs.
+`GET /api/isotopes` remains available with the current app behavior. If you also want reads restricted, add a matching `GET` route rule with the roles you want.
 
-Important limitation: because this app is a static frontend, any browser user who is allowed to use the app can also call the same `/api/...` endpoint from the browser. If you need the Cosmos query to be inaccessible to end users entirely, that work must move to a server-rendered/backend-controlled path instead of a client-side fetch.
+Important limitation: this is still a browser-callable API. Any user who has the `isotope_writer` role can invoke the write endpoint from the browser or other clients while signed in. If writes must only come from trusted backend automation, move the write path behind a separate backend service that is not directly exposed to browser users.
+
+To grant access, assign the `isotope_writer` role in Azure Static Web Apps invitations/role assignments.
+
+### Write payload
+
+`POST /api/isotopes` expects JSON in this shape:
+
+```json
+{
+	"elementName": "Cobalt",
+	"shortName": "Co",
+	"massNumber": 60,
+	"suffix": "m",
+	"energies": [1173.2, 1332.5],
+	"halfLife": {
+		"number": 5.2714,
+		"unit": "years"
+	}
+}
+```
+
+The function derives:
+
+- a GUID `id`
+- `halfLifeSeconds`
+- audit metadata such as `createdAt` and `createdBy`
+
+If the isotope already exists, the function updates that existing document and appends any new energies that are not already present.
 
 ### Backend configuration
 
@@ -76,6 +106,7 @@ Set these application settings in Azure Static Web Apps:
 - `COSMOSDB_KEY`
 - `COSMOSDB_DATABASE`
 - `COSMOSDB_CONTAINER`
+- `ISOTOPE_WRITE_ROLE` (optional, defaults to `isotope_writer`)
 - `COSMOSDB_QUERY` (optional, defaults to `SELECT * FROM c`)
 
 The included sample file is `api/local.settings.sample.json`.
