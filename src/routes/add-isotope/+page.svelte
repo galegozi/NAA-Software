@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import IsotopeInfo from '$lib/components/isotopeInfo.svelte';
-	import type { IsotopeInfo as IsotopeInfoType } from '$lib/types.js';
-	import { createIsotopeInfo } from '$lib/utils/naaUtils.js';
+	import WriteIsotopeForm from '$lib/components/WriteIsotopeForm.svelte';
+	import type { IsotopeWriteForm } from '$lib/types.js';
 	import {
 		getSignInErrorMessage,
 		isEnvironmentWithoutSignIn
@@ -21,8 +20,20 @@
 
 	const WRITER_ROLE = 'isotope_writer';
 
-	let isotopeForm = $state<IsotopeInfoType>(createIsotopeInfo());
-	let isotopeFormRef = $state<IsotopeInfo | null>(null);
+	function createWriteIsotopeForm(): IsotopeWriteForm {
+		return {
+			elementName: '',
+			shortName: '',
+			massNumber: 0,
+			suffix: '',
+			energy: 0,
+			halfLife: 0,
+			unit: 'seconds'
+		};
+	}
+
+	let isotopeForm = $state<IsotopeWriteForm>(createWriteIsotopeForm());
+	let isotopeFormRef = $state<WriteIsotopeForm | null>(null);
 	let isCheckingAuth = $state(true);
 	let isSubmitting = $state(false);
 	let authMessage = $state('');
@@ -39,23 +50,6 @@
 	let signInAvailable = $derived(
 		currentHostname !== '' && !isEnvironmentWithoutSignIn(currentHostname)
 	);
-
-	function parseIsotopeName(isotopeName: string) {
-		const normalizedName = isotopeName.trim();
-		const match = normalizedName.match(/^([A-Za-z]{1,3})\s*-\s*(\d{1,3})([A-Za-z0-9]*)$/);
-
-		if (!match) {
-			throw new Error(
-				'Isotope must use the format Symbol-Mass, for example Au-198 or Tc-99m.'
-			);
-		}
-
-		return {
-			shortName: match[1],
-			massNumber: Number(match[2]),
-			suffix: match[3] ?? ''
-		};
-	}
 
 	function isClientPrincipal(value: unknown): value is ClientPrincipal {
 		return typeof value === 'object' && value !== null;
@@ -184,17 +178,9 @@
 			return;
 		}
 
-		if (!isotopeFormRef?.validateIsotopeInfo()) {
+		if (!isotopeFormRef?.validateWriteIsotopeForm()) {
 			isotopeFormRef?.showValidationErrors();
 			submitError = isotopeFormRef?.getValidationErrors()?.join('. ') || 'Please correct the form.';
-			return;
-		}
-
-		let isotopeParts;
-		try {
-			isotopeParts = parseIsotopeName(isotopeForm.isotopeName);
-		} catch (error) {
-			submitError = error instanceof Error ? error.message : 'Invalid isotope name.';
 			return;
 		}
 
@@ -209,9 +195,9 @@
 				},
 				body: JSON.stringify({
 					elementName: isotopeForm.elementName,
-					shortName: isotopeParts.shortName,
-					massNumber: isotopeParts.massNumber,
-					suffix: isotopeParts.suffix,
+					shortName: isotopeForm.shortName,
+					massNumber: isotopeForm.massNumber,
+					suffix: isotopeForm.suffix,
 					energies: [isotopeForm.energy],
 					halfLife: {
 						number: isotopeForm.halfLife,
@@ -233,7 +219,7 @@
 			submitMessage = payload?.created
 				? 'Isotope added successfully.'
 				: 'Existing isotope updated successfully. Any new energy was appended.';
-			isotopeForm = createIsotopeInfo();
+			isotopeForm = createWriteIsotopeForm();
 			isotopeFormRef?.hideValidationErrors();
 		} catch (error) {
 			submitError = error instanceof Error ? error.message : 'Unable to save isotope.';
@@ -320,10 +306,11 @@
 					void submitIsotope();
 				}}
 			>
-				<IsotopeInfo bind:this={isotopeFormRef} bind:isotopeInfo={isotopeForm} />
+				<WriteIsotopeForm bind:this={isotopeFormRef} bind:formData={isotopeForm} />
 
 				<div class="writer-page__helper">
-					<p>Use isotope names like <strong>Au-198</strong> or <strong>Tc-99m</strong>.</p>
+					<p>Provide the element short name, integer mass number, and optional suffix separately.</p>
+					<p>All numeric fields accept decimals except for mass number, which stays an integer.</p>
 					<p>Submitting the same isotope with a new energy will append that energy to the stored list.</p>
 				</div>
 

@@ -50,7 +50,7 @@ export interface ReferenceMaterial extends BaseMaterialInfo {
 	knownUncertainty: number[];
 }
 
-export interface UnknownMaterial extends BaseMaterialInfo {}
+export type UnknownMaterial = BaseMaterialInfo;
 
 export interface Materials {
 	reference: ReferenceMaterial[];
@@ -77,4 +77,14 @@ export interface IsotopeCatalogItem {
 	energies: number[];
 	halfLife: HalfLife;
 	halfLifeSeconds: number;
+}
+
+export interface IsotopeWriteForm {
+	elementName: string;
+	shortName: string;
+	massNumber: number;
+	suffix: string;
+	energy: number;
+	halfLife: number;
+	unit: HalfLife['unit'];
 }
