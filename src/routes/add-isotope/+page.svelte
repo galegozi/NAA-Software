@@ -518,7 +518,7 @@
 							<tbody>
 								{#each uploadResult.items as item (`${item.shortName}-${item.massNumber}`)}
 									<tr>
-										<td>{item.shortName}-{item.massNumber}</td>
+										<td>{item.shortName}-{item.massNumber}{item.suffix}</td>
 										<td>{item.elementName}</td>
 										<td>{item.halfLife.number} {item.halfLife.unit}</td>
 										<td>{item.energies.join(', ')}</td>

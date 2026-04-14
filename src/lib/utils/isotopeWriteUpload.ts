@@ -39,7 +39,8 @@ export interface ParsedIsotopeUploadRow {
 	elementName: string;
 	shortName: string;
 	massNumber: number;
-	variant: string;
+	suffix: string;
+	variantCode: string;
 	halfLife: number;
 	unit: HalfLife['unit'];
 	energy: number;
@@ -74,6 +75,26 @@ function compareNumbers(left: number, right: number): number {
 	return left - right;
 }
 
+function getContiguousVariantCodes(rows: ParsedIsotopeUploadRow[]): Set<string> {
+	const suffixCodes = new Set(
+		rows
+			.map((row) => row.variantCode)
+			.filter((variantCode) => variantCode.length === 1 && /^[A-Z]$/u.test(variantCode))
+	);
+
+	const contiguousCodes = new Set<string>();
+	for (let code = 65; code <= 90; code += 1) {
+		const letter = String.fromCharCode(code);
+		if (!suffixCodes.has(letter)) {
+			break;
+		}
+
+		contiguousCodes.add(letter);
+	}
+
+	return contiguousCodes;
+}
+
 export function parseIsotopeWriteUpload(text: string): ParsedIsotopeUploadResult {
 	const sourceLines = text
 		.split(/\r?\n/u)
@@ -85,8 +106,6 @@ export function parseIsotopeWriteUpload(text: string): ParsedIsotopeUploadResult
 	}
 
 	const rows: ParsedIsotopeUploadRow[] = [];
-	const itemsByKey = new Map<string, ParsedIsotopeUploadItem>();
-	let ignoredVariantCount = 0;
 
 	for (const [index, rawLine] of sourceLines.entries()) {
 		const lineNumber = index + 1;
@@ -107,7 +126,8 @@ export function parseIsotopeWriteUpload(text: string): ParsedIsotopeUploadResult
 
 		const shortName = normalizeElementSymbol(isotopeMatch[1]);
 		const massNumber = Number.parseInt(isotopeMatch[2], 10);
-		const variant = isotopeMatch[3].toUpperCase();
+		const suffix = isotopeMatch[3].toLowerCase();
+		const variantCode = isotopeMatch[3].toUpperCase();
 		const elementName = lookupElementName(shortName);
 
 		if (!elementName) {
@@ -134,59 +154,83 @@ export function parseIsotopeWriteUpload(text: string): ParsedIsotopeUploadResult
 			throw new Error(`Line ${lineNumber} has an invalid energy value '${parts[3]}'.`);
 		}
 
-		if (variant) {
-			ignoredVariantCount += 1;
-		}
-
 		const row: ParsedIsotopeUploadRow = {
 			lineNumber,
 			raw: rawLine,
 			elementName,
 			shortName,
 			massNumber,
-			variant,
+			suffix,
+			variantCode,
 			halfLife,
 			unit,
 			energy
 		};
 		rows.push(row);
+	}
 
-		const itemKey = `${shortName}-${massNumber}`;
+	const itemsByKey = new Map<string, ParsedIsotopeUploadItem>();
+	let ignoredVariantCount = 0;
+	const rowsByBaseKey = new Map<string, ParsedIsotopeUploadRow[]>();
+
+	for (const row of rows) {
+		const baseKey = `${row.shortName}-${row.massNumber}`;
+		const group = rowsByBaseKey.get(baseKey);
+		if (group) {
+			group.push(row);
+		} else {
+			rowsByBaseKey.set(baseKey, [row]);
+		}
+	}
+
+	for (const groupRows of rowsByBaseKey.values()) {
+		const variantCodes = getContiguousVariantCodes(groupRows);
+
+		for (const row of groupRows) {
+			const isVariant = row.variantCode !== '' && variantCodes.has(row.variantCode);
+			const itemSuffix = isVariant ? '' : row.suffix;
+			const itemKey = `${row.shortName}-${row.massNumber}-${itemSuffix}`;
+
+			if (isVariant) {
+				ignoredVariantCount += 1;
+			}
+
 		const existingItem = itemsByKey.get(itemKey);
 
 		if (!existingItem) {
 			itemsByKey.set(itemKey, {
-				elementName,
-				shortName,
-				massNumber,
-				suffix: '',
-				energies: [energy],
+				elementName: row.elementName,
+				shortName: row.shortName,
+				massNumber: row.massNumber,
+				suffix: itemSuffix,
+				energies: [row.energy],
 				halfLife: {
-					number: halfLife,
-					unit
+					number: row.halfLife,
+					unit: row.unit
 				},
-				lineNumbers: [lineNumber],
-				variantLetters: variant ? [variant] : []
+				lineNumbers: [row.lineNumber],
+				variantLetters: isVariant ? [row.variantCode] : []
 			});
 			continue;
 		}
 
-		existingItem.lineNumbers.push(lineNumber);
-		if (variant) {
-			existingItem.variantLetters.push(variant);
+		existingItem.lineNumbers.push(row.lineNumber);
+		if (isVariant) {
+			existingItem.variantLetters.push(row.variantCode);
 		}
 
 		if (
-			existingItem.halfLife.unit !== unit ||
-			Math.abs(existingItem.halfLife.number - halfLife) > 1e-9
+			existingItem.halfLife.unit !== row.unit ||
+			Math.abs(existingItem.halfLife.number - row.halfLife) > 1e-9
 		) {
 			throw new Error(
-				`Line ${lineNumber} conflicts with earlier rows for ${shortName}-${massNumber}. Uploaded variants for the same isotope must use the same half-life value and unit.`
+				`Line ${row.lineNumber} conflicts with earlier rows for ${row.shortName}-${row.massNumber}${itemSuffix ? itemSuffix : ''}. Uploaded variants for the same isotope must use the same half-life value and unit.`
 			);
 		}
 
-		if (!existingItem.energies.includes(energy)) {
-			existingItem.energies = [...existingItem.energies, energy].sort(compareNumbers);
+		if (!existingItem.energies.includes(row.energy)) {
+			existingItem.energies = [...existingItem.energies, row.energy].sort(compareNumbers);
+		}
 		}
 	}
 
