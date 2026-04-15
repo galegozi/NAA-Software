@@ -59,6 +59,65 @@ function getIsotopeInfoStartStep(): number {
 	return STEP_CONSTANTS.UNAUTHED.ISOTOPE_INFO_START;
 }
 
+function getNavigationStepLabel(
+	step: number,
+	isotopeCount: number,
+	referenceCountOrUnknownCount: number,
+	unknownCount?: number,
+	authenticated = false
+): string {
+	const { referenceCount, unknownCount: resolvedUnknownCount } =
+		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
+	const stepType = getStepType(
+		step,
+		isotopeCount,
+		referenceCount,
+		resolvedUnknownCount,
+		authenticated
+	);
+
+	switch (stepType) {
+		case StepType.WELCOME:
+			return 'Welcome';
+		case StepType.ISOTOPE_SELECT:
+			return 'Select Isotopes';
+		case StepType.ISOTOPE_COUNT:
+			return 'Number of Elements';
+		case StepType.ISOTOPE_INFO: {
+			const isoIndex = getIsotopeIndex(step);
+			return isotopeCount === 1
+				? 'Element Information'
+				: `Element ${isoIndex + 1} Information`;
+		}
+		case StepType.REFERENCE_COUNT:
+			return 'Number of Reference Materials';
+		case StepType.REFERENCE_INFO: {
+			const refIndex = step - getReferenceInfoStartStep(isotopeCount, authenticated);
+			return referenceCount === 1
+				? 'Reference Material Information'
+				: `Reference Material ${refIndex + 1} Information`;
+		}
+		case StepType.UNKNOWN_COUNT:
+			return 'Number of Unknown Materials';
+		case StepType.UNKNOWN_INFO: {
+			const unknownIndex = getUnknownIndex(
+				step,
+				isotopeCount,
+				referenceCount,
+				resolvedUnknownCount,
+				authenticated
+			);
+			return resolvedUnknownCount === 1
+				? 'Unknown Material Information'
+				: `Unknown ${unknownIndex + 1} Information`;
+		}
+		case StepType.REVIEW:
+			return 'Review All Information';
+		default:
+			return 'Step';
+	}
+}
+
 /**
  * Calculate the step number for reference material input
  */
@@ -298,83 +357,17 @@ export function getBackButtonText(
 	unknownCount?: number,
 	authenticated = false
 ): string {
-	if (step <= getInitialIsotopeStep(authenticated)) {
+	if (step <= getWelcomeStep()) {
 		return 'Back';
 	}
 
-	const { referenceCount, unknownCount: resolvedUnknownCount } =
-		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
-	const referenceCountStep = getReferenceCountStep(isotopeCount, authenticated);
-	const referenceInfoStartStep = getReferenceInfoStartStep(isotopeCount, authenticated);
-	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount, authenticated);
-	const reviewStep = getReviewStep(
+	return `Back: ${getNavigationStepLabel(
+		step - 1,
 		isotopeCount,
-		referenceCount,
-		resolvedUnknownCount,
+		referenceCountOrUnknownCount,
+		unknownCount,
 		authenticated
-	);
-
-	if (!authenticated && step >= getIsotopeInfoStartStep() && step < referenceCountStep) {
-		if (step === getIsotopeInfoStartStep()) {
-			return 'Back: Number of Elements';
-		}
-		const previousIsoNumber = getIsotopeIndex(step);
-		return isotopeCount > 1
-			? `Back: Element ${previousIsoNumber} Information`
-			: 'Back: Element Information';
-	}
-
-	if (step === referenceCountStep) {
-		if (authenticated) {
-			return 'Back: Select Isotopes';
-		}
-		return isotopeCount > 1
-			? `Back: Element ${isotopeCount} Information`
-			: 'Back: Element Information';
-	}
-
-	if (step >= referenceInfoStartStep && step < unknownCountStep) {
-		if (step === referenceInfoStartStep) {
-			return 'Back: Number of Reference Materials';
-		}
-		const previousRefNumber = step - referenceInfoStartStep;
-		return referenceCount > 1
-			? `Back: Reference Material ${previousRefNumber} Information`
-			: 'Back: Reference Material Information';
-	}
-
-	if (step === unknownCountStep) {
-		return referenceCount > 1
-			? `Back: Reference Material ${referenceCount} Information`
-			: 'Back: Reference Material Information';
-	}
-
-	if (step > unknownCountStep && step < reviewStep) {
-		if (step === unknownCountStep + 1) {
-			return 'Back: Number of Unknown Materials';
-		}
-		const previousUnknownNumber = getUnknownIndex(
-			step,
-			isotopeCount,
-			referenceCount,
-			undefined,
-			authenticated
-		);
-		return resolvedUnknownCount > 1
-			? `Back: Unknown ${previousUnknownNumber} Information`
-			: 'Back: Unknown Material Information';
-	}
-
-	if (step === reviewStep) {
-		if (resolvedUnknownCount <= 0) {
-			return 'Back: Unknown Count';
-		}
-		return resolvedUnknownCount > 1
-			? `Back: Unknown ${resolvedUnknownCount} Information`
-			: 'Back: Unknown Material Information';
-	}
-
-	return 'Back';
+	)}`;
 }
 
 /**
@@ -387,15 +380,18 @@ export function getNextButtonText(
 	unknownCount?: number,
 	authenticated = false
 ): string {
-	if (step < getInitialIsotopeStep(authenticated)) {
-		return authenticated ? 'Next: Select Isotopes' : 'Next: Number of Elements';
+	if (step < getWelcomeStep()) {
+		return `Next: ${getNavigationStepLabel(
+			getWelcomeStep(),
+			isotopeCount,
+			referenceCountOrUnknownCount,
+			unknownCount,
+			authenticated
+		)}`;
 	}
 
 	const { referenceCount, unknownCount: resolvedUnknownCount } =
 		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
-	const referenceCountStep = getReferenceCountStep(isotopeCount, authenticated);
-	const referenceInfoStartStep = getReferenceInfoStartStep(isotopeCount, authenticated);
-	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount, authenticated);
 	const reviewStep = getReviewStep(
 		isotopeCount,
 		referenceCount,
@@ -403,56 +399,17 @@ export function getNextButtonText(
 		authenticated
 	);
 
-	if (step === getInitialIsotopeStep(authenticated)) {
-		if (authenticated) {
-			return 'Next: Number of Reference Materials';
-		}
-		return isotopeCount === 1 ? 'Next: Element Information' : 'Next: Element 1 Information';
+	if (step >= reviewStep) {
+		return 'Review All Information';
 	}
 
-	if (!authenticated && step >= getIsotopeInfoStartStep() && step < referenceCountStep) {
-		const currentIsoIndex = getIsotopeIndex(step);
-		const nextIsoIndex = currentIsoIndex + 1;
-
-		if (nextIsoIndex < isotopeCount) {
-			return `Next: Element ${nextIsoIndex + 1} Information`;
-		}
-		return 'Next: Number of Reference Materials';
-	}
-
-	if (step === referenceCountStep) {
-		return referenceCount === 1
-			? 'Next: Reference Material Information'
-			: 'Next: Reference Material 1 Information';
-	}
-
-	if (step >= referenceInfoStartStep && step < unknownCountStep) {
-		const currentRefIndex = step - referenceInfoStartStep;
-		const nextRefIndex = currentRefIndex + 1;
-
-		if (nextRefIndex < referenceCount) {
-			return `Next: Reference Material ${nextRefIndex + 1} Information`;
-		}
-		return 'Next: Number of Unknown Materials';
-	}
-
-	if (step === unknownCountStep) {
-		return resolvedUnknownCount === 1
-			? 'Next: Unknown Material Information'
-			: 'Next: Unknown 1 Information';
-	}
-
-	if (step > unknownCountStep && step < reviewStep) {
-		const currentUnknownIdx = getUnknownIndex(step, isotopeCount, referenceCount);
-		const nextUnknownIdx = currentUnknownIdx + 1;
-
-		if (nextUnknownIdx < resolvedUnknownCount) {
-			return `Next: Unknown ${nextUnknownIdx + 1} Information`;
-		}
-		return 'Next: Review All';
-	}
-
-	return 'Review All Information';
+	return `Next: ${getNavigationStepLabel(
+		step + 1,
+		isotopeCount,
+		referenceCountOrUnknownCount,
+		unknownCount,
+		authenticated
+	)}`;
 }
 
 /**

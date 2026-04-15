@@ -584,6 +584,7 @@
 		padding: 3rem 5% 0;
 		display: grid;
 		gap: 1.5rem;
+		overflow-x: auto;
 	}
 
 	.writer-page__hero {
@@ -636,7 +637,8 @@
 		border-radius: 1.5rem;
 		padding: 1.5rem;
 		box-shadow: var(--writer-card-shadow);
-		max-width: 52rem;
+		inline-size: max-content;
+		min-inline-size: min(100%, 52rem);
 		color: var(--writer-text);
 	}
 
@@ -650,6 +652,10 @@
 		gap: 1rem;
 		align-items: start;
 		margin-bottom: 1.25rem;
+	}
+
+	.writer-card__header > :first-child {
+		flex: 1 1 auto;
 	}
 
 	.writer-card__header h2,
@@ -834,6 +840,7 @@
 
 		.writer-card {
 			padding: 1.1rem;
+			min-inline-size: 0;
 		}
 
 		.writer-card__header {
