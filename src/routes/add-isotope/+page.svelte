@@ -288,14 +288,19 @@
 		}
 	}
 
-	async function handleUploadChange() {
+	async function handleUploadChange(event: Event) {
 		uploadParseError = '';
 		uploadError = '';
 		uploadMessage = '';
 		uploadResult = null;
 		uploadFileName = '';
 
-		const file = uploadFiles?.[0];
+		const input = event.currentTarget;
+		if (!(input instanceof HTMLInputElement)) {
+			return;
+		}
+
+		const file = input.files?.[0];
 		if (!file) {
 			return;
 		}
@@ -516,7 +521,7 @@
 								</tr>
 							</thead>
 							<tbody>
-								{#each uploadResult.items as item (`${item.shortName}-${item.massNumber}`)}
+								{#each uploadResult.items as item (`${item.shortName}-${item.massNumber}-${item.suffix}`)}
 									<tr>
 										<td>{item.shortName}-{item.massNumber}{item.suffix}</td>
 										<td>{item.elementName}</td>
