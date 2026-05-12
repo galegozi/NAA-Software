@@ -1,7 +1,6 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
-	import { onMount } from 'svelte';
 	import WriteIsotopeForm from '$lib/components/WriteIsotopeForm.svelte';
+	import AuthGate from '$lib/components/AuthGate.svelte';
 	import type { IsotopeWriteForm } from '$lib/types.js';
 	import { lookupElementName } from '../../lib/utils/elementNames.js';
 	import {
@@ -9,21 +8,6 @@
 		type ParsedIsotopeUploadItem,
 		type ParsedIsotopeUploadResult
 	} from '../../lib/utils/isotopeWriteUpload.js';
-	import {
-		getSignInErrorMessage,
-		isEnvironmentWithoutSignIn
-	} from '$lib/utils/authEnvironment.js';
-
-	type ClientPrincipal = {
-		identityProvider?: string;
-		userId?: string;
-		userDetails?: string;
-		userRoles?: string[];
-	};
-
-	type AuthEnvelope = {
-		clientPrincipal?: ClientPrincipal | null;
-	};
 
 	type IsotopeWriteRequest = {
 		elementName: string;
@@ -53,10 +37,7 @@
 
 	let isotopeForm = $state<IsotopeWriteForm>(createWriteIsotopeForm());
 	let isotopeFormRef = $state<WriteIsotopeForm | null>(null);
-	let isCheckingAuth = $state(true);
 	let isSubmitting = $state(false);
-	let authMessage = $state('');
-	let hasInitializedAuth = $state(false);
 	let submitMessage = $state('');
 	let submitError = $state('');
 	let uploadFiles = $state<FileList | undefined>(undefined);
@@ -66,50 +47,7 @@
 	let uploadMessage = $state('');
 	let uploadError = $state('');
 	let isUploading = $state(false);
-	let currentHostname = $state('');
-	let authSupported = $state(false);
-	let principal = $state<ClientPrincipal | null>(null);
-
-	let isSignedIn = $derived(principal !== null);
-	let writerAccess = $derived(
-		principal !== null && Array.isArray(principal.userRoles) && principal.userRoles.includes(WRITER_ROLE)
-	);
-	let signInAvailable = $derived(
-		currentHostname !== '' && !isEnvironmentWithoutSignIn(currentHostname)
-	);
-
-	function isClientPrincipal(value: unknown): value is ClientPrincipal {
-		return typeof value === 'object' && value !== null;
-	}
-
-	function extractClientPrincipal(payload: unknown): ClientPrincipal | null {
-		if (Array.isArray(payload)) {
-			for (const entry of payload) {
-				if (isClientPrincipal(entry) && isClientPrincipal((entry as AuthEnvelope).clientPrincipal)) {
-					return (entry as AuthEnvelope).clientPrincipal ?? null;
-				}
-
-				if (isClientPrincipal(entry) && ('userId' in entry || 'userDetails' in entry || 'userRoles' in entry)) {
-					return entry as ClientPrincipal;
-				}
-			}
-
-			return null;
-		}
-
-		if (isClientPrincipal(payload) && isClientPrincipal((payload as AuthEnvelope).clientPrincipal)) {
-			return (payload as AuthEnvelope).clientPrincipal ?? null;
-		}
-
-		if (
-			isClientPrincipal(payload) &&
-			('userId' in payload || 'userDetails' in payload || 'userRoles' in payload)
-		) {
-			return payload as ClientPrincipal;
-		}
-
-		return null;
-	}
+	let authGateRef = $state<AuthGate | null>(null);
 
 	function resolveElementName(formData: Pick<IsotopeWriteForm, 'elementName' | 'shortName'>): string {
 		return formData.elementName.trim() || lookupElementName(formData.shortName);
@@ -162,7 +100,7 @@
 
 		if (!response.ok) {
 			if (response.status === 401 || response.status === 403) {
-				await refreshAuthState();
+				await authGateRef?.refreshAuthState();
 			}
 
 			throw new Error(body?.error || `Request failed with status ${response.status}`);
@@ -173,77 +111,7 @@
 		};
 	}
 
-	async function refreshAuthState() {
-		if (!browser) {
-			return;
-		}
-
-		isCheckingAuth = true;
-		authMessage = '';
-		currentHostname = window.location.hostname;
-
-		if (isEnvironmentWithoutSignIn(currentHostname)) {
-			authSupported = false;
-			principal = null;
-			isCheckingAuth = false;
-			return;
-		}
-
-		try {
-			const controller = new AbortController();
-			const timeoutId = window.setTimeout(() => controller.abort(), 5000);
-			const response = await fetch('/.auth/me', {
-				method: 'GET',
-				cache: 'no-store',
-				signal: controller.signal,
-				headers: {
-					accept: 'application/json'
-				}
-			});
-			window.clearTimeout(timeoutId);
-
-			if (response.status === 404) {
-				authSupported = false;
-				principal = null;
-				return;
-			}
-
-			if (!response.ok) {
-				authSupported = true;
-				principal = null;
-				authMessage = getSignInErrorMessage(currentHostname);
-				return;
-			}
-
-			authSupported = true;
-			const payload = await response.json();
-			principal = extractClientPrincipal(payload);
-		} catch {
-			authSupported = true;
-			principal = null;
-			authMessage = getSignInErrorMessage(currentHostname);
-		} finally {
-			isCheckingAuth = false;
-		}
-	}
-
-	async function handleSignIn() {
-		if (!browser) {
-			return;
-		}
-
-		authMessage = '';
-		const currentUrl = new URL(window.location.href);
-		const loginUrl = new URL('/.auth/login/aad', currentUrl.origin);
-		loginUrl.searchParams.set(
-			'post_login_redirect_uri',
-			currentUrl.pathname + currentUrl.search + currentUrl.hash
-		);
-
-		window.location.assign(loginUrl.toString());
-	}
-
-	async function submitIsotope() {
+	async function submitIsotope(writerAccess: boolean) {
 		submitMessage = '';
 		submitError = '';
 
@@ -302,7 +170,7 @@
 		}
 	}
 
-	async function submitUploadedIsotopes() {
+	async function submitUploadedIsotopes(writerAccess: boolean) {
 		uploadError = '';
 		uploadMessage = '';
 
@@ -352,14 +220,6 @@
 		}
 	}
 
-	onMount(() => {
-		if (!browser || hasInitializedAuth) {
-			return;
-		}
-
-		hasInitializedAuth = true;
-		void refreshAuthState();
-	});
 </script>
 
 <svelte:head>
@@ -385,171 +245,153 @@
 		</p>
 	</div>
 
-	{#if isCheckingAuth}
-		<div class="writer-card">
-			<p>Checking sign-in status...</p>
-		</div>
-	{:else if !signInAvailable || !authSupported}
-		<div class="writer-card writer-card--warning">
-			<h2>Azure deployment required</h2>
-			<p>This route is only available when the app is running behind Azure Static Web Apps sign-in.</p>
-		</div>
-	{:else if !isSignedIn}
-		<div class="writer-card writer-card--warning">
-			<h2>Sign in required</h2>
-			<p>Sign in with an account that has the isotope writer role to access this page.</p>
-			<button type="button" class="btn variant-filled-primary" onclick={handleSignIn}>
-				Sign In
-			</button>
-			{#if authMessage}
-				<p class="writer-page__notice">{authMessage}</p>
-			{/if}
-		</div>
-	{:else}
-		<div class="writer-card">
-			<div class="writer-card__header">
-				<div>
-					<h2>Add or update an isotope</h2>
-					<p>
-						If the isotope already exists, the API will keep the existing record and append any
-						new energy value.
-					</p>
-				</div>
-				<div class="writer-card__identity">
-					<span>Signed in as</span>
-					<strong>{principal?.userDetails || principal?.userId || 'Unknown user'}</strong>
-				</div>
-			</div>
-
-			{#if !writerAccess}
-				<div class="writer-page__feedback writer-page__feedback--warning" role="status">
-					This account is signed in, but it does not have the <code>{WRITER_ROLE}</code> role.
-					You can view and fill out the form, but saving is disabled until that role is assigned.
-				</div>
-			{/if}
-
-			<form
-				class="writer-form"
-				onsubmit={(event) => {
-					event.preventDefault();
-					void submitIsotope();
-				}}
-			>
-				<WriteIsotopeForm bind:this={isotopeFormRef} bind:formData={isotopeForm} />
-
-				<div class="writer-page__helper">
-					<p>Provide the element short name, integer mass number, and optional suffix separately.</p>
-					<p>If the full element name is left blank, the app will infer it from a recognized symbol.</p>
-					<p>All numeric fields accept decimals except for mass number, which stays an integer.</p>
-					<p>Submitting the same isotope with a new energy will append that energy to the stored list.</p>
-				</div>
-
-				{#if submitError}
-					<p class="writer-page__feedback writer-page__feedback--error">{submitError}</p>
-				{/if}
-
-				{#if submitMessage}
-					<p class="writer-page__feedback writer-page__feedback--success">{submitMessage}</p>
-				{/if}
-
-				<div class="writer-form__actions">
-					<button
-						type="submit"
-						class="btn variant-filled-primary"
-						disabled={isSubmitting || !writerAccess}
-					>
-						{isSubmitting ? 'Saving...' : 'Save Isotope'}
-					</button>
-				</div>
-			</form>
-
-			<div class="writer-upload">
-				<div class="writer-upload__header">
+	<AuthGate bind:this={authGateRef} requiredRole={WRITER_ROLE}>
+		{#snippet children({ principal, writerAccess })}
+			<div class="writer-card">
+				<div class="writer-card__header">
 					<div>
-						<h3>Upload isotope rows</h3>
+						<h2>Add or update an isotope</h2>
 						<p>
-							Accepted format: <code>Cd-115B D 2.2280 527.9</code>. The trailing letter is
-							treated as a variant marker and only contributes another energy for the same isotope.
+							If the isotope already exists, the API will keep the existing record and append any
+							new energy value.
 						</p>
 					</div>
+					<div class="writer-card__identity">
+						<span>Signed in as</span>
+						<strong>{principal?.userDetails || principal?.userId || 'Unknown user'}</strong>
+					</div>
 				</div>
 
-				<label class="writer-upload__picker">
-					<span>Select a text file</span>
-					<input type="file" accept=".txt,.dat,.csv" bind:files={uploadFiles} onchange={handleUploadChange} />
-				</label>
-
-				<div class="writer-page__helper">
-					<p>The full element name is inferred from the symbol in each row.</p>
-					<p>Variant letters like <code>A</code> or <code>B</code> are ignored for isotope identity and grouped into one record.</p>
-					<p>Rows for the same isotope must agree on half-life value and unit.</p>
-				</div>
-
-				{#if uploadParseError}
-					<p class="writer-page__feedback writer-page__feedback--error">{uploadParseError}</p>
+				{#if !writerAccess}
+					<div class="writer-page__feedback writer-page__feedback--warning" role="status">
+						This account is signed in, but it does not have the <code>{WRITER_ROLE}</code> role.
+						You can view and fill out the form, but saving is disabled until that role is assigned.
+					</div>
 				{/if}
 
-				{#if uploadResult}
-					<div class="writer-upload__summary">
-						<p><strong>File:</strong> {uploadFileName}</p>
-						<p><strong>Parsed rows:</strong> {uploadResult.sourceLineCount}</p>
-						<p><strong>Grouped isotopes:</strong> {uploadResult.items.length}</p>
-						{#if uploadResult.ignoredVariantCount > 0}
-							<p>
-								<strong>Ignored variant letters:</strong> {uploadResult.ignoredVariantCount}
-							</p>
-						{/if}
+				<form
+					class="writer-form"
+					onsubmit={(event) => {
+						event.preventDefault();
+						void submitIsotope(writerAccess);
+					}}
+				>
+					<WriteIsotopeForm bind:this={isotopeFormRef} bind:formData={isotopeForm} />
+
+					<div class="writer-page__helper">
+						<p>Provide the element short name, integer mass number, and optional suffix separately.</p>
+						<p>If the full element name is left blank, the app will infer it from a recognized symbol.</p>
+						<p>All numeric fields accept decimals except for mass number, which stays an integer.</p>
+						<p>Submitting the same isotope with a new energy will append that energy to the stored list.</p>
 					</div>
 
-					<div class="writer-upload__table-wrap">
-						<table class="writer-upload__table">
-							<thead>
-								<tr>
-									<th>Isotope</th>
-									<th>Element</th>
-									<th>Half-life</th>
-									<th>Energies</th>
-									<th>Lines</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each uploadResult.items as item (`${item.shortName}-${item.massNumber}-${item.suffix}`)}
-									<tr>
-										<td>{item.shortName}-{item.massNumber}{item.suffix}</td>
-										<td>{item.elementName}</td>
-										<td>{item.halfLife.number} {item.halfLife.unit}</td>
-										<td>{item.energies.join(', ')}</td>
-										<td>{item.lineNumbers.join(', ')}</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-
-					{#if uploadError}
-						<p class="writer-page__feedback writer-page__feedback--error">{uploadError}</p>
+					{#if submitError}
+						<p class="writer-page__feedback writer-page__feedback--error">{submitError}</p>
 					{/if}
 
-					{#if uploadMessage}
-						<p class="writer-page__feedback writer-page__feedback--success">{uploadMessage}</p>
+					{#if submitMessage}
+						<p class="writer-page__feedback writer-page__feedback--success">{submitMessage}</p>
 					{/if}
 
 					<div class="writer-form__actions">
 						<button
-							type="button"
+							type="submit"
 							class="btn variant-filled-primary"
-							disabled={isUploading || isSubmitting || !writerAccess}
-							onclick={() => {
-								void submitUploadedIsotopes();
-							}}
+							disabled={isSubmitting || !writerAccess}
 						>
-							{isUploading ? 'Saving Upload...' : 'Save Uploaded Isotopes'}
+							{isSubmitting ? 'Saving...' : 'Save Isotope'}
 						</button>
 					</div>
-				{/if}
+				</form>
+
+				<div class="writer-upload">
+					<div class="writer-upload__header">
+						<div>
+							<h3>Upload isotope rows</h3>
+							<p>
+								Accepted format: <code>Cd-115B D 2.2280 527.9</code>. The trailing letter is
+								treated as a variant marker and only contributes another energy for the same isotope.
+							</p>
+						</div>
+					</div>
+
+					<label class="writer-upload__picker">
+						<span>Select a text file</span>
+						<input type="file" accept=".txt,.dat,.csv" bind:files={uploadFiles} onchange={handleUploadChange} />
+					</label>
+
+					<div class="writer-page__helper">
+						<p>The full element name is inferred from the symbol in each row.</p>
+						<p>Variant letters like <code>A</code> or <code>B</code> are ignored for isotope identity and grouped into one record.</p>
+						<p>Rows for the same isotope must agree on half-life value and unit.</p>
+					</div>
+
+					{#if uploadParseError}
+						<p class="writer-page__feedback writer-page__feedback--error">{uploadParseError}</p>
+					{/if}
+
+					{#if uploadResult}
+						<div class="writer-upload__summary">
+							<p><strong>File:</strong> {uploadFileName}</p>
+							<p><strong>Parsed rows:</strong> {uploadResult.sourceLineCount}</p>
+							<p><strong>Grouped isotopes:</strong> {uploadResult.items.length}</p>
+							{#if uploadResult.ignoredVariantCount > 0}
+								<p>
+									<strong>Ignored variant letters:</strong> {uploadResult.ignoredVariantCount}
+								</p>
+							{/if}
+						</div>
+
+						<div class="writer-upload__table-wrap">
+							<table class="writer-upload__table">
+								<thead>
+									<tr>
+										<th>Isotope</th>
+										<th>Element</th>
+										<th>Half-life</th>
+										<th>Energies</th>
+										<th>Lines</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each uploadResult.items as item (`${item.shortName}-${item.massNumber}-${item.suffix}`)}
+										<tr>
+											<td>{item.shortName}-{item.massNumber}{item.suffix}</td>
+											<td>{item.elementName}</td>
+											<td>{item.halfLife.number} {item.halfLife.unit}</td>
+											<td>{item.energies.join(', ')}</td>
+											<td>{item.lineNumbers.join(', ')}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+
+						{#if uploadError}
+							<p class="writer-page__feedback writer-page__feedback--error">{uploadError}</p>
+						{/if}
+
+						{#if uploadMessage}
+							<p class="writer-page__feedback writer-page__feedback--success">{uploadMessage}</p>
+						{/if}
+
+						<div class="writer-form__actions">
+							<button
+								type="button"
+								class="btn variant-filled-primary"
+								disabled={isUploading || isSubmitting || !writerAccess}
+								onclick={() => {
+									void submitUploadedIsotopes(writerAccess);
+								}}
+							>
+								{isUploading ? 'Saving Upload...' : 'Save Uploaded Isotopes'}
+							</button>
+						</div>
+					{/if}
+				</div>
 			</div>
-		</div>
-	{/if}
+		{/snippet}
+	</AuthGate>
 </section>
 
 <style>
@@ -634,10 +476,6 @@
 		color: var(--writer-text);
 	}
 
-	.writer-card--warning {
-		border-color: var(--writer-warning-border);
-	}
-
 	.writer-card__header {
 		display: flex;
 		justify-content: space-between;
@@ -650,14 +488,11 @@
 		flex: 1 1 auto;
 	}
 
-	.writer-card__header h2,
-		.writer-card--warning h2 {
+	.writer-card__header h2 {
 		margin: 0;
 	}
 
-	.writer-card__header p,
-		.writer-card--warning p,
-		.writer-card > p {
+	.writer-card__header p {
 		margin: 0.5rem 0 0;
 	}
 
@@ -714,12 +549,6 @@
 		background: var(--writer-helper-bg);
 		color: var(--writer-text);
 		border: 1px solid var(--writer-helper-border);
-	}
-
-	.writer-page__notice {
-		margin-top: 0.85rem;
-		font-size: 0.95rem;
-		color: var(--writer-notice-text);
 	}
 
 	.writer-form__actions {

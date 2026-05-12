@@ -1,22 +1,9 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
-	import { onMount } from 'svelte';
 	import IsotopeViewer from '$lib/components/IsotopeViewer.svelte';
+	import AuthGate from '$lib/components/AuthGate.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
 	import type { IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
 	import { createReferenceMaterial } from '$lib/utils/naaUtils.js';
-	import { getSignInErrorMessage, isEnvironmentWithoutSignIn } from '$lib/utils/authEnvironment.js';
-
-	type ClientPrincipal = {
-		identityProvider?: string;
-		userId?: string;
-		userDetails?: string;
-		userRoles?: string[];
-	};
-
-	type AuthEnvelope = {
-		clientPrincipal?: ClientPrincipal | null;
-	};
 
 	type ReferenceMaterialCountingWriteRequest = {
 		countingLabel: string;
@@ -97,12 +84,7 @@
 		return `${DEFAULT_COUNTING_LABEL_PREFIX} ${index + 1}`;
 	}
 
-	let currentHostname = $state('');
-	let authSupported = $state(false);
-	let principal = $state<ClientPrincipal | null>(null);
-	let isCheckingAuth = $state(true);
-	let authMessage = $state('');
-	let hasInitializedAuth = $state(false);
+	let authGateRef = $state<AuthGate | null>(null);
 	let isSubmitting = $state(false);
 	let submitError = $state('');
 	let submitMessage = $state('');
@@ -114,43 +96,6 @@
 	let countingRefs = $state<(RefMatInfo | undefined)[]>([undefined]);
 
 	let isotopeCount = $derived(selectedIsotopes.length);
-	let isSignedIn = $derived(principal !== null);
-	let writerAccess = $derived(
-		principal !== null && Array.isArray(principal.userRoles) && principal.userRoles.includes(WRITER_ROLE)
-	);
-	let signInAvailable = $derived(
-		currentHostname !== '' && !isEnvironmentWithoutSignIn(currentHostname)
-	);
-
-	function isClientPrincipal(value: unknown): value is ClientPrincipal {
-		return typeof value === 'object' && value !== null;
-	}
-
-	function extractClientPrincipal(payload: unknown): ClientPrincipal | null {
-		if (Array.isArray(payload)) {
-			for (const entry of payload) {
-				if (isClientPrincipal(entry) && isClientPrincipal((entry as AuthEnvelope).clientPrincipal)) {
-					return (entry as AuthEnvelope).clientPrincipal ?? null;
-				}
-
-				if (isClientPrincipal(entry) && ('userId' in entry || 'userDetails' in entry || 'userRoles' in entry)) {
-					return entry as ClientPrincipal;
-				}
-			}
-
-			return null;
-		}
-
-		if (isClientPrincipal(payload) && isClientPrincipal((payload as AuthEnvelope).clientPrincipal)) {
-			return (payload as AuthEnvelope).clientPrincipal ?? null;
-		}
-
-		if (isClientPrincipal(payload) && ('userId' in payload || 'userDetails' in payload || 'userRoles' in payload)) {
-			return payload as ClientPrincipal;
-		}
-
-		return null;
-	}
 
 	function getReferenceKeyFromCounting(referenceMaterial: ReferenceMaterial): string {
 		const netlCode = referenceMaterial.NETL_code?.trim();
@@ -184,75 +129,6 @@
 	});
 
 	async function refreshAuthState() {
-		if (!browser) {
-			return;
-		}
-
-		isCheckingAuth = true;
-		authMessage = '';
-		currentHostname = window.location.hostname;
-
-		if (isEnvironmentWithoutSignIn(currentHostname)) {
-			authSupported = false;
-			principal = null;
-			isCheckingAuth = false;
-			return;
-		}
-
-		try {
-			const controller = new AbortController();
-			const timeoutId = window.setTimeout(() => controller.abort(), 5000);
-			const response = await fetch('/.auth/me', {
-				method: 'GET',
-				cache: 'no-store',
-				signal: controller.signal,
-				headers: {
-					accept: 'application/json'
-				}
-			});
-			window.clearTimeout(timeoutId);
-
-			if (response.status === 404) {
-				authSupported = false;
-				principal = null;
-				return;
-			}
-
-			if (!response.ok) {
-				authSupported = true;
-				principal = null;
-				authMessage = getSignInErrorMessage(currentHostname);
-				return;
-			}
-
-			authSupported = true;
-			const payload = await response.json();
-			principal = extractClientPrincipal(payload);
-		} catch {
-			authSupported = true;
-			principal = null;
-			authMessage = getSignInErrorMessage(currentHostname);
-		} finally {
-			isCheckingAuth = false;
-		}
-	}
-
-	async function handleSignIn() {
-		if (!browser) {
-			return;
-		}
-
-		authMessage = '';
-		const currentUrl = new URL(window.location.href);
-		const loginUrl = new URL('/.auth/login/aad', currentUrl.origin);
-		loginUrl.searchParams.set(
-			'post_login_redirect_uri',
-			currentUrl.pathname + currentUrl.search + currentUrl.hash
-		);
-
-		window.location.assign(loginUrl.toString());
-	}
-
 	function addCounting() {
 		const template = countings[countings.length - 1] ?? createCounting(isotopeCount);
 		const nextCounting = cloneReferenceMaterial(template);
@@ -325,7 +201,7 @@
 
 		if (!response.ok) {
 			if (response.status === 401 || response.status === 403) {
-				await refreshAuthState();
+				await authGateRef?.refreshAuthState();
 			}
 			throw new Error(body?.error || `Request failed with status ${response.status}`);
 		}
@@ -337,7 +213,7 @@
 		};
 	}
 
-	async function submitReferenceMaterial() {
+	async function submitReferenceMaterial(writerAccess: boolean) {
 		submitMessage = '';
 		submitError = '';
 
@@ -364,28 +240,6 @@
 		}
 	}
 
-	onMount(() => {
-		if (!browser || hasInitializedAuth) {
-			return;
-		}
-
-		hasInitializedAuth = true;
-		const watchdogId = window.setTimeout(() => {
-			if (!isCheckingAuth) {
-				return;
-			}
-
-			currentHostname = window.location.hostname;
-			authSupported = !isEnvironmentWithoutSignIn(currentHostname);
-			principal = null;
-			authMessage = getSignInErrorMessage(currentHostname);
-			isCheckingAuth = false;
-		}, 6000);
-
-		void refreshAuthState().finally(() => {
-			window.clearTimeout(watchdogId);
-		});
-	});
 </script>
 
 <svelte:head>
@@ -403,117 +257,102 @@
 	</div>
 
 	{#if isCheckingAuth}
-		<div class="writer-card">
-			<p>Checking sign-in status...</p>
-		</div>
-	{:else if !signInAvailable || !authSupported}
-		<div class="writer-card writer-card--warning">
-			<h2>Azure deployment required</h2>
-			<p>This route is only available when the app is running behind Azure Static Web Apps sign-in.</p>
-		</div>
-	{:else if !isSignedIn}
-		<div class="writer-card writer-card--warning">
-			<h2>Sign in required</h2>
-			<p>Sign in with an account that has the isotope writer role to add reference materials.</p>
-			<button type="button" class="btn variant-filled-primary" onclick={handleSignIn}>Sign In</button>
-			{#if authMessage}
-				<p class="writer-page__notice">{authMessage}</p>
-			{/if}
-		</div>
-	{:else}
-		<div class="writer-card">
-			<div class="writer-card__header">
-				<div>
-					<h2>Reference material entry</h2>
-					<p>
-						If a saved document already matches NETL code + sample name, new submissions append
-						additional countings to that record.
-					</p>
-				</div>
-				<div class="writer-card__identity">
-					<span>Signed in as</span>
-					<strong>{principal?.userDetails || principal?.userId || 'Unknown user'}</strong>
-				</div>
-			</div>
-
-			{#if !writerAccess}
-				<div class="writer-page__feedback writer-page__feedback--warning" role="status">
-					This account is signed in, but it does not have the <code>{WRITER_ROLE}</code> role.
-					Saving is disabled until that role is assigned.
-				</div>
-			{/if}
-
-			<div class="writer-block">
-				<IsotopeViewer bind:selectedIsotopes />
-			</div>
-
-			<div class="writer-block">
-				<label class="label">
-					<span>Notes (optional)</span>
-					<textarea
-						class="textarea w-full"
-						bind:value={referenceMaterialNotes}
-						rows="3"
-						placeholder="Optional context for this reference material or counting batch"
-					></textarea>
-				</label>
-			</div>
-
-			{#each countings as counting, index}
-				<div class="writer-block writer-block--counting">
-					<div class="writer-counting__header">
-						<h3>{defaultCountingLabel(index)}</h3>
-						{#if countings.length > 1}
-							<button
-								type="button"
-								class="btn writer-btn-secondary"
-								onclick={() => removeCounting(index)}
-							>
-								Remove
-							</button>
-						{/if}
+	<AuthGate bind:this={authGateRef} requiredRole={WRITER_ROLE}>
+		{#snippet children({ principal, writerAccess })}
+			<div class="writer-card">
+				<div class="writer-card__header">
+					<div>
+						<h2>Reference material entry</h2>
+						<p>
+							If a saved document already matches NETL code + sample name, new submissions append
+							additional countings to that record.
+						</p>
 					</div>
-
-					<label class="label">
-						<span>Counting Label</span>
-						<input class="input w-50" type="text" bind:value={countingLabels[index]} />
-					</label>
-
-					<RefMatInfo
-						bind:this={countingRefs[index]}
-						isotopeCount={isotopeCount}
-						bind:refMatInfo={countings[index]}
-						isotopeInfo={selectedIsotopes}
-						getRoiIndex={() => []}
-					/>
+					<div class="writer-card__identity">
+						<span>Signed in as</span>
+						<strong>{principal?.userDetails || principal?.userId || 'Unknown user'}</strong>
+					</div>
 				</div>
-			{/each}
 
-			<div class="writer-form__actions">
-				<button type="button" class="btn writer-btn-secondary" onclick={addCounting}>
-					Add Another Counting
-				</button>
-				<button
-					type="button"
-					class="btn variant-filled-primary"
-					disabled={isSubmitting || !writerAccess}
-					onclick={() => {
-						void submitReferenceMaterial();
-					}}
-				>
-					{isSubmitting ? 'Saving...' : 'Save Reference Material'}
-				</button>
+				{#if !writerAccess}
+					<div class="writer-page__feedback writer-page__feedback--warning" role="status">
+						This account is signed in, but it does not have the <code>{WRITER_ROLE}</code> role.
+						Saving is disabled until that role is assigned.
+					</div>
+				{/if}
+
+				<div class="writer-block">
+					<IsotopeViewer bind:selectedIsotopes />
+				</div>
+
+				<div class="writer-block">
+					<label class="label">
+						<span>Notes (optional)</span>
+						<textarea
+							class="textarea w-full"
+							bind:value={referenceMaterialNotes}
+							rows="3"
+							placeholder="Optional context for this reference material or counting batch"
+						></textarea>
+					</label>
+				</div>
+
+				{#each countings as counting, index}
+					<div class="writer-block writer-block--counting">
+						<div class="writer-counting__header">
+							<h3>{defaultCountingLabel(index)}</h3>
+							{#if countings.length > 1}
+								<button
+									type="button"
+									class="btn writer-btn-secondary"
+									onclick={() => removeCounting(index)}
+								>
+									Remove
+								</button>
+							{/if}
+						</div>
+
+						<label class="label">
+							<span>Counting Label</span>
+							<input class="input w-50" type="text" bind:value={countingLabels[index]} />
+						</label>
+
+						<RefMatInfo
+							bind:this={countingRefs[index]}
+							isotopeCount={isotopeCount}
+							bind:refMatInfo={countings[index]}
+							isotopeInfo={selectedIsotopes}
+							getRoiIndex={() => []}
+						/>
+					</div>
+				{/each}
+
+				<div class="writer-form__actions">
+					<button type="button" class="btn writer-btn-secondary" onclick={addCounting}>
+						Add Another Counting
+					</button>
+					<button
+						type="button"
+						class="btn variant-filled-primary"
+						disabled={isSubmitting || !writerAccess}
+						onclick={() => {
+							void submitReferenceMaterial(writerAccess);
+						}}
+					>
+						{isSubmitting ? 'Saving...' : 'Save Reference Material'}
+					</button>
+				</div>
+
+				{#if submitError}
+					<p class="writer-page__feedback writer-page__feedback--error">{submitError}</p>
+				{/if}
+
+				{#if submitMessage}
+					<p class="writer-page__feedback writer-page__feedback--success">{submitMessage}</p>
+				{/if}
 			</div>
-
-			{#if submitError}
-				<p class="writer-page__feedback writer-page__feedback--error">{submitError}</p>
-			{/if}
-
-			{#if submitMessage}
-				<p class="writer-page__feedback writer-page__feedback--success">{submitMessage}</p>
-			{/if}
-		</div>
-	{/if}
+		{/snippet}
+	</AuthGate>
 </section>
 
 <style>
