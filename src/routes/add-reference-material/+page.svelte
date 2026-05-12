@@ -370,7 +370,21 @@
 		}
 
 		hasInitializedAuth = true;
-		void refreshAuthState();
+		const watchdogId = window.setTimeout(() => {
+			if (!isCheckingAuth) {
+				return;
+			}
+
+			currentHostname = window.location.hostname;
+			authSupported = !isEnvironmentWithoutSignIn(currentHostname);
+			principal = null;
+			authMessage = getSignInErrorMessage(currentHostname);
+			isCheckingAuth = false;
+		}, 6000);
+
+		void refreshAuthState().finally(() => {
+			window.clearTimeout(watchdogId);
+		});
 	});
 </script>
 
