@@ -43,3 +43,89 @@ npm run build
 You can preview the production build with `npm run preview`.
 
 > To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+
+## Azure Static Web Apps + Cosmos DB
+
+This project now includes an integrated Azure Functions backend under `api/` for use with Azure Static Web Apps.
+
+### What it exposes
+
+- `GET /api/isotopes`
+- `POST /api/isotopes`
+
+The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
+
+### API access control
+
+The integrated Azure Functions endpoint stays at `authLevel: 'anonymous'`, because Azure Static Web Apps is the layer that authenticates and authorizes requests before forwarding them to the function.
+
+`POST /api/isotopes` is locked down in two places:
+
+- `staticwebapp.config.json` allows only the custom `isotope_writer` role to call that method.
+- The function independently validates the forwarded `x-ms-client-principal` header and rejects callers that do not have the same role.
+
+That second check matters because it prevents an accidental config regression from silently opening write access.
+
+`GET /api/isotopes` remains available with the current app behavior. If you also want reads restricted, add a matching `GET` route rule with the roles you want.
+
+Important limitation: this is still a browser-callable API. Any user who has the `isotope_writer` role can invoke the write endpoint from the browser or other clients while signed in. If writes must only come from trusted backend automation, move the write path behind a separate backend service that is not directly exposed to browser users.
+
+To grant access, assign the `isotope_writer` role in Azure Static Web Apps invitations/role assignments.
+
+### Write payload
+
+`POST /api/isotopes` expects JSON in this shape:
+
+```json
+{
+	"elementName": "Cobalt",
+	"shortName": "Co",
+	"massNumber": 60,
+	"suffix": "m",
+	"energies": [1173.2, 1332.5],
+	"halfLife": {
+		"number": 5.2714,
+		"unit": "years"
+	}
+}
+```
+
+The function derives:
+
+- a GUID `id`
+- `halfLifeSeconds`
+- audit metadata such as `createdAt` and `createdBy`
+
+If the isotope already exists, the function updates that existing document and appends any new energies that are not already present.
+
+### Backend configuration
+
+Set these application settings in Azure Static Web Apps:
+
+- `COSMOSDB_ENDPOINT`
+- `COSMOSDB_KEY`
+- `COSMOSDB_DATABASE`
+- `COSMOSDB_CONTAINER`
+- `ISOTOPE_WRITE_ROLE` (optional, defaults to `isotope_writer`)
+- `COSMOSDB_QUERY` (optional, defaults to `SELECT * FROM c`)
+
+The included sample file is `api/local.settings.sample.json`.
+
+### Local development
+
+Install the API dependencies:
+
+```sh
+cd api
+npm install
+```
+
+To run the integrated Static Web App locally, use the Azure Static Web Apps CLI or Azure Functions Core Tools with the Svelte app and the `api/` folder together.
+
+### Azure deployment settings
+
+Use these Azure Static Web Apps settings:
+
+- App location: `/`
+- API location: `api`
+- Output location: `build`

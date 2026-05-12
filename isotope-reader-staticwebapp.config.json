@@ -1,0 +1,26 @@
+{
+	"routes": [
+		{
+			"route": "/api/isotopes",
+			"allowedRoles": ["isotope_reader"]
+		},
+		{
+			"route": "/api/*",
+			"allowedRoles": ["isotope_reader"]
+		}
+	],
+	"responseOverrides": {
+		"401": {
+			"redirect": "/.auth/login/aad",
+			"statusCode": 302
+		},
+		"403": {
+			"rewrite": "/index.html",
+			"statusCode": 403
+		}
+	},
+	"navigationFallback": {
+		"rewrite": "/index.html",
+		"exclude": ["/api/*", "/app/*", "/favicon.svg"]
+	}
+}

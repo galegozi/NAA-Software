@@ -50,7 +50,7 @@ export interface ReferenceMaterial extends BaseMaterialInfo {
 	knownUncertainty: number[];
 }
 
-export interface UnknownMaterial extends BaseMaterialInfo {}
+export type UnknownMaterial = BaseMaterialInfo;
 
 export interface Materials {
 	reference: ReferenceMaterial[];
@@ -61,4 +61,30 @@ export interface Materials {
 
 export interface RoiData {
 	centroid: number;
+}
+
+export interface HalfLife {
+	number: number;
+	unit: "seconds" | "minutes" | "hours" | "days" | "weeks" | "years";
+}
+
+export interface IsotopeCatalogItem {
+	id: string;
+	elementName: string;
+	shortName: string;
+	massNumber: number;
+	suffix: string;
+	energies: number[];
+	halfLife: HalfLife;
+	halfLifeSeconds: number;
+}
+
+export interface IsotopeWriteForm {
+	elementName: string;
+	shortName: string;
+	massNumber: number;
+	suffix: string;
+	energy: number;
+	halfLife: number;
+	unit: HalfLife['unit'];
 }

@@ -9,7 +9,8 @@ export type {
 	ReferenceMaterial,
 	UnknownMaterial,
 	Materials,
-	RoiData
+	RoiData,
+	IsotopeCatalogItem
 } from './types.js';
 
 // Export utilities

@@ -1,0 +1,13 @@
+{
+	"IsEncrypted": false,
+	"Values": {
+		"AzureWebJobsStorage": "UseDevelopmentStorage=true",
+		"FUNCTIONS_WORKER_RUNTIME": "node",
+		"COSMOSDB_ENDPOINT": "https://your-account.documents.azure.com:443/",
+		"COSMOSDB_KEY": "your-cosmos-key",
+		"COSMOSDB_DATABASE": "NAA-db",
+		"COSMOSDB_CONTAINER": "isotopes",
+		"ISOTOPE_WRITE_ROLE": "isotope_writer",
+		"COSMOSDB_QUERY": "SELECT * FROM c"
+	}
+}
