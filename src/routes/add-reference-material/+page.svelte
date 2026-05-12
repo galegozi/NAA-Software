@@ -94,6 +94,7 @@
 	let countingLabels = $state<string[]>([defaultCountingLabel(0)]);
 	let countings = $state<ReferenceMaterial[]>([createCounting(0)]);
 	let countingRefs = $state<(RefMatInfo | undefined)[]>([undefined]);
+	let lastResizedIsotopeCount = $state(-1);
 
 	let isotopeCount = $derived(selectedIsotopes.length);
 
@@ -112,6 +113,11 @@
 	}
 
 	$effect(() => {
+		if (lastResizedIsotopeCount === isotopeCount) {
+			return;
+		}
+
+		lastResizedIsotopeCount = isotopeCount;
 		const nextCountings = countings.map((counting) => resizeReferenceMaterial(counting, isotopeCount));
 		const changed = nextCountings.some((counting, index) => counting !== countings[index]);
 
@@ -133,6 +139,7 @@
 		const nextCounting = cloneReferenceMaterial(template);
 		countings = [...countings, nextCounting];
 		countingLabels = [...countingLabels, defaultCountingLabel(countings.length - 1)];
+		countingRefs = [...countingRefs, undefined];
 	}
 
 	function removeCounting(index: number) {
@@ -295,7 +302,7 @@
 					</label>
 				</div>
 
-				{#each countings as counting, index}
+				{#each countings as counting, index (`${counting.NETL_code || 'counting'}-${index}`)}
 					<div class="writer-block writer-block--counting">
 						<div class="writer-counting__header">
 							<h3>{defaultCountingLabel(index)}</h3>
