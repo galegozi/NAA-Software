@@ -27,7 +27,6 @@
 		truncateToSigFigs
 	} from '$lib/utils/naaUtils.js';
 	import {
-		getSignInErrorMessage,
 		isEnvironmentWithoutSignIn
 	} from '$lib/utils/authEnvironment.js';
 	import {
@@ -366,35 +365,8 @@
 		localAuthNotice = '';
 
 		const currentUrl = new URL(window.location.href);
-		const unavailableMessage = getSignInErrorMessage(currentUrl.hostname);
 		const loginUrl = new URL('/.auth/login/aad', currentUrl.origin);
 		loginUrl.searchParams.set('post_login_redirect_uri', currentUrl.pathname + currentUrl.search + currentUrl.hash);
-
-		try {
-			const authAvailabilityResponse = await fetch('/.auth/me', {
-				method: 'GET',
-				cache: 'no-store',
-				headers: {
-					accept: 'application/json'
-				}
-			});
-
-			if (authAvailabilityResponse.status === 404) {
-				clearPersistedWizardState();
-				localAuthNotice = unavailableMessage;
-				return;
-			}
-
-			if (!authAvailabilityResponse.ok) {
-				clearPersistedWizardState();
-				localAuthNotice = unavailableMessage;
-				return;
-			}
-		} catch {
-			clearPersistedWizardState();
-			localAuthNotice = unavailableMessage;
-			return;
-		}
 
 		persistWizardState();
 		window.location.assign(loginUrl.toString());

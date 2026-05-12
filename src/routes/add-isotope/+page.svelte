@@ -190,13 +190,17 @@
 		}
 
 		try {
+			const controller = new AbortController();
+			const timeoutId = window.setTimeout(() => controller.abort(), 5000);
 			const response = await fetch('/.auth/me', {
 				method: 'GET',
 				cache: 'no-store',
+				signal: controller.signal,
 				headers: {
 					accept: 'application/json'
 				}
 			});
+			window.clearTimeout(timeoutId);
 
 			if (response.status === 404) {
 				authSupported = false;
@@ -230,30 +234,11 @@
 
 		authMessage = '';
 		const currentUrl = new URL(window.location.href);
-		const unavailableMessage = getSignInErrorMessage(currentUrl.hostname);
 		const loginUrl = new URL('/.auth/login/aad', currentUrl.origin);
 		loginUrl.searchParams.set(
 			'post_login_redirect_uri',
 			currentUrl.pathname + currentUrl.search + currentUrl.hash
 		);
-
-		try {
-			const authAvailabilityResponse = await fetch('/.auth/me', {
-				method: 'GET',
-				cache: 'no-store',
-				headers: {
-					accept: 'application/json'
-				}
-			});
-
-			if (authAvailabilityResponse.status === 404 || !authAvailabilityResponse.ok) {
-				authMessage = unavailableMessage;
-				return;
-			}
-		} catch {
-			authMessage = unavailableMessage;
-			return;
-		}
 
 		window.location.assign(loginUrl.toString());
 	}
