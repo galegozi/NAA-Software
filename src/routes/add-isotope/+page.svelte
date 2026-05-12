@@ -55,6 +55,7 @@
 	let isCheckingAuth = $state(true);
 	let isSubmitting = $state(false);
 	let authMessage = $state('');
+	let hasInitializedAuth = $state(false);
 	let submitMessage = $state('');
 	let submitError = $state('');
 	let uploadFiles = $state<FileList | undefined>(undefined);
@@ -366,6 +367,11 @@
 	}
 
 	$effect(() => {
+		if (!browser || hasInitializedAuth) {
+			return;
+		}
+
+		hasInitializedAuth = true;
 		void refreshAuthState();
 	});
 </script>

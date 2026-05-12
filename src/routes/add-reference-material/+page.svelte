@@ -101,6 +101,7 @@
 	let principal = $state<ClientPrincipal | null>(null);
 	let isCheckingAuth = $state(true);
 	let authMessage = $state('');
+	let hasInitializedAuth = $state(false);
 	let isSubmitting = $state(false);
 	let submitError = $state('');
 	let submitMessage = $state('');
@@ -378,6 +379,11 @@
 	}
 
 	$effect(() => {
+		if (!browser || hasInitializedAuth) {
+			return;
+		}
+
+		hasInitializedAuth = true;
 		void refreshAuthState();
 	});
 </script>
@@ -531,6 +537,7 @@
 		display: grid;
 		gap: 1.5rem;
 		overflow-x: auto;
+		color: var(--writer-text);
 	}
 
 	.writer-page__hero {
@@ -564,6 +571,7 @@
 		border-radius: 1.5rem;
 		padding: 1.5rem;
 		box-shadow: var(--writer-card-shadow);
+		color: var(--writer-text);
 	}
 
 	.writer-card--warning {
@@ -647,6 +655,55 @@
 	.writer-page__notice {
 		margin-top: 0.7rem;
 		color: var(--writer-notice-text);
+	}
+
+	.writer-page :global(.label span),
+	.writer-page :global(h2),
+	.writer-page :global(h3),
+	.writer-page :global(p) {
+		color: inherit;
+	}
+
+	.writer-page :global(input),
+	.writer-page :global(select),
+	.writer-page :global(textarea) {
+		color: inherit;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		.writer-page {
+			--writer-text: rgb(241 245 249);
+			--writer-muted: rgb(203 213 225);
+			--writer-accent: rgb(148 163 184);
+			--writer-card-bg: rgb(15 23 42 / 0.92);
+			--writer-card-border: rgb(148 163 184 / 0.22);
+			--writer-card-shadow: 0 24px 56px rgb(2 6 23 / 0.55);
+			--writer-warning-border: rgb(245 158 11 / 0.35);
+			--writer-identity-bg: rgb(148 163 184 / 0.14);
+			--writer-error-bg: rgb(69 10 10 / 0.52);
+			--writer-error-text: rgb(254 202 202);
+			--writer-error-border: rgb(248 113 113 / 0.5);
+			--writer-success-bg: rgb(20 83 45 / 0.45);
+			--writer-success-text: rgb(187 247 208);
+			--writer-success-border: rgb(74 222 128 / 0.45);
+			--writer-notice-text: rgb(253 224 71);
+		}
+
+		.writer-page :global(input),
+		.writer-page :global(select),
+		.writer-page :global(textarea) {
+			background: rgb(15 23 42 / 0.72);
+			border-color: rgb(148 163 184 / 0.25);
+		}
+
+		.writer-btn-secondary {
+			border-color: rgb(148 163 184 / 0.35);
+			background: rgb(30 41 59 / 0.72);
+		}
+
+		.writer-page__feedback--warning {
+			background: rgb(120 53 15 / 0.35);
+		}
 	}
 
 	@media (max-width: 900px) {
