@@ -128,7 +128,6 @@
 		ensureCountingRefsLength(countings.length);
 	});
 
-	async function refreshAuthState() {
 	function addCounting() {
 		const template = countings[countings.length - 1] ?? createCounting(isotopeCount);
 		const nextCounting = cloneReferenceMaterial(template);
@@ -256,7 +255,6 @@
 		</p>
 	</div>
 
-	{#if isCheckingAuth}
 	<AuthGate bind:this={authGateRef} requiredRole={WRITER_ROLE}>
 		{#snippet children({ principal, writerAccess })}
 			<div class="writer-card">
@@ -413,10 +411,6 @@
 		color: var(--writer-text);
 	}
 
-	.writer-card--warning {
-		border-color: var(--writer-warning-border);
-	}
-
 	.writer-card__header {
 		display: flex;
 		justify-content: space-between;
@@ -489,11 +483,6 @@
 		background: var(--writer-success-bg);
 		color: var(--writer-success-text);
 		border-color: var(--writer-success-border);
-	}
-
-	.writer-page__notice {
-		margin-top: 0.7rem;
-		color: var(--writer-notice-text);
 	}
 
 	.writer-page :global(.label span),
