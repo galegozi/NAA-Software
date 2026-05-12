@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { page } from '$app/state';
+	import { page } from '$app/stores';
 	import './layout.css';
 
 	const { children } = $props();
@@ -8,13 +8,19 @@
 
 <div class="app-shell">
 	<nav class="top-nav" aria-label="Primary">
-		<a class:active={page.url.pathname === '/'} class="top-nav__link" href={resolve('/')}>
+		<a
+			class:active={$page.url.pathname === '/'}
+			class="top-nav__link"
+			href={resolve('/')}
+			data-sveltekit-reload
+		>
 			<span>Analyze</span>
 		</a>
 		<a
-			class:active={page.url.pathname.startsWith('/add-isotope')}
+			class:active={$page.url.pathname.startsWith('/add-isotope')}
 			class="top-nav__link"
 			href={resolve('/add-isotope')}
+			data-sveltekit-reload
 		>
 			<span class="top-nav__icon" aria-hidden="true">
 				<svg viewBox="0 0 24 24" focusable="false">
@@ -26,9 +32,10 @@
 			<span>Write Isotope</span>
 		</a>
 		<a
-			class:active={page.url.pathname.startsWith('/add-reference-material')}
+			class:active={$page.url.pathname.startsWith('/add-reference-material')}
 			class="top-nav__link"
 			href={resolve('/add-reference-material')}
+			data-sveltekit-reload
 		>
 			<span class="top-nav__icon" aria-hidden="true">
 				<svg viewBox="0 0 24 24" focusable="false">
@@ -42,7 +49,7 @@
 	</nav>
 
 	<main class="page-shell">
-		{#key `${page.url.pathname}${page.url.search}`}
+		{#key `${$page.url.pathname}${$page.url.search}`}
 			{@render children()}
 		{/key}
 	</main>
