@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { onMount } from 'svelte';
 	import WriteIsotopeForm from '$lib/components/WriteIsotopeForm.svelte';
 	import type { IsotopeWriteForm } from '$lib/types.js';
 	import { lookupElementName } from '../../lib/utils/elementNames.js';
@@ -366,7 +367,7 @@
 		}
 	}
 
-	$effect(() => {
+	onMount(() => {
 		if (!browser || hasInitializedAuth) {
 			return;
 		}

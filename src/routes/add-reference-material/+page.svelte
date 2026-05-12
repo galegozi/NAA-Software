@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { onMount } from 'svelte';
 	import IsotopeViewer from '$lib/components/IsotopeViewer.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
 	import type { IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
@@ -378,7 +379,7 @@
 		}
 	}
 
-	$effect(() => {
+	onMount(() => {
 		if (!browser || hasInitializedAuth) {
 			return;
 		}
