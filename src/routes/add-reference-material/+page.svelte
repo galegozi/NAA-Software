@@ -1,0 +1,657 @@
+<script lang="ts">
+	import { browser } from '$app/environment';
+	import IsotopeViewer from '$lib/components/IsotopeViewer.svelte';
+	import RefMatInfo from '$lib/components/refMatInfo.svelte';
+	import type { IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
+	import { createReferenceMaterial } from '$lib/utils/naaUtils.js';
+	import { getSignInErrorMessage, isEnvironmentWithoutSignIn } from '$lib/utils/authEnvironment.js';
+
+	type ClientPrincipal = {
+		identityProvider?: string;
+		userId?: string;
+		userDetails?: string;
+		userRoles?: string[];
+	};
+
+	type AuthEnvelope = {
+		clientPrincipal?: ClientPrincipal | null;
+	};
+
+	type ReferenceMaterialCountingWriteRequest = {
+		countingLabel: string;
+		referenceMaterial: ReferenceMaterial;
+	};
+
+	type ReferenceMaterialWriteRequest = {
+		referenceKey: string;
+		notes: string;
+		isotopes: IsotopeInfo[];
+		countings: ReferenceMaterialCountingWriteRequest[];
+	};
+
+	type SaveReferenceMaterialResult = {
+		created: boolean;
+		appendedCountings: number;
+		totalCountings: number;
+	};
+
+	const WRITER_ROLE = 'isotope_writer';
+	const DEFAULT_COUNTING_LABEL_PREFIX = 'Counting';
+
+	function createCounting(isotopeCount: number): ReferenceMaterial {
+		return createReferenceMaterial(isotopeCount);
+	}
+
+	function cloneReferenceMaterial(referenceMaterial: ReferenceMaterial): ReferenceMaterial {
+		return {
+			...referenceMaterial,
+			counts: referenceMaterial.counts.map((count) => ({ ...count })),
+			concentrationUnits: [...referenceMaterial.concentrationUnits],
+			knownConcentration: [...referenceMaterial.knownConcentration],
+			knownUncertainty: [...referenceMaterial.knownUncertainty]
+		};
+	}
+
+	function resizeReferenceMaterial(reference: ReferenceMaterial, isotopeCount: number): ReferenceMaterial {
+		const nextReference = createReferenceMaterial(isotopeCount);
+		const existingCounts = reference.counts || [];
+
+		nextReference.NETL_code = reference.NETL_code;
+		nextReference.sampleName = reference.sampleName;
+		nextReference.mass = reference.mass;
+		nextReference.irradiationTime = reference.irradiationTime;
+		nextReference.irradiationEnd = reference.irradiationEnd;
+		nextReference.measurementStartTime = reference.measurementStartTime;
+		nextReference.decayTime = reference.decayTime;
+		nextReference.liveTime = reference.liveTime;
+		nextReference.realTime = reference.realTime;
+		nextReference.fluence = reference.fluence;
+		nextReference.dtType = reference.dtType;
+		nextReference.counts = Array.from({ length: isotopeCount }, (_, index) => {
+			const count = existingCounts[index];
+			return {
+				grossCounts: count?.grossCounts ?? 0,
+				netCounts: count?.netCounts ?? 0,
+				uncertainty: count?.uncertainty ?? 0,
+				grossCountsPositionalCorrectionFactor: count?.grossCountsPositionalCorrectionFactor ?? 1,
+				netCountsPositionalCorrectionFactor: count?.netCountsPositionalCorrectionFactor ?? 1,
+				uncertaintyPositionalCorrectionFactor: count?.uncertaintyPositionalCorrectionFactor ?? 1
+			};
+		});
+
+		nextReference.knownConcentration = Array.from({ length: isotopeCount }, (_, index) =>
+			reference.knownConcentration?.[index] ?? 0
+		);
+		nextReference.knownUncertainty = Array.from({ length: isotopeCount }, (_, index) =>
+			reference.knownUncertainty?.[index] ?? 0
+		);
+		nextReference.concentrationUnits = Array.from({ length: isotopeCount }, (_, index) =>
+			reference.concentrationUnits?.[index]
+		);
+
+		return nextReference;
+	}
+
+	function defaultCountingLabel(index: number): string {
+		return `${DEFAULT_COUNTING_LABEL_PREFIX} ${index + 1}`;
+	}
+
+	let currentHostname = $state('');
+	let authSupported = $state(false);
+	let principal = $state<ClientPrincipal | null>(null);
+	let isCheckingAuth = $state(true);
+	let authMessage = $state('');
+	let isSubmitting = $state(false);
+	let submitError = $state('');
+	let submitMessage = $state('');
+
+	let selectedIsotopes = $state<IsotopeInfo[]>([]);
+	let referenceMaterialNotes = $state('');
+	let countingLabels = $state<string[]>([defaultCountingLabel(0)]);
+	let countings = $state<ReferenceMaterial[]>([createCounting(0)]);
+	let countingRefs = $state<(RefMatInfo | undefined)[]>([undefined]);
+
+	let isotopeCount = $derived(selectedIsotopes.length);
+	let isSignedIn = $derived(principal !== null);
+	let writerAccess = $derived(
+		principal !== null && Array.isArray(principal.userRoles) && principal.userRoles.includes(WRITER_ROLE)
+	);
+	let signInAvailable = $derived(
+		currentHostname !== '' && !isEnvironmentWithoutSignIn(currentHostname)
+	);
+
+	function isClientPrincipal(value: unknown): value is ClientPrincipal {
+		return typeof value === 'object' && value !== null;
+	}
+
+	function extractClientPrincipal(payload: unknown): ClientPrincipal | null {
+		if (Array.isArray(payload)) {
+			for (const entry of payload) {
+				if (isClientPrincipal(entry) && isClientPrincipal((entry as AuthEnvelope).clientPrincipal)) {
+					return (entry as AuthEnvelope).clientPrincipal ?? null;
+				}
+
+				if (isClientPrincipal(entry) && ('userId' in entry || 'userDetails' in entry || 'userRoles' in entry)) {
+					return entry as ClientPrincipal;
+				}
+			}
+
+			return null;
+		}
+
+		if (isClientPrincipal(payload) && isClientPrincipal((payload as AuthEnvelope).clientPrincipal)) {
+			return (payload as AuthEnvelope).clientPrincipal ?? null;
+		}
+
+		if (isClientPrincipal(payload) && ('userId' in payload || 'userDetails' in payload || 'userRoles' in payload)) {
+			return payload as ClientPrincipal;
+		}
+
+		return null;
+	}
+
+	function getReferenceKeyFromCounting(referenceMaterial: ReferenceMaterial): string {
+		const netlCode = referenceMaterial.NETL_code?.trim();
+		const sampleName = referenceMaterial.sampleName?.trim();
+		return [netlCode, sampleName].filter(Boolean).join('::');
+	}
+
+	function ensureCountingRefsLength(expectedLength: number) {
+		if (countingRefs.length === expectedLength) {
+			return;
+		}
+
+		countingRefs = Array.from({ length: expectedLength }, (_, index) => countingRefs[index]);
+	}
+
+	$effect(() => {
+		const nextCountings = countings.map((counting) => resizeReferenceMaterial(counting, isotopeCount));
+		const changed = nextCountings.some((counting, index) => counting !== countings[index]);
+
+		if (changed) {
+			countings = nextCountings;
+		}
+
+		if (countingLabels.length !== countings.length) {
+			countingLabels = Array.from({ length: countings.length }, (_, index) =>
+				countingLabels[index] || defaultCountingLabel(index)
+			);
+		}
+
+		ensureCountingRefsLength(countings.length);
+	});
+
+	async function refreshAuthState() {
+		if (!browser) {
+			return;
+		}
+
+		isCheckingAuth = true;
+		authMessage = '';
+		currentHostname = window.location.hostname;
+
+		if (isEnvironmentWithoutSignIn(currentHostname)) {
+			authSupported = false;
+			principal = null;
+			isCheckingAuth = false;
+			return;
+		}
+
+		try {
+			const response = await fetch('/.auth/me', {
+				method: 'GET',
+				cache: 'no-store',
+				headers: {
+					accept: 'application/json'
+				}
+			});
+
+			if (response.status === 404) {
+				authSupported = false;
+				principal = null;
+				return;
+			}
+
+			if (!response.ok) {
+				authSupported = true;
+				principal = null;
+				authMessage = getSignInErrorMessage(currentHostname);
+				return;
+			}
+
+			authSupported = true;
+			const payload = await response.json();
+			principal = extractClientPrincipal(payload);
+		} catch {
+			authSupported = true;
+			principal = null;
+			authMessage = getSignInErrorMessage(currentHostname);
+		} finally {
+			isCheckingAuth = false;
+		}
+	}
+
+	async function handleSignIn() {
+		if (!browser) {
+			return;
+		}
+
+		authMessage = '';
+		const currentUrl = new URL(window.location.href);
+		const unavailableMessage = getSignInErrorMessage(currentUrl.hostname);
+		const loginUrl = new URL('/.auth/login/aad', currentUrl.origin);
+		loginUrl.searchParams.set(
+			'post_login_redirect_uri',
+			currentUrl.pathname + currentUrl.search + currentUrl.hash
+		);
+
+		try {
+			const authAvailabilityResponse = await fetch('/.auth/me', {
+				method: 'GET',
+				cache: 'no-store',
+				headers: {
+					accept: 'application/json'
+				}
+			});
+
+			if (authAvailabilityResponse.status === 404 || !authAvailabilityResponse.ok) {
+				authMessage = unavailableMessage;
+				return;
+			}
+		} catch {
+			authMessage = unavailableMessage;
+			return;
+		}
+
+		window.location.assign(loginUrl.toString());
+	}
+
+	function addCounting() {
+		const template = countings[countings.length - 1] ?? createCounting(isotopeCount);
+		const nextCounting = cloneReferenceMaterial(template);
+		countings = [...countings, nextCounting];
+		countingLabels = [...countingLabels, defaultCountingLabel(countings.length - 1)];
+	}
+
+	function removeCounting(index: number) {
+		if (countings.length <= 1) {
+			return;
+		}
+
+		countings = countings.filter((_, countingIndex) => countingIndex !== index);
+		countingLabels = countingLabels.filter((_, countingIndex) => countingIndex !== index);
+		countingRefs = countingRefs.filter((_, countingIndex) => countingIndex !== index);
+	}
+
+	function validateCountings(): boolean {
+		submitError = '';
+		if (selectedIsotopes.length === 0) {
+			submitError = 'Select at least one isotope before saving a reference material.';
+			return false;
+		}
+
+		for (let i = 0; i < countings.length; i++) {
+			const ref = countingRefs[i];
+			if (!ref || typeof ref.validateRefMatInfo !== 'function') {
+				submitError = 'Form is still initializing. Please try again.';
+				return false;
+			}
+
+			const valid = ref.validateRefMatInfo();
+			if (!valid) {
+				if (typeof ref.showValidationErrors === 'function') {
+					ref.showValidationErrors();
+				}
+				const errors = ref.getValidationErrors?.() || ['Please complete all required fields.'];
+				submitError = errors.join(' | ');
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	function buildPayload(): ReferenceMaterialWriteRequest {
+		const firstCounting = countings[0];
+		return {
+			referenceKey: getReferenceKeyFromCounting(firstCounting),
+			notes: referenceMaterialNotes.trim(),
+			isotopes: selectedIsotopes,
+			countings: countings.map((referenceMaterial, index) => ({
+				countingLabel: countingLabels[index]?.trim() || defaultCountingLabel(index),
+				referenceMaterial
+			}))
+		};
+	}
+
+	async function saveReferenceMaterial(payload: ReferenceMaterialWriteRequest): Promise<SaveReferenceMaterialResult> {
+		const response = await fetch('/api/reference-materials', {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				accept: 'application/json'
+			},
+			body: JSON.stringify(payload)
+		});
+
+		const body = await response.json().catch(() => null);
+
+		if (!response.ok) {
+			if (response.status === 401 || response.status === 403) {
+				await refreshAuthState();
+			}
+			throw new Error(body?.error || `Request failed with status ${response.status}`);
+		}
+
+		return {
+			created: Boolean(body?.created),
+			appendedCountings: Number(body?.appendedCountings ?? 0),
+			totalCountings: Number(body?.totalCountings ?? 0)
+		};
+	}
+
+	async function submitReferenceMaterial() {
+		submitMessage = '';
+		submitError = '';
+
+		if (!writerAccess) {
+			submitError = `Your account is signed in, but it does not have the '${WRITER_ROLE}' role required to save reference materials.`;
+			return;
+		}
+
+		if (!validateCountings()) {
+			return;
+		}
+
+		isSubmitting = true;
+		try {
+			const payload = buildPayload();
+			const result = await saveReferenceMaterial(payload);
+			submitMessage = result.created
+				? `Reference material created with ${result.appendedCountings} counting(s).`
+				: `Reference material updated. Appended ${result.appendedCountings} new counting(s). Total countings: ${result.totalCountings}.`;
+		} catch (error) {
+			submitError = error instanceof Error ? error.message : 'Unable to save reference material.';
+		} finally {
+			isSubmitting = false;
+		}
+	}
+
+	$effect(() => {
+		void refreshAuthState();
+	});
+</script>
+
+<svelte:head>
+	<title>Add Reference Material</title>
+</svelte:head>
+
+<section class="writer-page">
+	<div class="writer-page__hero">
+		<p class="writer-page__eyebrow">Reference Material Library</p>
+		<h1 class="writer-page__title">Add reference material countings</h1>
+		<p class="writer-page__summary">
+			Select isotopes from Cosmos-backed catalog, then save one or more countings for the same
+			reference material. Re-analyzed ROI outputs can be saved as additional countings under the same key.
+		</p>
+	</div>
+
+	{#if isCheckingAuth}
+		<div class="writer-card">
+			<p>Checking sign-in status...</p>
+		</div>
+	{:else if !signInAvailable || !authSupported}
+		<div class="writer-card writer-card--warning">
+			<h2>Azure deployment required</h2>
+			<p>This route is only available when the app is running behind Azure Static Web Apps sign-in.</p>
+		</div>
+	{:else if !isSignedIn}
+		<div class="writer-card writer-card--warning">
+			<h2>Sign in required</h2>
+			<p>Sign in with an account that has the isotope writer role to add reference materials.</p>
+			<button type="button" class="btn variant-filled-primary" onclick={handleSignIn}>Sign In</button>
+			{#if authMessage}
+				<p class="writer-page__notice">{authMessage}</p>
+			{/if}
+		</div>
+	{:else}
+		<div class="writer-card">
+			<div class="writer-card__header">
+				<div>
+					<h2>Reference material entry</h2>
+					<p>
+						If a saved document already matches NETL code + sample name, new submissions append
+						additional countings to that record.
+					</p>
+				</div>
+				<div class="writer-card__identity">
+					<span>Signed in as</span>
+					<strong>{principal?.userDetails || principal?.userId || 'Unknown user'}</strong>
+				</div>
+			</div>
+
+			{#if !writerAccess}
+				<div class="writer-page__feedback writer-page__feedback--warning" role="status">
+					This account is signed in, but it does not have the <code>{WRITER_ROLE}</code> role.
+					Saving is disabled until that role is assigned.
+				</div>
+			{/if}
+
+			<div class="writer-block">
+				<IsotopeViewer bind:selectedIsotopes />
+			</div>
+
+			<div class="writer-block">
+				<label class="label">
+					<span>Notes (optional)</span>
+					<textarea
+						class="textarea w-full"
+						bind:value={referenceMaterialNotes}
+						rows="3"
+						placeholder="Optional context for this reference material or counting batch"
+					></textarea>
+				</label>
+			</div>
+
+			{#each countings as counting, index}
+				<div class="writer-block writer-block--counting">
+					<div class="writer-counting__header">
+						<h3>{defaultCountingLabel(index)}</h3>
+						{#if countings.length > 1}
+							<button
+								type="button"
+								class="btn writer-btn-secondary"
+								onclick={() => removeCounting(index)}
+							>
+								Remove
+							</button>
+						{/if}
+					</div>
+
+					<label class="label">
+						<span>Counting Label</span>
+						<input class="input w-50" type="text" bind:value={countingLabels[index]} />
+					</label>
+
+					<RefMatInfo
+						bind:this={countingRefs[index]}
+						isotopeCount={isotopeCount}
+						bind:refMatInfo={countings[index]}
+						isotopeInfo={selectedIsotopes}
+						getRoiIndex={() => []}
+					/>
+				</div>
+			{/each}
+
+			<div class="writer-form__actions">
+				<button type="button" class="btn writer-btn-secondary" onclick={addCounting}>
+					Add Another Counting
+				</button>
+				<button
+					type="button"
+					class="btn variant-filled-primary"
+					disabled={isSubmitting || !writerAccess}
+					onclick={() => {
+						void submitReferenceMaterial();
+					}}
+				>
+					{isSubmitting ? 'Saving...' : 'Save Reference Material'}
+				</button>
+			</div>
+
+			{#if submitError}
+				<p class="writer-page__feedback writer-page__feedback--error">{submitError}</p>
+			{/if}
+
+			{#if submitMessage}
+				<p class="writer-page__feedback writer-page__feedback--success">{submitMessage}</p>
+			{/if}
+		</div>
+	{/if}
+</section>
+
+<style>
+	.writer-page {
+		--writer-text: rgb(15 23 42);
+		--writer-muted: rgb(51 65 85);
+		--writer-accent: rgb(71 85 105);
+		--writer-card-bg: rgb(255 252 245 / 0.96);
+		--writer-card-border: rgb(15 23 42 / 0.08);
+		--writer-card-shadow: 0 28px 60px rgb(15 23 42 / 0.12);
+		--writer-warning-border: rgb(245 158 11 / 0.28);
+		--writer-identity-bg: rgb(15 23 42 / 0.05);
+		--writer-error-bg: rgb(254 242 242);
+		--writer-error-text: rgb(153 27 27);
+		--writer-error-border: rgb(248 113 113 / 0.28);
+		--writer-success-bg: rgb(240 253 244);
+		--writer-success-text: rgb(22 101 52);
+		--writer-success-border: rgb(74 222 128 / 0.25);
+		--writer-notice-text: rgb(180 83 9);
+		padding: 3rem 5% 0;
+		display: grid;
+		gap: 1.5rem;
+		overflow-x: auto;
+	}
+
+	.writer-page__hero {
+		color: var(--writer-text);
+		max-width: 52rem;
+	}
+
+	.writer-page__eyebrow {
+		margin: 0 0 0.5rem;
+		font-size: 0.95rem;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--writer-accent);
+	}
+
+	.writer-page__title {
+		margin: 0;
+		font-size: clamp(2.1rem, 4vw, 3.1rem);
+		line-height: 1;
+	}
+
+	.writer-page__summary {
+		margin: 0.8rem 0 0;
+		color: var(--writer-muted);
+	}
+
+	.writer-card {
+		background: var(--writer-card-bg);
+		border: 1px solid var(--writer-card-border);
+		border-radius: 1.5rem;
+		padding: 1.5rem;
+		box-shadow: var(--writer-card-shadow);
+	}
+
+	.writer-card--warning {
+		border-color: var(--writer-warning-border);
+	}
+
+	.writer-card__header {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.writer-card__identity {
+		background: var(--writer-identity-bg);
+		border-radius: 0.8rem;
+		padding: 0.8rem 1rem;
+		min-width: 16rem;
+	}
+
+	.writer-card__identity span {
+		display: block;
+		font-size: 0.85rem;
+		color: var(--writer-muted);
+	}
+
+	.writer-counting__header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 1rem;
+		margin-bottom: 0.8rem;
+	}
+
+	.writer-block {
+		margin-top: 1.4rem;
+	}
+
+	.writer-block--counting {
+		padding-top: 1.25rem;
+		border-top: 1px solid var(--writer-card-border);
+	}
+
+	.writer-form__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin-top: 1.2rem;
+	}
+
+	.writer-btn-secondary {
+		border: 1px solid rgb(15 23 42 / 0.2);
+		background: rgb(255 255 255 / 0.75);
+	}
+
+	.writer-page__feedback {
+		margin-top: 1rem;
+		padding: 0.85rem 1rem;
+		border-radius: 0.8rem;
+		border: 1px solid transparent;
+	}
+
+	.writer-page__feedback--warning {
+		color: var(--writer-notice-text);
+		border-color: var(--writer-warning-border);
+		background: rgb(254 252 232);
+	}
+
+	.writer-page__feedback--error {
+		background: var(--writer-error-bg);
+		color: var(--writer-error-text);
+		border-color: var(--writer-error-border);
+	}
+
+	.writer-page__feedback--success {
+		background: var(--writer-success-bg);
+		color: var(--writer-success-text);
+		border-color: var(--writer-success-border);
+	}
+
+	.writer-page__notice {
+		margin-top: 0.7rem;
+		color: var(--writer-notice-text);
+	}
+
+	@media (max-width: 900px) {
+		.writer-page {
+			padding: 2rem 1rem 0;
+		}
+	}
+</style>

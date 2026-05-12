@@ -52,6 +52,7 @@ This project now includes an integrated Azure Functions backend under `api/` for
 
 - `GET /api/isotopes`
 - `POST /api/isotopes`
+- `POST /api/reference-materials`
 
 The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
 
@@ -59,7 +60,7 @@ The frontend isotope viewer calls `/api/isotopes` by default. You can override t
 
 The integrated Azure Functions endpoint stays at `authLevel: 'anonymous'`, because Azure Static Web Apps is the layer that authenticates and authorizes requests before forwarding them to the function.
 
-`POST /api/isotopes` is locked down in two places:
+`POST /api/isotopes` and `POST /api/reference-materials` are locked down in two places:
 
 - `staticwebapp.config.json` allows only the custom `isotope_writer` role to call that method.
 - The function independently validates the forwarded `x-ms-client-principal` header and rejects callers that do not have the same role.
@@ -71,6 +72,60 @@ That second check matters because it prevents an accidental config regression fr
 Important limitation: this is still a browser-callable API. Any user who has the `isotope_writer` role can invoke the write endpoint from the browser or other clients while signed in. If writes must only come from trusted backend automation, move the write path behind a separate backend service that is not directly exposed to browser users.
 
 To grant access, assign the `isotope_writer` role in Azure Static Web Apps invitations/role assignments.
+
+### Reference material write payload
+
+`POST /api/reference-materials` expects JSON in this shape:
+
+```json
+{
+	"referenceKey": "AB0053::SRM1633c",
+	"notes": "Optional run notes",
+	"isotopes": [
+		{
+			"elementName": "Cobalt",
+			"isotopeName": "Co-60",
+			"energy": 1173.2,
+			"halfLife": 5.2714,
+			"unit": "years",
+			"linkedReference": 0
+		}
+	],
+	"countings": [
+		{
+			"countingLabel": "Original ROI",
+			"referenceMaterial": {
+				"NETL_code": "AB0053",
+				"sampleName": "SRM1633c",
+				"mass": 0.5,
+				"irradiationTime": 3600,
+				"irradiationEnd": "2026-01-11T10:00",
+				"measurementStartTime": "2026-01-12T12:00",
+				"decayTime": 93600,
+				"liveTime": 1800,
+				"realTime": 1820,
+				"fluence": 1.2e13,
+				"counts": [
+					{
+						"grossCounts": 5000,
+						"netCounts": 4500,
+						"uncertainty": 67,
+						"grossCountsPositionalCorrectionFactor": 1,
+						"netCountsPositionalCorrectionFactor": 1,
+						"uncertaintyPositionalCorrectionFactor": 1
+					}
+				],
+				"dtType": "simple",
+				"knownConcentration": [0.1],
+				"knownUncertainty": [0.005],
+				"concentrationUnits": ["ppm"]
+			}
+		}
+	]
+}
+```
+
+If a document with the same normalized `referenceKey` already exists, the API appends the incoming countings to that existing record.
 
 ### Write payload
 
@@ -106,6 +161,7 @@ Set these application settings in Azure Static Web Apps:
 - `COSMOSDB_KEY`
 - `COSMOSDB_DATABASE`
 - `COSMOSDB_CONTAINER`
+- `COSMOSDB_REFERENCE_CONTAINER` (optional, defaults to `reference-materials`)
 - `ISOTOPE_WRITE_ROLE` (optional, defaults to `isotope_writer`)
 - `COSMOSDB_QUERY` (optional, defaults to `SELECT * FROM c`)
 
