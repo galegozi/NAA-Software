@@ -42,6 +42,8 @@
 	</nav>
 
 	<main class="page-shell">
-		{@render children()}
+		{#key `${page.url.pathname}${page.url.search}`}
+			{@render children()}
+		{/key}
 	</main>
 </div>
