@@ -33,6 +33,7 @@ function buildValidPayload() {
 					liveTime: 1800,
 					realTime: 1810,
 					fluence: 1.2e13,
+					irradiationType: 'total',
 					counts: [
 						{
 							grossCounts: 5000,
@@ -94,7 +95,7 @@ test('normalizeReferenceMaterialWritePayload computes decayTime from measurement
 test('normalizeReferenceMaterialWritePayload changes identity when irradiation changes', () => {
 	const payloadA = buildValidPayload();
 	const payloadB = buildValidPayload();
-	payloadB.countings[0].referenceMaterial.irradiationEnd = '2026-02-11T10:00';
+	payloadB.countings[0].referenceMaterial.irradiationType = 'gated';
 
 	const resultA = normalizeReferenceMaterialWritePayload(payloadA, { userId: 'writer-1' });
 	const resultB = normalizeReferenceMaterialWritePayload(payloadB, { userId: 'writer-1' });

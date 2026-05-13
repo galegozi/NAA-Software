@@ -27,6 +27,7 @@ export interface CountData {
  * Avoid using `'mixed'` in new code and prefer `'short'` or `'simple'` instead.
  */
 export type DeadTimeType = 'short' | 'simple' | 'mixed' | undefined;
+export type IrradiationType = 'gated' | 'total' | undefined;
 export type ConcUnitType = 'percentage' | 'ppm' | undefined;
 
 export interface BaseMaterialInfo {
@@ -41,6 +42,7 @@ export interface BaseMaterialInfo {
 	realTime: number;
 	fluence: number;
 	counts: CountData[];
+	irradiationType: IrradiationType;
 	dtType: DeadTimeType;
 }
 

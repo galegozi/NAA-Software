@@ -54,6 +54,7 @@
 		nextReference.liveTime = reference.liveTime;
 		nextReference.realTime = reference.realTime;
 		nextReference.fluence = reference.fluence;
+		nextReference.irradiationType = reference.irradiationType;
 		nextReference.dtType = reference.dtType;
 		nextReference.counts = Array.from({ length: isotopeCount }, (_, index) => {
 			const count = existingCounts[index];

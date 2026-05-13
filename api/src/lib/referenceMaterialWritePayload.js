@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 const ALLOWED_DT_TYPES = new Set(['short', 'simple', 'mixed']);
+const ALLOWED_IRRADIATION_TYPES = new Set(['gated', 'total']);
 const ALLOWED_CONCENTRATION_UNITS = new Set(['percentage', 'ppm']);
 
 function toTrimmedString(value) {
@@ -180,6 +181,11 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 		throw new Error(`'${fieldPrefix}.dtType' must be one of: short, simple, mixed.`);
 	}
 
+	const irradiationType = toTrimmedString(payload.irradiationType) || 'total';
+	if (!ALLOWED_IRRADIATION_TYPES.has(irradiationType)) {
+		throw new Error(`'${fieldPrefix}.irradiationType' must be one of: gated, total.`);
+	}
+
 	const knownConcentration = payload.knownConcentration.map((value, index) =>
 		normalizeFiniteNumber(value, `${fieldPrefix}.knownConcentration[${index}]`, { min: 0 })
 	);
@@ -220,6 +226,7 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 		counts: payload.counts.map((countData, index) =>
 			normalizeCountData(countData, `${fieldPrefix}.counts[${index}]`)
 		),
+		irradiationType,
 		dtType: dtType || undefined,
 		knownConcentration,
 		knownUncertainty,
@@ -334,6 +341,7 @@ function referenceMaterialEqual(left, right, { includeCounts = true } = {}) {
 		left.liveTime === right.liveTime &&
 		left.realTime === right.realTime &&
 		left.fluence === right.fluence &&
+		left.irradiationType === right.irradiationType &&
 		left.dtType === right.dtType &&
 		arraysEqual(left.knownConcentration, right.knownConcentration) &&
 		arraysEqual(left.knownUncertainty, right.knownUncertainty) &&
@@ -363,6 +371,7 @@ function buildReferenceIdentityMaterial(material, isotopes) {
 		liveTime: material.liveTime,
 		realTime: material.realTime,
 		fluence: material.fluence,
+		irradiationType: material.irradiationType || 'total',
 		dtType: material.dtType || '',
 		knownConcentration: material.knownConcentration,
 		knownUncertainty: material.knownUncertainty,

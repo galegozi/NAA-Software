@@ -24,6 +24,7 @@
 				netCountsPositionalCorrectionFactor: 1,
 				uncertaintyPositionalCorrectionFactor: 1
 			})),
+			irradiationType: 'total',
 			dtType: undefined,
 
 			// specific to Reference Material

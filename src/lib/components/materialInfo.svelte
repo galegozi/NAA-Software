@@ -25,6 +25,7 @@
 				netCountsPositionalCorrectionFactor: 1,
 				uncertaintyPositionalCorrectionFactor: 1
 			})),
+			irradiationType: 'total',
 			dtType: undefined,
 
 		}),
@@ -608,6 +609,18 @@
 	<br />
 {/each}
 <br />
+
+<label class="label">
+	<span>Irradiation Type</span>
+	<select
+		class="select input w-50 bg-surface-50-950 text-surface-950-50"
+		bind:value={materialInfo.irradiationType}
+		required
+	>
+		<option value="total">Total</option>
+		<option value="gated">Gated</option>
+	</select>
+</label>
 
 <label class="label">
 	<span>Dead Time Correction Type</span>
