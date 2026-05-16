@@ -533,6 +533,40 @@
 		<span class="field-error">Fluence must be greater than 0</span>
 	{/if}
 </label>
+
+<label class="label">
+	<span>Irradiation Type</span>
+	<select
+		class="select input w-50 bg-surface-50-950 text-surface-950-50"
+		bind:value={materialInfo.irradiationType}
+		required
+	>
+		<option value="total">Total</option>
+		<option value="gated">Gated</option>
+	</select>
+</label>
+
+<label class="label">
+	<span>Dead Time Correction Type</span>
+	<select
+		class="select input w-50 bg-surface-50-950 text-surface-950-50"
+		bind:value={materialInfo.dtType}
+		required
+	>
+		<option value="short">Short Lived Only</option>
+		<option value="simple" selected>Simple: Only using the net counts, decay constant, and live time</option>
+		<option value="Deprecated" disabled>Deprecated Options</option>
+		<option value="mixed">Mixed (deprecated): Short Lived in presence of Long Lived</option>
+		<!--(net counts)/(1-e^(-decay constant * live time))-->
+	</select>
+</label>
+
+{#if materialInfo.dtType === 'mixed'}
+	<p class="text-sm text-yellow-600 italic">
+		Note: The Mixed Dead Time Correction is deprecated. Please let someone know if you need this
+		feature.
+	</p>
+{/if}
 <br />
 {#each { length: isotopeCount } as _, index}
 	{#if shouldShowIsotope(index)}
@@ -605,44 +639,26 @@
 				required
 			/>
 		</label>
+		{#if roiData && roiData.length > 0}
+			<label class="label">
+				<span>ROI Match</span>
+				<select
+					class="select input w-50 bg-surface-50-950 text-surface-950-50"
+					value={roiSelections[index]}
+					onchange={(e) => handleRoiSelectionChange(index, e)}
+				>
+					<option value={-1}>None</option>
+					{#each roiData as roi, roiIndex}
+						<option value={roiIndex}>
+							ROI {roi.roi}: {roi.centroid} keV ({roi.grossCounts} gross, {roi.netCounts} net)
+						</option>
+					{/each}
+				</select>
+			</label>
+		{/if}
 	{/if}
 	<br />
 {/each}
-<br />
-
-<label class="label">
-	<span>Irradiation Type</span>
-	<select
-		class="select input w-50 bg-surface-50-950 text-surface-950-50"
-		bind:value={materialInfo.irradiationType}
-		required
-	>
-		<option value="total">Total</option>
-		<option value="gated">Gated</option>
-	</select>
-</label>
-
-<label class="label">
-	<span>Dead Time Correction Type</span>
-	<select
-		class="select input w-50 bg-surface-50-950 text-surface-950-50"
-		bind:value={materialInfo.dtType}
-		required
-	>
-		<option value="short">Short Lived Only</option>
-		<option value="simple" selected>Simple: Only using the net counts, decay constant, and live time</option>
-		<option value="Deprecated" disabled>Deprecated Options</option>
-		<option value="mixed">Mixed (deprecated): Short Lived in presence of Long Lived</option>
-		<!--(net counts)/(1-e^(-decay constant * live time))-->
-	</select>
-</label>
-
-{#if materialInfo.dtType === 'mixed'}
-	<p class="text-sm text-yellow-600 italic">
-		Note: The Mixed Dead Time Correction is deprecated. Please let someone know if you need this
-		feature.
-	</p>
-{/if}
 
 <style>
 	.field-error {
