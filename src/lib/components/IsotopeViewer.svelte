@@ -86,10 +86,6 @@
 		};
 	}
 
-	function isCatalogItemSelected(item: IsotopeCatalogItem): boolean {
-		return selectedIsotopes.some((isotope) => isotope.isotopeName === getIsotopeName(item));
-	}
-
 	async function loadItems(search: string) {
 		const apiUrl = env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
 		const requestUrl = new URL(apiUrl, window.location.origin);
@@ -205,10 +201,6 @@
 	});
 
 	function addSelectedIsotope(item: IsotopeCatalogItem, energy: number) {
-		if (isCatalogItemSelected(item)) {
-			return;
-		}
-
 		selectedIsotopes = [...selectedIsotopes, toIsotopeInfo(item, energy)];
 		searchTerm = '';
 	}
@@ -240,7 +232,6 @@
 					<p class="p-2">Unable to load isotope catalog: {errorMessage}</p>
 				{:else if visibleRows.length > 0}
 					{#each visibleRows as row (row.id)}
-						{@const isAlreadySelected = isCatalogItemSelected(row.item)}
 						<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
 							<div class="flex items-start justify-between gap-4">
 								<div class="space-y-1">
@@ -249,12 +240,11 @@
 									<div class="text-sm">Half-life: {row.item.halfLife.number || row.item.halfLifeSeconds} {row.item.halfLife.unit}</div>
 								</div>
 								<button
-									class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
+									class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400"
 									type="button"
 									onclick={() => addSelectedIsotope(row.item, row.energy)}
-									disabled={isAlreadySelected}
 								>
-									{isAlreadySelected ? 'Added' : 'Add'}
+									Add
 								</button>
 							</div>
 						</div>
