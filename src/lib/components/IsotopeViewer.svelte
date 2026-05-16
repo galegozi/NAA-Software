@@ -86,6 +86,17 @@
 		};
 	}
 
+	function isExactIsotopeSelected(item: IsotopeCatalogItem, energy: number): boolean {
+		const newIsotope = toIsotopeInfo(item, energy);
+		return selectedIsotopes.some((selected) => 
+			selected.elementName === newIsotope.elementName &&
+			selected.isotopeName === newIsotope.isotopeName &&
+			selected.energy === newIsotope.energy &&
+			selected.halfLife === newIsotope.halfLife &&
+			selected.unit === newIsotope.unit
+		);
+	}
+
 	async function loadItems(search: string) {
 		const apiUrl = env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
 		const requestUrl = new URL(apiUrl, window.location.origin);
@@ -171,7 +182,17 @@
 	let filteredRows = $derived(
 		energyRows.filter((row) => matchesSearch(row.item, row.energy, searchTerm))
 	);
-	let visibleRows = $derived(filteredRows.slice(0, 25));
+	let sortedRows = $derived(
+		[...filteredRows].sort((a, b) => {
+			const isotopeNameA = getIsotopeName(a.item);
+			const isotopeNameB = getIsotopeName(b.item);
+			if (isotopeNameA !== isotopeNameB) {
+				return isotopeNameA.localeCompare(isotopeNameB);
+			}
+			return a.energy - b.energy;
+		})
+	);
+	let visibleRows = $derived(sortedRows.slice(0, 25));
 
 	$effect(() => {
 		const nextSearch = searchTerm.trim();
@@ -201,6 +222,10 @@
 	});
 
 	function addSelectedIsotope(item: IsotopeCatalogItem, energy: number) {
+		if (isExactIsotopeSelected(item, energy)) {
+			return;
+		}
+
 		selectedIsotopes = [...selectedIsotopes, toIsotopeInfo(item, energy)];
 		searchTerm = '';
 	}
@@ -232,19 +257,21 @@
 					<p class="p-2">Unable to load isotope catalog: {errorMessage}</p>
 				{:else if visibleRows.length > 0}
 					{#each visibleRows as row (row.id)}
-						<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
-							<div class="flex items-start justify-between gap-4">
-								<div class="space-y-1">
-									<div class="font-bold">{row.item.elementName} ({getIsotopeName(row.item)})</div>
-									<div class="text-sm">Energy: {row.energy} keV</div>
-									<div class="text-sm">Half-life: {row.item.halfLife.number || row.item.halfLifeSeconds} {row.item.halfLife.unit}</div>
-								</div>
-								<button
-									class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400"
-									type="button"
-									onclick={() => addSelectedIsotope(row.item, row.energy)}
-								>
-									Add
+					{@const isAlreadySelected = isExactIsotopeSelected(row.item, row.energy)}
+					<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
+						<div class="flex items-start justify-between gap-4">
+							<div class="space-y-1">
+								<div class="font-bold">{row.item.elementName} ({getIsotopeName(row.item)})</div>
+								<div class="text-sm">Energy: {row.energy} keV</div>
+								<div class="text-sm">Half-life: {row.item.halfLife.number || row.item.halfLifeSeconds} {row.item.halfLife.unit}</div>
+							</div>
+							<button
+								class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
+								type="button"
+								onclick={() => addSelectedIsotope(row.item, row.energy)}
+								disabled={isAlreadySelected}
+							>
+								{isAlreadySelected ? 'Added' : 'Add'}
 								</button>
 							</div>
 						</div>
@@ -256,7 +283,7 @@
 				{/if}
 			</div>
 
-			{#if filteredRows.length > visibleRows.length}
+			{#if sortedRows.length > visibleRows.length}
 				<p>Showing the first {visibleRows.length} matches. Keep typing to narrow the list.</p>
 			{/if}
 
