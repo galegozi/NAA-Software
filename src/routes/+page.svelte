@@ -862,12 +862,13 @@
 					</ul>
 				</li>
 				<li>Automatic loading of isotope information from the database.</li>
+				<li>Automatic loading of reference materials from the database.</li>
 			</ul>
 			<br />
 			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
 			<br />
 			<p>
-				In this version (v{APP_VERSION}), the main focus is to add loading of isotopes from a
+				In this version (v{APP_VERSION}), the main focus is to add loading of reference materials from a
 				database.
 			</p>
 			<br />
