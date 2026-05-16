@@ -227,7 +227,6 @@
 		}
 
 		selectedIsotopes = [...selectedIsotopes, toIsotopeInfo(item, energy)];
-		searchTerm = '';
 	}
 
 	function removeSelectedIsotope(index: number) {
