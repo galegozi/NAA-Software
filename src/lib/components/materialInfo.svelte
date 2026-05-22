@@ -238,7 +238,7 @@
 		const nextSelections = getOneToOneRoiIndices(data.roiData);
 		roiSelections = nextSelections;
 
-		materialInfo.counts = materialInfo.counts.map(() => ({
+		materialInfo.counts = Array.from({ length: isotopeCount }, () => ({
 			grossCounts: 0,
 			netCounts: 0,
 			uncertainty: 0,
@@ -617,91 +617,93 @@
 <br />
 {#each { length: isotopeCount } as _, index}
 	{#if shouldShowIsotope(index)}
-		<h3 class="text-xl font-bold">
-			{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Counts
-		</h3>
-		<label class="label">
-			<span>Gross Counts</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].grossCounts}
-				placeholder="e.g., 5000"
-				min="0"
-				required
-			/>
-		</label>
-		<label class="label">
-			<span>Net Counts</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].netCounts}
-				placeholder="e.g., 4500"
-				min="0"
-				required
-			/>
-		</label>
-		<label class="label">
-			<span>Uncertainty (in counts)</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].uncertainty}
-				placeholder="e.g., 67.08"
-				min="0"
-				required
-			/>
-		</label>
-		<label class="label">
-			<span>Gross Counts Positional Correction Factor</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].grossCountsPositionalCorrectionFactor}
-				placeholder="e.g., 1"
-				step="any"
-				required
-			/>
-		</label>
-		<label class="label">
-			<span>Net Counts Positional Correction Factor</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].netCountsPositionalCorrectionFactor}
-				placeholder="e.g., 1"
-				step="any"
-				required
-			/>
-		</label>
-		<label class="label">
-			<span>Uncertainty Positional Correction Factor</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].uncertaintyPositionalCorrectionFactor}
-				placeholder="e.g., 1"
-				step="any"
-				required
-			/>
-		</label>
-		{#if roiData && roiData.length > 0}
+		{#if materialInfo.counts[index]}
+			<h3 class="text-xl font-bold">
+				{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Counts
+			</h3>
 			<label class="label">
-				<span>ROI Match</span>
-				<select
-					class="select input w-50 bg-surface-50-950 text-surface-950-50"
-					value={roiSelections[index]}
-					onchange={(e) => handleRoiSelectionChange(index, e)}
-				>
-					<option value={-1}>None</option>
-					{#each roiData as roi, roiIndex}
-						<option value={roiIndex}>
-							ROI {roi.roi}: {roi.centroid} keV ({roi.grossCounts} gross, {roi.netCounts} net)
-						</option>
-					{/each}
-				</select>
+				<span>Gross Counts</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].grossCounts}
+					placeholder="e.g., 5000"
+					min="0"
+					required
+				/>
 			</label>
+			<label class="label">
+				<span>Net Counts</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].netCounts}
+					placeholder="e.g., 4500"
+					min="0"
+					required
+				/>
+			</label>
+			<label class="label">
+				<span>Uncertainty (in counts)</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].uncertainty}
+					placeholder="e.g., 67.08"
+					min="0"
+					required
+				/>
+			</label>
+			<label class="label">
+				<span>Gross Counts Positional Correction Factor</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].grossCountsPositionalCorrectionFactor}
+					placeholder="e.g., 1"
+					step="any"
+					required
+				/>
+			</label>
+			<label class="label">
+				<span>Net Counts Positional Correction Factor</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].netCountsPositionalCorrectionFactor}
+					placeholder="e.g., 1"
+					step="any"
+					required
+				/>
+			</label>
+			<label class="label">
+				<span>Uncertainty Positional Correction Factor</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].uncertaintyPositionalCorrectionFactor}
+					placeholder="e.g., 1"
+					step="any"
+					required
+				/>
+			</label>
+			{#if roiData && roiData.length > 0}
+				<label class="label">
+					<span>ROI Match</span>
+					<select
+						class="select input w-50 bg-surface-50-950 text-surface-950-50"
+						value={roiSelections[index]}
+						onchange={(e) => handleRoiSelectionChange(index, e)}
+					>
+						<option value={-1}>None</option>
+						{#each roiData as roi, roiIndex}
+							<option value={roiIndex}>
+								ROI {roi.roi}: {roi.centroid} keV ({roi.grossCounts} gross, {roi.netCounts} net)
+							</option>
+						{/each}
+					</select>
+				</label>
+			{/if}
 		{/if}
 	{/if}
 	<br />
