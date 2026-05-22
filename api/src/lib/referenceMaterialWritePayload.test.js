@@ -12,11 +12,8 @@ function buildValidPayload() {
 		notes: 'first submission',
 		isotopes: [
 			{
-				elementName: 'Cobalt',
-				isotopeName: 'Co-60',
-				energy: 1173.2,
-				halfLife: 5.27,
-				unit: 'years'
+				isotopeId: 'mock-co-60',
+				energy: 1173.2
 			}
 		],
 		countings: [
@@ -62,6 +59,8 @@ test('normalizeReferenceMaterialWritePayload normalizes a valid payload', () => 
 	assert.match(result.referenceKey, /^rm-[a-f0-9]{40}$/u);
 	assert.equal(result.isotopes.length, 1);
 	assert.equal(result.countings.length, 1);
+	assert.equal(result.isotopes[0].isotopeId, 'mock-co-60');
+	assert.equal(result.isotopes[0].energy, 1173.2);
 	assert.equal(result.countings[0].referenceMaterial.counts[0].netCounts, 4500);
 	assert.equal(result.countings[0].referenceMaterial.irradiationStartTime, '2026-01-11T09:00');
 	assert.equal(result.countings[0].referenceMaterial.decayTime, 93600);

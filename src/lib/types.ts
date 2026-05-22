@@ -3,6 +3,7 @@
  */
 
 export interface IsotopeInfo {
+	id?: string;
 	elementName: string;
 	isotopeName: string;
 	energy: number;

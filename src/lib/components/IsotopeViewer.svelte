@@ -23,11 +23,11 @@
 
 	function getSelectionKey(item: IsotopeCatalogItem, energy: number): string {
 		const halfLife = item.halfLife.number || item.halfLifeSeconds;
-		return `${item.elementName}|${getIsotopeName(item)}|${energy}|${halfLife}|${item.halfLife.unit}`;
+		return `${item.id}|${item.elementName}|${getIsotopeName(item)}|${energy}|${halfLife}|${item.halfLife.unit}`;
 	}
 
 	function getIsotopeSelectionKey(isotope: IsotopeInfo): string {
-		return `${isotope.elementName}|${isotope.isotopeName}|${isotope.energy}|${isotope.halfLife}|${isotope.unit}`;
+		return `${isotope.id ?? ''}|${isotope.elementName}|${isotope.isotopeName}|${isotope.energy}|${isotope.halfLife}|${isotope.unit}`;
 	}
 
 	function normalizeItems(payload: unknown): IsotopeCatalogItem[] {
@@ -86,6 +86,7 @@
 
 	function toIsotopeInfo(item: IsotopeCatalogItem, energy: number): IsotopeInfo {
 		return {
+			id: item.id,
 			elementName: item.elementName,
 			isotopeName: getIsotopeName(item),
 			energy,

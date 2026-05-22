@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import IsotopeEnable from './isotopeEnable.svelte';
 
 	import type { MaestroParsedData, MaestroRoiEntry } from '$lib/NAAMath/types.js';
@@ -71,23 +70,6 @@
 		const currentSelections = roiSelections ?? [];
 		if (currentSelections.length !== isotopeCount) {
 			roiSelections = Array.from({ length: isotopeCount }, (_, i) => currentSelections[i] ?? -1);
-		}
-	});
-
-	// Preserve scroll position when NETL code or sample name changes to prevent page jumping
-	let lastNETLCode = $state('');
-	let lastSampleName = $state('');
-
-	$effect(() => {
-		if (materialInfo.NETL_code !== lastNETLCode || materialInfo.sampleName !== lastSampleName) {
-			if (typeof window !== 'undefined') {
-				const scrollPos = window.scrollY;
-				lastNETLCode = materialInfo.NETL_code;
-				lastSampleName = materialInfo.sampleName;
-				tick().then(() => {
-					window.scrollTo(0, scrollPos);
-				});
-			}
 		}
 	});
 

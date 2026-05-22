@@ -29,18 +29,33 @@ function normalizeFiniteNumber(value, fieldName, { min = -Infinity, max = Infini
 	return parsed;
 }
 
-function normalizeIsotope(payload, index) {
-	if (typeof payload !== 'object' || payload === null) {
-		throw new Error(`'isotopes[${index}]' must be an object.`);
+function normalizeIsotopeSelection(payload, index) {
+	if (typeof payload === 'string') {
+		return {
+			isotopeId: requireString(payload, `isotopes[${index}]`, 200),
+			energy: null
+		};
 	}
 
-	return {
-		elementName: requireString(payload.elementName, `isotopes[${index}].elementName`, 120),
-		isotopeName: requireString(payload.isotopeName, `isotopes[${index}].isotopeName`, 120),
-		energy: normalizeFiniteNumber(payload.energy, `isotopes[${index}].energy`, { min: 0 }),
-		halfLife: normalizeFiniteNumber(payload.halfLife, `isotopes[${index}].halfLife`, { min: 0 }),
-		unit: requireString(payload.unit, `isotopes[${index}].unit`, 24)
-	};
+	if (typeof payload === 'object' && payload !== null) {
+		const isotopeId = requireString(
+			payload.isotopeId ?? payload.id,
+			`isotopes[${index}].isotopeId`,
+			200
+		);
+
+		const hasEnergy = payload.energy !== undefined && payload.energy !== null;
+		const energy = hasEnergy
+			? normalizeFiniteNumber(payload.energy, `isotopes[${index}].energy`, { min: 0 })
+			: null;
+
+		return {
+			isotopeId,
+			energy
+		};
+	}
+
+	throw new Error(`'isotopes[${index}]' must be an isotope selection object or ID string.`);
 }
 
 function normalizeCountData(payload, fieldPrefix) {
@@ -279,7 +294,7 @@ function arraysEqual(left, right) {
 	return true;
 }
 
-function isotopesEqual(left, right) {
+function isotopeSelectionsEqual(left, right) {
 	if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
 		return false;
 	}
@@ -288,17 +303,18 @@ function isotopesEqual(left, right) {
 		const l = left[index];
 		const r = right[index];
 		if (
-			l?.elementName !== r?.elementName ||
-			l?.isotopeName !== r?.isotopeName ||
-			l?.energy !== r?.energy ||
-			l?.halfLife !== r?.halfLife ||
-			l?.unit !== r?.unit
+			l?.isotopeId !== r?.isotopeId ||
+			l?.energy !== r?.energy
 		) {
 			return false;
 		}
 	}
 
 	return true;
+}
+
+function isotopesEqual(left, right) {
+	return isotopeSelectionsEqual(left, right);
 }
 
 function countsEqual(leftCounts, rightCounts) {
@@ -376,13 +392,7 @@ function buildReferenceIdentityMaterial(material, isotopes) {
 		knownConcentration: material.knownConcentration,
 		knownUncertainty: material.knownUncertainty,
 		concentrationUnits: material.concentrationUnits,
-		isotopes: isotopes.map((isotope) => ({
-			elementName: isotope.elementName,
-			isotopeName: isotope.isotopeName,
-			energy: isotope.energy,
-			halfLife: isotope.halfLife,
-			unit: isotope.unit
-		}))
+		isotopes
 	};
 }
 
@@ -405,7 +415,9 @@ export function normalizeReferenceMaterialWritePayload(payload, principal) {
 		throw new Error("'countings' must be a non-empty array.");
 	}
 
-	const isotopes = payload.isotopes.map((isotope, index) => normalizeIsotope(isotope, index));
+	const isotopes = payload.isotopes.map((isotope, index) =>
+		normalizeIsotopeSelection(isotope, index)
+	);
 	const isotopeCount = isotopes.length;
 	const normalizedCountings = payload.countings.map((entry, index) => {
 		if (typeof entry !== 'object' || entry === null) {

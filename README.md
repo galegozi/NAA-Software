@@ -57,7 +57,6 @@ This project now includes an integrated Azure Functions backend under `api/` for
 The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
 
 ### API access control
-
 The integrated Azure Functions endpoint stays at `authLevel: 'anonymous'`, because Azure Static Web Apps is the layer that authenticates and authorizes requests before forwarding them to the function.
 
 `POST /api/isotopes` and `POST /api/reference-materials` are locked down in two places:
@@ -83,12 +82,8 @@ To grant access, assign the `isotope_writer` role in Azure Static Web Apps invit
 	"notes": "Optional run notes",
 	"isotopes": [
 		{
-			"elementName": "Cobalt",
-			"isotopeName": "Co-60",
-			"energy": 1173.2,
-			"halfLife": 5.2714,
-			"unit": "years",
-			"linkedReference": 0
+			"isotopeId": "isotope-doc-id-1",
+			"energy": 1173.2
 		}
 	],
 	"countings": [

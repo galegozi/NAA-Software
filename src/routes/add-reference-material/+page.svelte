@@ -13,7 +13,10 @@
 	type ReferenceMaterialWriteRequest = {
 		referenceKey: string;
 		notes: string;
-		isotopes: IsotopeInfo[];
+		isotopes: Array<{
+			isotopeId: string;
+			energy: number;
+		}>;
 		countings: ReferenceMaterialCountingWriteRequest[];
 	};
 
@@ -183,10 +186,28 @@
 
 	function buildPayload(): ReferenceMaterialWriteRequest {
 		const firstCounting = countings[0];
+		const isotopeSelections: ReferenceMaterialWriteRequest['isotopes'] = [];
+		for (const isotope of selectedIsotopes) {
+			if (typeof isotope.id !== 'string' || isotope.id.trim().length === 0) {
+				continue;
+			}
+
+			const selection: ReferenceMaterialWriteRequest['isotopes'][number] = {
+				isotopeId: isotope.id,
+				energy: isotope.energy
+			};
+
+			isotopeSelections.push(selection);
+		}
+
+		if (isotopeSelections.length !== selectedIsotopes.length) {
+			throw new Error('One or more selected isotopes are missing a catalog ID. Re-select isotopes and try again.');
+		}
+
 		return {
 			referenceKey: getReferenceKeyFromCounting(firstCounting),
 			notes: referenceMaterialNotes.trim(),
-			isotopes: selectedIsotopes,
+			isotopes: isotopeSelections,
 			countings: countings.map((referenceMaterial, index) => ({
 				countingLabel: countingLabels[index]?.trim() || defaultCountingLabel(index),
 				referenceMaterial
