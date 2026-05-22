@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import IsotopeEnable from './isotopeEnable.svelte';
 
 	import type { MaestroParsedData, MaestroRoiEntry } from '$lib/NAAMath/types.js';
@@ -66,6 +67,26 @@
 		}
 	});
 
+	// Preserve scroll position when NETL code or sample name changes to prevent page jumping
+	let lastNETLCode = $state('');
+	let lastSampleName = $state('');
+
+	$effect(() => {
+		if (materialInfo.NETL_code !== lastNETLCode || materialInfo.sampleName !== lastSampleName) {
+			if (typeof window !== 'undefined') {
+				const scrollPos = window.scrollY;
+				lastNETLCode = materialInfo.NETL_code;
+				lastSampleName = materialInfo.sampleName;
+				tick().then(() => {
+					window.scrollTo(0, scrollPos);
+				});
+			}
+		}
+	});
+
+	// Track if decay time was manually set to avoid overwriting user input
+	let lastManualDecayTime = $state<number | null>(null);
+
 	$effect(() => {
 		const measurementStartTime = normalizeDateTimeLocal(materialInfo.measurementStartTime);
 		const irradiationEnd = normalizeDateTimeLocal(materialInfo.irradiationEnd);
@@ -97,15 +118,23 @@
 			return;
 		}
 
-		if (computedDecayTime > 0) {
-			materialInfo.decayTime = computedDecayTime;
-			return;
-		}
+		// Only auto-compute decay time if it hasn't been manually set
+		// If user has manually entered a decay time that differs from computed, don't overwrite it
+		if (lastManualDecayTime === null) {
+			if (computedDecayTime > 0) {
+				materialInfo.decayTime = computedDecayTime;
+				return;
+			}
 
-		if (!(Number.isFinite(inputDecayTime) && inputDecayTime > 0)) {
-			materialInfo.decayTime = computedDecayTime;
+			if (!(Number.isFinite(inputDecayTime) && inputDecayTime > 0)) {
+				materialInfo.decayTime = computedDecayTime;
+			}
 		}
 	});
+
+	export function trackDecayTimeChange() {
+		lastManualDecayTime = materialInfo.decayTime;
+	}
 
 	function parseDateTimeInput(value: string): Date | null {
 		const trimmed = value?.trim();
@@ -483,6 +512,7 @@
 		class="input w-50"
 		type="number"
 		bind:value={materialInfo.decayTime}
+		onchange={() => trackDecayTimeChange()}
 		placeholder="e.g., 7200"
 		min="0"
 		required
@@ -666,5 +696,13 @@
 		font-size: 0.875rem;
 		margin-top: 0.25rem;
 		display: block;
+	}
+
+	:global(html) {
+		scroll-behavior: auto;
+	}
+
+	:global(input:focus, textarea:focus, select:focus) {
+		scroll-margin: 10rem;
 	}
 </style>
