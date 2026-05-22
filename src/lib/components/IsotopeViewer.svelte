@@ -21,6 +21,15 @@
 		energy: number;
 	};
 
+	function getSelectionKey(item: IsotopeCatalogItem, energy: number): string {
+		const halfLife = item.halfLife.number || item.halfLifeSeconds;
+		return `${item.elementName}|${getIsotopeName(item)}|${energy}|${halfLife}|${item.halfLife.unit}`;
+	}
+
+	function getIsotopeSelectionKey(isotope: IsotopeInfo): string {
+		return `${isotope.elementName}|${isotope.isotopeName}|${isotope.energy}|${isotope.halfLife}|${isotope.unit}`;
+	}
+
 	function normalizeItems(payload: unknown): IsotopeCatalogItem[] {
 		if (Array.isArray(payload)) {
 			return payload as IsotopeCatalogItem[];
@@ -87,14 +96,7 @@
 	}
 
 	function isExactIsotopeSelected(item: IsotopeCatalogItem, energy: number): boolean {
-		const newIsotope = toIsotopeInfo(item, energy);
-		return selectedIsotopes.some((selected) => 
-			selected.elementName === newIsotope.elementName &&
-			selected.isotopeName === newIsotope.isotopeName &&
-			selected.energy === newIsotope.energy &&
-			selected.halfLife === newIsotope.halfLife &&
-			selected.unit === newIsotope.unit
-		);
+		return selectedIsotopeKeys.has(getSelectionKey(item, energy));
 	}
 
 	async function loadItems(search: string) {
@@ -193,6 +195,7 @@
 		})
 	);
 	let visibleRows = $derived(sortedRows.slice(0, 25));
+	let selectedIsotopeKeys = $derived(new Set(selectedIsotopes.map(getIsotopeSelectionKey)));
 
 	$effect(() => {
 		const nextSearch = searchTerm.trim();
@@ -256,7 +259,7 @@
 					<p class="p-2">Unable to load isotope catalog: {errorMessage}</p>
 				{:else if visibleRows.length > 0}
 					{#each visibleRows as row (row.id)}
-					{@const isAlreadySelected = isExactIsotopeSelected(row.item, row.energy)}
+					{@const isAlreadySelected = selectedIsotopeKeys.has(getSelectionKey(row.item, row.energy))}
 					<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
 						<div class="flex items-start justify-between gap-4">
 							<div class="space-y-1">

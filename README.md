@@ -162,6 +162,7 @@ Set these application settings in Azure Static Web Apps:
 - `COSMOSDB_DATABASE`
 - `COSMOSDB_CONTAINER`
 - `COSMOSDB_REFERENCE_CONTAINER` (optional, defaults to `reference-materials`)
+- `MOCK_COSMOS` (optional, defaults to `false`; when `true`, GET/POST isotope endpoints and POST reference-materials use mock in-memory behavior and log payloads instead of calling Cosmos DB)
 - `ISOTOPE_WRITE_ROLE` (optional, defaults to `isotope_writer`)
 - `COSMOSDB_QUERY` (optional, defaults to `SELECT * FROM c`)
 

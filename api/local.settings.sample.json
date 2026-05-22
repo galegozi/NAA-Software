@@ -8,6 +8,7 @@
 		"COSMOSDB_DATABASE": "NAA-db",
 		"COSMOSDB_CONTAINER": "isotopes",
 		"COSMOSDB_REFERENCE_CONTAINER": "reference-materials",
+		"MOCK_COSMOS": "false",
 		"ISOTOPE_WRITE_ROLE": "isotope_writer",
 		"COSMOSDB_QUERY": "SELECT * FROM c"
 	}

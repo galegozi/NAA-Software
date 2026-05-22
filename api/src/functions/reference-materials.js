@@ -4,6 +4,11 @@ import { getReferenceMaterialsContainer } from '../lib/cosmosClient.js';
 import { mergeReferenceMaterialWrite, normalizeReferenceMaterialWritePayload } from '../lib/referenceMaterialWritePayload.js';
 import { canWriteIsotopes } from '../lib/staticWebAppsAuth.js';
 
+function isMockCosmosEnabled() {
+	const value = process.env.MOCK_COSMOS?.trim().toLowerCase();
+	return value === '1' || value === 'true' || value === 'yes';
+}
+
 async function referenceMaterialsHandler(request, context) {
 	if (request.method !== 'POST') {
 		return {
@@ -44,6 +49,25 @@ async function referenceMaterialsHandler(request, context) {
 			status: 400,
 			jsonBody: {
 				error: error instanceof Error ? error.message : 'Invalid reference material payload.'
+			}
+		};
+	}
+
+	if (isMockCosmosEnabled()) {
+		context.log('MOCK_COSMOS enabled: mock-saving reference material payload.', {
+			referenceKey: item.referenceKey,
+			isotopeCount: item.isotopes.length,
+			countings: item.countings.length
+		});
+
+		return {
+			status: 201,
+			jsonBody: {
+				item,
+				created: true,
+				appendedCountings: item.countings.length,
+				totalCountings: item.countings.length,
+				mocked: true
 			}
 		};
 	}
