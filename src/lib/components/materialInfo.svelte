@@ -55,10 +55,17 @@
 			});
 			materialInfo.counts = newCounts;
 		}
+
+		if (pendingMaestroData && isotopeCount > 0 && materialInfo.counts.length === isotopeCount) {
+			const parsedData = pendingMaestroData;
+			pendingMaestroData = null;
+			applyParsedMaestroData(parsedData);
+		}
 	});
 
 	let roiData = $state<MaestroRoiEntry[] | null>(null);
 	let roiSelections = $state<number[]>([]);
+	let pendingMaestroData = $state<MaestroParsedData | null>(null);
 
 	$effect(() => {
 		const currentSelections = roiSelections ?? [];
@@ -219,6 +226,37 @@
 		});
 	}
 
+	function applyParsedMaestroData(data: MaestroParsedData) {
+		materialInfo.liveTime = data.liveTime;
+		materialInfo.realTime = data.realTime;
+		materialInfo.measurementStartTime = data.startTime
+			? `${data.startTime.getFullYear()}-${String(data.startTime.getMonth() + 1).padStart(2, '0')}-${String(data.startTime.getDate()).padStart(2, '0')}T${String(data.startTime.getHours()).padStart(2, '0')}:${String(data.startTime.getMinutes()).padStart(2, '0')}`
+			: '';
+		roiData = data.roiData;
+
+		selected = new Set<string>();
+		const nextSelections = getOneToOneRoiIndices(data.roiData);
+		roiSelections = nextSelections;
+
+		materialInfo.counts = materialInfo.counts.map(() => ({
+			grossCounts: 0,
+			netCounts: 0,
+			uncertainty: 0,
+			grossCountsPositionalCorrectionFactor: 1,
+			netCountsPositionalCorrectionFactor: 1,
+			uncertaintyPositionalCorrectionFactor: 1
+		}));
+
+		if (canEditToggles) {
+			const matchedLabels = nextSelections
+				.map((roiIndex, isoIndex) => (roiIndex >= 0 ? getIsotopeKey(isoIndex) : null))
+				.filter((label): label is string => Boolean(label));
+			selected = new Set(matchedLabels);
+		}
+
+		applyAllRoiSelections(nextSelections);
+	}
+
 	function handleRoiSelectionChange(isoIndex: number, event: Event) {
 		const target = event.target as HTMLSelectElement;
 		const roiIndex = Number(target.value);
@@ -339,33 +377,12 @@
 	}
 
 	function handleParsedMaestro(data: MaestroParsedData) {
-		materialInfo.liveTime = data.liveTime;
-		materialInfo.realTime = data.realTime;
-		materialInfo.measurementStartTime = data.startTime
-			? `${data.startTime.getFullYear()}-${String(data.startTime.getMonth() + 1).padStart(2, '0')}-${String(data.startTime.getDate()).padStart(2, '0')}T${String(data.startTime.getHours()).padStart(2, '0')}:${String(data.startTime.getMinutes()).padStart(2, '0')}`
-			: '';
-		roiData = data.roiData;
-
-		selected = new Set<string>();
-		roiSelections = getOneToOneRoiIndices(data.roiData);
-
-		materialInfo.counts = materialInfo.counts.map(() => ({
-			grossCounts: 0,
-			netCounts: 0,
-			uncertainty: 0,
-			grossCountsPositionalCorrectionFactor: 1,
-			netCountsPositionalCorrectionFactor: 1,
-			uncertaintyPositionalCorrectionFactor: 1
-		}));
-
-		if (canEditToggles) {
-			const matchedLabels = roiSelections
-				.map((roiIndex, isoIndex) => (roiIndex >= 0 ? getIsotopeKey(isoIndex) : null))
-				.filter((label): label is string => Boolean(label));
-			selected = new Set(matchedLabels);
+		pendingMaestroData = data;
+		if (isotopeCount > 0 && materialInfo.counts.length === isotopeCount) {
+			const parsedData = pendingMaestroData;
+			pendingMaestroData = null;
+			applyParsedMaestroData(parsedData);
 		}
-
-		applyAllRoiSelections(roiSelections);
 	}
 
 	export function validateMaterialInfo(): boolean {
