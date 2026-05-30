@@ -3,6 +3,7 @@
 	import AuthGate from '$lib/components/AuthGate.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
 	import ReferenceDatasheetForm from '$lib/components/ReferenceDatasheetForm.svelte';
+	import IsotopeMeasurementMappingForm from '$lib/components/IsotopeMeasurementMappingForm.svelte';
 	import type { IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
 	import { createReferenceMaterial } from '$lib/utils/naaUtils.js';
 
@@ -109,7 +110,7 @@
 	let submitError = $state('');
 	let submitMessage = $state('');
 
-	let activeTab = $state<'irradiation' | 'datasheet'>('irradiation');
+	let activeTab = $state<'irradiation' | 'datasheet' | 'mappings'>('irradiation');
 
 	let selectedIsotopes = $state<IsotopeInfo[]>([]);
 	let referenceMaterialNotes = $state('');
@@ -117,6 +118,7 @@
 	let datasheetsLoading = $state(false);
 	let datasheetsError = $state('');
 	let selectedReferenceDatasheetId = $state('');
+	let datasheetSearchTerm = $state('');
 	let datasheetMatchError = $state('');
 	let countingLabels = $state<string[]>([defaultCountingLabel(0)]);
 	let countings = $state<ReferenceMaterial[]>([createCounting(0)]);
@@ -124,6 +126,18 @@
 	let lastResizedIsotopeCount = $state(-1);
 
 	let isotopeCount = $derived(selectedIsotopes.length);
+	let filteredReferenceDatasheets = $derived.by(() => {
+		const query = datasheetSearchTerm.trim().toLowerCase();
+		if (!query) {
+			return referenceDatasheets;
+		}
+
+		return referenceDatasheets.filter((item) => {
+			const sampleName = (item.sampleName || '').toLowerCase();
+			const id = (item.id || '').toLowerCase();
+			return sampleName.includes(query) || id.includes(query);
+		});
+	});
 
 	function getReferenceKeyFromCounting(referenceMaterial: ReferenceMaterial): string {
 		const netlCode = referenceMaterial.NETL_code?.trim();
@@ -431,8 +445,8 @@
 		<h1 class="writer-page__title">Add reference material</h1>
 		<p class="writer-page__summary">
 			Use the <strong>Irradiation</strong> tab to record counting data from irradiated reference
-			materials, or the <strong>Datasheet</strong> tab to enter certified concentration values from
-			a reference material certificate.
+			materials, the <strong>Datasheet</strong> tab to enter certified concentration values from
+			a reference material certificate, or <strong>A Measures B</strong> to define isotope proxy mappings.
 		</p>
 	</div>
 
@@ -456,6 +470,18 @@
 			onclick={() => { activeTab = 'datasheet'; }}
 		>
 			Datasheet
+		</button>
+		<button
+			role="tab"
+			type="button"
+			class="writer-tab"
+			class:writer-tab--active={activeTab === 'mappings'}
+			aria-selected={activeTab === 'mappings'}
+			onclick={() => {
+				activeTab = 'mappings';
+			}}
+		>
+			A Measures B
 		</button>
 	</div>
 
@@ -486,14 +512,26 @@
 
 				<div class="writer-block">
 					<label class="label">
+						<span>Find Datasheet</span>
+						<input
+							class="input w-full"
+							type="search"
+							bind:value={datasheetSearchTerm}
+							placeholder="Search by sample name or datasheet ID"
+						/>
+					</label>
+					<label class="label">
 						<span>Reference Datasheet</span>
 						<select class="select w-full" bind:value={selectedReferenceDatasheetId} disabled={datasheetsLoading}>
 							<option value="" disabled selected>Select a saved datasheet</option>
-							{#each referenceDatasheets as datasheet}
+							{#each filteredReferenceDatasheets as datasheet}
 								<option value={datasheet.id}>{datasheet.sampleName}</option>
 							{/each}
 						</select>
 					</label>
+					{#if filteredReferenceDatasheets.length === 0 && referenceDatasheets.length > 0}
+						<p>No datasheets match your search.</p>
+					{/if}
 					{#if datasheetsError}
 						<p class="writer-page__feedback writer-page__feedback--error">{datasheetsError}</p>
 					{/if}
@@ -575,8 +613,10 @@
 			</div>
 		{/snippet}
 	</AuthGate>
-	{:else}
+	{:else if activeTab === 'datasheet'}
 		<ReferenceDatasheetForm />
+	{:else}
+		<IsotopeMeasurementMappingForm />
 	{/if}
 </section>
 

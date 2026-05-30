@@ -48,6 +48,7 @@ export interface BaseMaterialInfo {
 }
 
 export interface ReferenceMaterial extends BaseMaterialInfo {
+	referenceDatasheetId?: string;
 	concentrationUnits: ConcUnitType[];
 	knownConcentration: number[];
 	knownUncertainty: number[];

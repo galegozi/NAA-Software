@@ -51,3 +51,18 @@ export function getReferenceDatasheetContainer() {
 
 	return cachedClient.database(databaseName).container(containerName);
 }
+
+export function getIsotopeMeasurementLinksContainer() {
+	if (!cachedClient) {
+		cachedClient = new CosmosClient({
+			endpoint: getRequiredSetting('COSMOSDB_ENDPOINT'),
+			key: getRequiredSetting('COSMOSDB_KEY')
+		});
+	}
+
+	const databaseName = process.env.COSMOSDB_DATABASE?.trim() || 'NAA-db';
+	const containerName =
+		process.env.COSMOSDB_ISOTOPE_MEASUREMENTS_CONTAINER?.trim() || 'isotope-measurements';
+
+	return cachedClient.database(databaseName).container(containerName);
+}
