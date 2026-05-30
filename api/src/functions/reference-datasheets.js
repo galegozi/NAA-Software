@@ -70,6 +70,7 @@ function normalizeDatasheetPayload(body, principal) {
 
 	return {
 		id: randomUUID(),
+		docType: 'reference-datasheet',
 		sampleName: sampleName.trim(),
 		entries: entries.map((e) => ({
 			label: e.label.trim(),
@@ -82,8 +83,27 @@ function normalizeDatasheetPayload(body, principal) {
 	};
 }
 
+async function listReferenceDatasheets() {
+	const container = getReferenceDatasheetContainer();
+	const query = container.items.query({
+		query: 'SELECT * FROM c ORDER BY c.createdAt DESC'
+	});
+
+	const { resources } = await query.fetchAll();
+	const items = Array.isArray(resources) ? resources : [];
+
+	return items
+		.map((item) => ({
+			id: item?.id,
+			sampleName: typeof item?.sampleName === 'string' ? item.sampleName : '',
+			entries: Array.isArray(item?.entries) ? item.entries : [],
+			createdAt: item?.createdAt ?? null
+		}))
+		.filter((item) => typeof item.id === 'string' && item.id.length > 0 && item.sampleName.length > 0);
+}
+
 async function referenceDatasheetsHandler(request, context) {
-	if (request.method !== 'POST') {
+	if (request.method !== 'POST' && request.method !== 'GET') {
 		return {
 			status: 405,
 			jsonBody: { error: 'Method not allowed.' }
@@ -96,6 +116,22 @@ async function referenceDatasheetsHandler(request, context) {
 			status: authorization.status,
 			jsonBody: { error: authorization.message }
 		};
+	}
+
+	if (request.method === 'GET') {
+		try {
+			const items = await listReferenceDatasheets();
+			return {
+				status: 200,
+				jsonBody: { items }
+			};
+		} catch (error) {
+			context.log('Error listing reference datasheets:', error);
+			return {
+				status: 500,
+				jsonBody: { error: 'Failed to load reference datasheets.' }
+			};
+		}
 	}
 
 	let body;
@@ -148,7 +184,7 @@ async function referenceDatasheetsHandler(request, context) {
 }
 
 app.http('reference-datasheets', {
-	methods: ['POST'],
+	methods: ['POST', 'GET'],
 	authLevel: 'anonymous',
 	route: 'reference-datasheets',
 	handler: referenceDatasheetsHandler

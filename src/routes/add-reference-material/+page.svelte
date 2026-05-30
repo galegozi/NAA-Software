@@ -14,11 +14,26 @@
 	type ReferenceMaterialWriteRequest = {
 		referenceKey: string;
 		notes: string;
+		referenceDatasheetId: string;
 		isotopes: Array<{
 			isotopeId: string;
 			energy: number;
 		}>;
 		countings: ReferenceMaterialCountingWriteRequest[];
+	};
+
+	type ReferenceDatasheetEntry = {
+		label: string;
+		concentration: number;
+		uncertainty: number;
+		unit: 'ppm' | 'percentage';
+	};
+
+	type ReferenceDatasheet = {
+		id: string;
+		sampleName: string;
+		entries: ReferenceDatasheetEntry[];
+		createdAt?: string | null;
 	};
 
 	type SaveReferenceMaterialResult = {
@@ -98,6 +113,11 @@
 
 	let selectedIsotopes = $state<IsotopeInfo[]>([]);
 	let referenceMaterialNotes = $state('');
+	let referenceDatasheets = $state<ReferenceDatasheet[]>([]);
+	let datasheetsLoading = $state(false);
+	let datasheetsError = $state('');
+	let selectedReferenceDatasheetId = $state('');
+	let datasheetMatchError = $state('');
 	let countingLabels = $state<string[]>([defaultCountingLabel(0)]);
 	let countings = $state<ReferenceMaterial[]>([createCounting(0)]);
 	let countingRefs = $state<(RefMatInfo | undefined)[]>([undefined]);
@@ -117,6 +137,106 @@
 		}
 
 		countingRefs = Array.from({ length: expectedLength }, (_, index) => countingRefs[index]);
+	}
+
+	function normalizeLabel(value: string): string {
+		return value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+	}
+
+	function isotopeLabelCandidates(isotope: IsotopeInfo): string[] {
+		const isotopeName = typeof isotope.isotopeName === 'string' ? isotope.isotopeName : '';
+		const elementName = typeof isotope.elementName === 'string' ? isotope.elementName : '';
+		const isotopeMatch = isotopeName.match(/^([A-Za-z]+)-?(\d+[A-Za-z]*)$/);
+		const candidates = [isotopeName, elementName];
+		if (isotopeMatch) {
+			candidates.push(`${isotopeMatch[1]}-${isotopeMatch[2]}`);
+			candidates.push(`${isotopeMatch[1]}${isotopeMatch[2]}`);
+			candidates.push(isotopeMatch[1]);
+		}
+
+		return [...new Set(candidates.map((label) => normalizeLabel(label)).filter((label) => label.length > 0))];
+	}
+
+	async function loadReferenceDatasheets() {
+		datasheetsLoading = true;
+		datasheetsError = '';
+		try {
+			const response = await fetch('/api/reference-datasheets', {
+				method: 'GET',
+				headers: { accept: 'application/json' }
+			});
+
+			const body = await response.json().catch(() => null);
+			if (!response.ok) {
+				if (response.status === 401 || response.status === 403) {
+					await authGateRef?.refreshAuthState();
+				}
+				throw new Error(body?.error || `Request failed with status ${response.status}`);
+			}
+
+			referenceDatasheets = Array.isArray(body?.items) ? body.items : [];
+			if (referenceDatasheets.length > 0 && !selectedReferenceDatasheetId) {
+				selectedReferenceDatasheetId = referenceDatasheets[0].id;
+			}
+		} catch (error) {
+			datasheetsError = error instanceof Error ? error.message : 'Unable to load reference datasheets.';
+		} finally {
+			datasheetsLoading = false;
+		}
+	}
+
+	function applyDatasheetToCountings() {
+		datasheetMatchError = '';
+		if (!selectedReferenceDatasheetId || selectedIsotopes.length === 0) {
+			return;
+		}
+
+		const selectedDatasheet = referenceDatasheets.find((item) => item.id === selectedReferenceDatasheetId);
+		if (!selectedDatasheet) {
+			return;
+		}
+
+		const entryMap = new Map<string, ReferenceDatasheetEntry>();
+		for (const entry of selectedDatasheet.entries ?? []) {
+			const key = normalizeLabel(entry.label);
+			if (!key || entryMap.has(key)) {
+				continue;
+			}
+			entryMap.set(key, entry);
+		}
+
+		const nextConcentration: number[] = [];
+		const nextUncertainty: number[] = [];
+		const nextUnits: Array<'ppm' | 'percentage' | undefined> = [];
+		const missing: string[] = [];
+
+		for (const isotope of selectedIsotopes) {
+			const candidates = isotopeLabelCandidates(isotope);
+			const match = candidates.map((candidate) => entryMap.get(candidate)).find(Boolean);
+			if (!match) {
+				missing.push(isotope.isotopeName || isotope.elementName || 'Unknown isotope');
+				nextConcentration.push(0);
+				nextUncertainty.push(0);
+				nextUnits.push(undefined);
+				continue;
+			}
+
+			nextConcentration.push(match.concentration);
+			nextUncertainty.push(match.uncertainty);
+			nextUnits.push(match.unit);
+		}
+
+		datasheetMatchError =
+			missing.length > 0
+				? `Selected datasheet is missing concentration entries for: ${missing.join(', ')}`
+				: '';
+
+		countings = countings.map((counting) => ({
+			...counting,
+			knownConcentration: [...nextConcentration],
+			knownUncertainty: [...nextUncertainty],
+			concentrationUnits: [...nextUnits]
+		}));
 	}
 
 	$effect(() => {
@@ -141,6 +261,20 @@
 		ensureCountingRefsLength(countings.length);
 	});
 
+	$effect(() => {
+		if (activeTab !== 'irradiation') {
+			return;
+		}
+
+		if (!datasheetsLoading && referenceDatasheets.length === 0 && !datasheetsError) {
+			void loadReferenceDatasheets();
+		}
+	});
+
+	$effect(() => {
+		applyDatasheetToCountings();
+	});
+
 	function addCounting() {
 		const template = countings[countings.length - 1] ?? createCounting(isotopeCount);
 		const nextCounting = cloneReferenceMaterial(template);
@@ -161,6 +295,16 @@
 
 	function validateCountings(): boolean {
 		submitError = '';
+		if (!selectedReferenceDatasheetId) {
+			submitError = 'Select a reference datasheet before saving an irradiation counting.';
+			return false;
+		}
+
+		if (datasheetMatchError) {
+			submitError = datasheetMatchError;
+			return false;
+		}
+
 		if (selectedIsotopes.length === 0) {
 			submitError = 'Select at least one isotope before saving a reference material.';
 			return false;
@@ -210,10 +354,14 @@
 		return {
 			referenceKey: getReferenceKeyFromCounting(firstCounting),
 			notes: referenceMaterialNotes.trim(),
+			referenceDatasheetId: selectedReferenceDatasheetId,
 			isotopes: isotopeSelections,
 			countings: countings.map((referenceMaterial, index) => ({
 				countingLabel: countingLabels[index]?.trim() || defaultCountingLabel(index),
-				referenceMaterial
+				referenceMaterial: {
+					...referenceMaterial,
+					referenceDatasheetId: selectedReferenceDatasheetId
+				}
 			}))
 		};
 	}
@@ -337,6 +485,24 @@
 				{/if}
 
 				<div class="writer-block">
+					<label class="label">
+						<span>Reference Datasheet</span>
+						<select class="select w-full" bind:value={selectedReferenceDatasheetId} disabled={datasheetsLoading}>
+							<option value="" disabled selected>Select a saved datasheet</option>
+							{#each referenceDatasheets as datasheet}
+								<option value={datasheet.id}>{datasheet.sampleName}</option>
+							{/each}
+						</select>
+					</label>
+					{#if datasheetsError}
+						<p class="writer-page__feedback writer-page__feedback--error">{datasheetsError}</p>
+					{/if}
+					{#if datasheetMatchError}
+						<p class="writer-page__feedback writer-page__feedback--warning">{datasheetMatchError}</p>
+					{/if}
+				</div>
+
+				<div class="writer-block">
 					<IsotopeViewer bind:selectedIsotopes />
 				</div>
 
@@ -377,6 +543,7 @@
 							isotopeCount={isotopeCount}
 							bind:refMatInfo={countings[index]}
 							isotopeInfo={selectedIsotopes}
+							concentrationReadOnly={true}
 							getRoiIndex={() => []}
 						/>
 					</div>

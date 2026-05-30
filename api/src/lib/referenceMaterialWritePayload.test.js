@@ -22,6 +22,7 @@ function buildValidPayload() {
 				referenceMaterial: {
 					NETL_code: 'AB0053',
 					sampleName: 'SRM1633c',
+					referenceDatasheetId: 'ds-001',
 					mass: 0.5,
 					irradiationTime: 3600,
 					irradiationEnd: '2026-01-11T10:00',
@@ -41,10 +42,7 @@ function buildValidPayload() {
 							uncertaintyPositionalCorrectionFactor: 1
 						}
 					],
-					dtType: 'simple',
-					knownConcentration: [0.12],
-					knownUncertainty: [0.006],
-					concentrationUnits: ['ppm']
+					dtType: 'simple'
 				}
 			}
 		]
@@ -62,6 +60,8 @@ test('normalizeReferenceMaterialWritePayload normalizes a valid payload', () => 
 	assert.equal(result.isotopes[0].isotopeId, 'mock-co-60');
 	assert.equal(result.isotopes[0].energy, 1173.2);
 	assert.equal(result.countings[0].referenceMaterial.counts[0].netCounts, 4500);
+	assert.equal(result.countings[0].referenceMaterial.referenceDatasheetId, 'ds-001');
+	assert.equal(result.countings[0].referenceMaterial.knownConcentration, undefined);
 	assert.equal(result.countings[0].referenceMaterial.irradiationStartTime, '2026-01-11T09:00');
 	assert.equal(result.countings[0].referenceMaterial.decayTime, 93600);
 	assert.equal(result.countings[0].referenceMaterial.irradiationStartEpochMs !== null, true);

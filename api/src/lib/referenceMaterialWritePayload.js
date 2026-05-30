@@ -167,28 +167,14 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 		throw new Error(`'${fieldPrefix}' must be an object.`);
 	}
 
+	const referenceDatasheetId = requireString(
+		payload.referenceDatasheetId,
+		`${fieldPrefix}.referenceDatasheetId`,
+		128
+	);
+
 	if (!Array.isArray(payload.counts) || payload.counts.length !== isotopeCount) {
 		throw new Error(`'${fieldPrefix}.counts' must include exactly ${isotopeCount} isotope rows.`);
-	}
-
-	if (
-		!Array.isArray(payload.knownConcentration) ||
-		!Array.isArray(payload.knownUncertainty) ||
-		!Array.isArray(payload.concentrationUnits)
-	) {
-		throw new Error(
-			`'${fieldPrefix}.knownConcentration', '${fieldPrefix}.knownUncertainty', and '${fieldPrefix}.concentrationUnits' are required arrays.`
-		);
-	}
-
-	if (
-		payload.knownConcentration.length !== isotopeCount ||
-		payload.knownUncertainty.length !== isotopeCount ||
-		payload.concentrationUnits.length !== isotopeCount
-	) {
-		throw new Error(
-			`'${fieldPrefix}' concentration arrays must include exactly ${isotopeCount} isotope values.`
-		);
 	}
 
 	const dtType = toTrimmedString(payload.dtType);
@@ -201,30 +187,10 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 		throw new Error(`'${fieldPrefix}.irradiationType' must be one of: gated, total.`);
 	}
 
-	const knownConcentration = payload.knownConcentration.map((value, index) =>
-		normalizeFiniteNumber(value, `${fieldPrefix}.knownConcentration[${index}]`, { min: 0 })
-	);
-	const knownUncertainty = payload.knownUncertainty.map((value, index) =>
-		normalizeFiniteNumber(value, `${fieldPrefix}.knownUncertainty[${index}]`, { min: 0 })
-	);
-	const concentrationUnits = payload.concentrationUnits.map((value, index) => {
-		const unit = toTrimmedString(value);
-		if (!unit) {
-			return undefined;
-		}
-
-		if (!ALLOWED_CONCENTRATION_UNITS.has(unit)) {
-			throw new Error(
-				`'${fieldPrefix}.concentrationUnits[${index}]' must be one of: percentage, ppm.`
-			);
-		}
-
-		return unit;
-	});
-
 	const normalizedMaterial = {
 		NETL_code: requireString(payload.NETL_code, `${fieldPrefix}.NETL_code`, 64),
 		sampleName: requireString(payload.sampleName, `${fieldPrefix}.sampleName`, 120),
+		referenceDatasheetId,
 		mass: normalizeFiniteNumber(payload.mass, `${fieldPrefix}.mass`, { min: 0 }),
 		irradiationTime: normalizeFiniteNumber(payload.irradiationTime, `${fieldPrefix}.irradiationTime`, {
 			min: 0
@@ -242,10 +208,7 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 			normalizeCountData(countData, `${fieldPrefix}.counts[${index}]`)
 		),
 		irradiationType,
-		dtType: dtType || undefined,
-		knownConcentration,
-		knownUncertainty,
-		concentrationUnits
+		dtType: dtType || undefined
 	};
 
 	const timing = normalizeMaterialTiming(normalizedMaterial);
@@ -348,6 +311,7 @@ function referenceMaterialEqual(left, right, { includeCounts = true } = {}) {
 	const baseMatches =
 		left.NETL_code === right.NETL_code &&
 		left.sampleName === right.sampleName &&
+		left.referenceDatasheetId === right.referenceDatasheetId &&
 		left.mass === right.mass &&
 		left.irradiationTime === right.irradiationTime &&
 		left.irradiationStartTime === right.irradiationStartTime &&
@@ -358,10 +322,7 @@ function referenceMaterialEqual(left, right, { includeCounts = true } = {}) {
 		left.realTime === right.realTime &&
 		left.fluence === right.fluence &&
 		left.irradiationType === right.irradiationType &&
-		left.dtType === right.dtType &&
-		arraysEqual(left.knownConcentration, right.knownConcentration) &&
-		arraysEqual(left.knownUncertainty, right.knownUncertainty) &&
-		arraysEqual(left.concentrationUnits, right.concentrationUnits);
+		left.dtType === right.dtType;
 
 	if (!baseMatches) {
 		return false;
@@ -378,6 +339,7 @@ function buildReferenceIdentityMaterial(material, isotopes) {
 	return {
 		netlCode: material.NETL_code,
 		sampleName: material.sampleName,
+		referenceDatasheetId: material.referenceDatasheetId,
 		mass: material.mass,
 		irradiationTime: material.irradiationTime,
 		irradiationStartTime: material.irradiationStartTime,
@@ -389,9 +351,6 @@ function buildReferenceIdentityMaterial(material, isotopes) {
 		fluence: material.fluence,
 		irradiationType: material.irradiationType || 'total',
 		dtType: material.dtType || '',
-		knownConcentration: material.knownConcentration,
-		knownUncertainty: material.knownUncertainty,
-		concentrationUnits: material.concentrationUnits,
 		isotopes
 	};
 }
