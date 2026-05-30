@@ -333,7 +333,7 @@
 		const missing: string[] = [];
 
 		for (const isotope of selectedIsotopes) {
-			const candidates = isotopeLabelCandidates(isotope);
+			const candidates = proxyLabelCandidates(isotope);
 			const match = candidates.map((candidate) => entryMap.get(candidate)).find(Boolean);
 			if (!match) {
 				missing.push(isotope.isotopeName || isotope.elementName || 'Unknown isotope');
