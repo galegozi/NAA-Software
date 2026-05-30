@@ -172,6 +172,20 @@
 		return value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 	}
 
+	function arraysEqual<T>(left: T[] | undefined, right: T[]): boolean {
+		if (!Array.isArray(left) || left.length !== right.length) {
+			return false;
+		}
+
+		for (let index = 0; index < right.length; index++) {
+			if (left[index] !== right[index]) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	function isotopeLabelCandidates(isotope: IsotopeInfo): string[] {
 		const isotopeName = typeof isotope.isotopeName === 'string' ? isotope.isotopeName : '';
 		const elementName = typeof isotope.elementName === 'string' ? isotope.elementName : '';
@@ -339,12 +353,26 @@
 				? `Selected datasheet is missing concentration entries for: ${missing.join(', ')}`
 				: '';
 
-		countings = countings.map((counting) => ({
-			...counting,
-			knownConcentration: [...nextConcentration],
-			knownUncertainty: [...nextUncertainty],
-			concentrationUnits: [...nextUnits]
-		}));
+		const nextCountings = countings.map((counting) => {
+			const concentrationsMatch = arraysEqual(counting.knownConcentration, nextConcentration);
+			const uncertaintiesMatch = arraysEqual(counting.knownUncertainty, nextUncertainty);
+			const unitsMatch = arraysEqual(counting.concentrationUnits, nextUnits);
+
+			if (concentrationsMatch && uncertaintiesMatch && unitsMatch) {
+				return counting;
+			}
+
+			return {
+				...counting,
+				knownConcentration: [...nextConcentration],
+				knownUncertainty: [...nextUncertainty],
+				concentrationUnits: [...nextUnits]
+			};
+		});
+
+		if (nextCountings.some((counting, index) => counting !== countings[index])) {
+			countings = nextCountings;
+		}
 	}
 
 	$effect(() => {
