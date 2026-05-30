@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import AuthGate from '$lib/components/AuthGate.svelte';
 	import IsotopeViewer from '$lib/components/IsotopeViewer.svelte';
 	import type { IsotopeInfo } from '$lib/types.js';
@@ -35,6 +36,7 @@
 	let mappingsError = $state('');
 	let mappings = $state<MappingRecord[]>([]);
 	let mappingsSearchTerm = $state('');
+	let isotopeMap = new SvelteMap<string, IsotopeInfo>();
 
 	let filteredMappings = $derived.by(() => {
 		const query = mappingsSearchTerm.trim().toLowerCase();
@@ -68,8 +70,45 @@
 	});
 
 	onMount(() => {
+		void loadIsotopeCatalog();
 		void loadMappings();
 	});
+
+	async function loadIsotopeCatalog() {
+		try {
+			const response = await fetch('/api/isotopes', {
+				method: 'GET',
+				headers: {
+					accept: 'application/json'
+				}
+			});
+
+			const body = await response.json().catch(() => null);
+			if (!response.ok) {
+				console.warn('Failed to load isotope catalog for display mapping');
+				return;
+			}
+
+			const isotopes = Array.isArray(body?.items) ? body.items : [];
+			const map = new SvelteMap<string, IsotopeInfo>();
+			isotopes.forEach((isotope: IsotopeInfo) => {
+				if (isotope.id) {
+					map.set(isotope.id, isotope);
+				}
+			});
+			isotopeMap = map;
+		} catch (error) {
+			console.warn('Error loading isotope catalog:', error);
+		}
+	}
+
+	function getIsotopeName(isotopeId: string): string {
+		const isotope = isotopeMap.get(isotopeId);
+		if (isotope) {
+			return `${isotope.elementName}-${isotope.isotopeName}`;
+		}
+		return isotopeId;
+	}
 
 	function keepOneIsotope(selection: IsotopeInfo[]): IsotopeInfo[] {
 		if (selection.length <= 1) {
@@ -259,7 +298,7 @@
 
 			<label class="label writer-block">
 				<span>Search mappings</span>
-				<input class="input w-full" type="search" bind:value={mappingsSearchTerm} placeholder="Search by isotope ID or notes" />
+				<input class="input w-full" type="search" bind:value={mappingsSearchTerm} placeholder="Search by isotope name or notes" />
 			</label>
 
 			{#if isLoadingMappings}
@@ -273,9 +312,9 @@
 					{#each filteredMappings as mapping (mapping.id)}
 						<div class="mapping-item">
 							<div class="mapping-row">
-								<strong>{mapping.measuredIsotope.isotopeId}</strong>
+								<strong>{getIsotopeName(mapping.measuredIsotope.isotopeId)}</strong>
 								<span class="mapping-arrow">measures</span>
-								<strong>{mapping.targetIsotope.isotopeId}</strong>
+								<strong>{getIsotopeName(mapping.targetIsotope.isotopeId)}</strong>
 							</div>
 							{#if mapping.notes}
 								<p class="mapping-notes">{mapping.notes}</p>
