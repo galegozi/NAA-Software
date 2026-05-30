@@ -36,7 +36,7 @@
 	let mappingsError = $state('');
 	let mappings = $state<MappingRecord[]>([]);
 	let mappingsSearchTerm = $state('');
-	let isotopeMap = new SvelteMap<string, IsotopeInfo>();
+	let isotopeNameCache = new SvelteMap<string, string>();
 
 	let filteredMappings = $derived.by(() => {
 		const query = mappingsSearchTerm.trim().toLowerCase();
@@ -61,52 +61,33 @@
 		if (measuredSelection.length > 1) {
 			measuredSelection = keepOneIsotope(measuredSelection);
 		}
+		// Cache the names from selected isotope
+		if (measuredSelection.length > 0 && measuredSelection[0].id && measuredSelection[0].isotopeName) {
+			isotopeNameCache.set(measuredSelection[0].id, measuredSelection[0].isotopeName);
+		}
 	});
 
 	$effect(() => {
 		if (targetSelection.length > 1) {
 			targetSelection = keepOneIsotope(targetSelection);
 		}
+		// Cache the names from selected isotope
+		if (targetSelection.length > 0 && targetSelection[0].id && targetSelection[0].isotopeName) {
+			isotopeNameCache.set(targetSelection[0].id, targetSelection[0].isotopeName);
+		}
 	});
 
 	onMount(() => {
-		void loadIsotopeCatalog();
 		void loadMappings();
 	});
 
-	async function loadIsotopeCatalog() {
-		try {
-			const response = await fetch('/api/isotopes', {
-				method: 'GET',
-				headers: {
-					accept: 'application/json'
-				}
-			});
-
-			const body = await response.json().catch(() => null);
-			if (!response.ok) {
-				console.warn('Failed to load isotope catalog for display mapping');
-				return;
-			}
-
-			const isotopes = Array.isArray(body?.items) ? body.items : [];
-			const map = new SvelteMap<string, IsotopeInfo>();
-			isotopes.forEach((isotope: IsotopeInfo) => {
-				if (isotope.id) {
-					map.set(isotope.id, isotope);
-				}
-			});
-			isotopeMap = map;
-		} catch (error) {
-			console.warn('Error loading isotope catalog:', error);
-		}
-	}
-
 	function getIsotopeName(isotopeId: string): string {
-		const isotope = isotopeMap.get(isotopeId);
-		if (isotope) {
-			return `${isotope.elementName}-${isotope.isotopeName}`;
+		// Check if we have it cached from user selection
+		const cached = isotopeNameCache.get(isotopeId);
+		if (cached) {
+			return cached;
 		}
+		// Fall back to the ID
 		return isotopeId;
 	}
 
