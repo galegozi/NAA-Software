@@ -37,3 +37,17 @@ export function getReferenceMaterialsContainer() {
 
 	return cachedClient.database(databaseName).container(containerName);
 }
+
+export function getReferenceDatasheetContainer() {
+	if (!cachedClient) {
+		cachedClient = new CosmosClient({
+			endpoint: getRequiredSetting('COSMOSDB_ENDPOINT'),
+			key: getRequiredSetting('COSMOSDB_KEY')
+		});
+	}
+
+	const databaseName = process.env.COSMOSDB_DATABASE?.trim() || 'NAA-db';
+	const containerName = process.env.COSMOSDB_DATASHEET_CONTAINER?.trim() || 'reference-datasheets';
+
+	return cachedClient.database(databaseName).container(containerName);
+}

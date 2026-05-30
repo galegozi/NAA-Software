@@ -2,6 +2,7 @@
 	import IsotopeViewer from '$lib/components/IsotopeViewer.svelte';
 	import AuthGate from '$lib/components/AuthGate.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
+	import ReferenceDatasheetForm from '$lib/components/ReferenceDatasheetForm.svelte';
 	import type { IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
 	import { createReferenceMaterial } from '$lib/utils/naaUtils.js';
 
@@ -92,6 +93,8 @@
 	let isSubmitting = $state(false);
 	let submitError = $state('');
 	let submitMessage = $state('');
+
+	let activeTab = $state<'irradiation' | 'datasheet'>('irradiation');
 
 	let selectedIsotopes = $state<IsotopeInfo[]>([]);
 	let referenceMaterialNotes = $state('');
@@ -277,13 +280,38 @@
 <section class="writer-page">
 	<div class="writer-page__hero">
 		<p class="writer-page__eyebrow">Reference Material Library</p>
-		<h1 class="writer-page__title">Add reference material countings</h1>
+		<h1 class="writer-page__title">Add reference material</h1>
 		<p class="writer-page__summary">
-			Select isotopes from Cosmos-backed catalog, then save one or more countings for the same
-			reference material. Re-analyzed ROI outputs can be saved as additional countings under the same key.
+			Use the <strong>Irradiation</strong> tab to record counting data from irradiated reference
+			materials, or the <strong>Datasheet</strong> tab to enter certified concentration values from
+			a reference material certificate.
 		</p>
 	</div>
 
+	<div class="writer-tabs" role="tablist" aria-label="Reference material input type">
+		<button
+			role="tab"
+			type="button"
+			class="writer-tab"
+			class:writer-tab--active={activeTab === 'irradiation'}
+			aria-selected={activeTab === 'irradiation'}
+			onclick={() => { activeTab = 'irradiation'; }}
+		>
+			Irradiation
+		</button>
+		<button
+			role="tab"
+			type="button"
+			class="writer-tab"
+			class:writer-tab--active={activeTab === 'datasheet'}
+			aria-selected={activeTab === 'datasheet'}
+			onclick={() => { activeTab = 'datasheet'; }}
+		>
+			Datasheet
+		</button>
+	</div>
+
+	{#if activeTab === 'irradiation'}
 	<AuthGate bind:this={authGateRef} requiredRole={WRITER_ROLE}>
 		{#snippet children({ principal, writerAccess })}
 			<div class="writer-card">
@@ -380,6 +408,9 @@
 			</div>
 		{/snippet}
 	</AuthGate>
+	{:else}
+		<ReferenceDatasheetForm />
+	{/if}
 </section>
 
 <style>
@@ -567,5 +598,35 @@
 		.writer-page {
 			padding: 2rem 1rem 0;
 		}
+	}
+
+	.writer-tabs {
+		display: flex;
+		gap: 0.25rem;
+		border-bottom: 2px solid var(--writer-card-border);
+		padding-bottom: 0;
+	}
+
+	.writer-tab {
+		padding: 0.55rem 1.25rem;
+		border: none;
+		background: transparent;
+		cursor: pointer;
+		font-size: 0.95rem;
+		font-weight: 600;
+		color: var(--writer-muted);
+		border-bottom: 2px solid transparent;
+		margin-bottom: -2px;
+		border-radius: 0.4rem 0.4rem 0 0;
+		transition: color 0.15s, border-color 0.15s;
+	}
+
+	.writer-tab:hover {
+		color: var(--writer-text);
+	}
+
+	.writer-tab--active {
+		color: var(--writer-text);
+		border-bottom-color: var(--writer-text);
 	}
 </style>
