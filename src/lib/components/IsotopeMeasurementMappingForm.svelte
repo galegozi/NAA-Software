@@ -78,16 +78,44 @@
 	});
 
 	onMount(() => {
+		void loadIsotopeCatalog();
 		void loadMappings();
 	});
 
+	async function loadIsotopeCatalog() {
+		try {
+			const response = await fetch('/api/isotopes?limit=1000', {
+				method: 'GET',
+				headers: {
+					accept: 'application/json'
+				}
+			});
+
+			if (!response.ok) {
+				console.warn('Failed to load isotope catalog');
+				return;
+			}
+
+			const body = await response.json().catch(() => null);
+			const isotopes = Array.isArray(body?.items) ? body.items : [];
+
+			isotopes.forEach((item: Record<string, unknown>) => {
+				if (typeof item.id === 'string' && typeof item.shortName === 'string' && typeof item.massNumber === 'number') {
+					const suffix = (typeof item.suffix === 'string') ? item.suffix : '';
+					const name = `${item.shortName}-${item.massNumber}${suffix}`;
+					isotopeNameCache.set(item.id, name);
+				}
+			});
+		} catch (err) {
+			console.warn('Error loading isotope catalog:', err);
+		}
+	}
+
 	function getIsotopeName(isotopeId: string): string {
-		// Check if we have it cached from user selection
 		const cached = isotopeNameCache.get(isotopeId);
 		if (cached) {
 			return cached;
 		}
-		// Fall back to the ID
 		return isotopeId;
 	}
 
