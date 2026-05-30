@@ -6,9 +6,6 @@
 
 	type IsotopeSelectionPayload = {
 		isotopeId: string;
-		energy: number;
-		elementName: string;
-		isotopeName: string;
 	};
 
 	type MappingPayload = {
@@ -47,10 +44,8 @@
 
 		return mappings.filter((mapping) => {
 			const haystack = [
-				mapping.measuredIsotope?.elementName,
-				mapping.measuredIsotope?.isotopeName,
-				mapping.targetIsotope?.elementName,
-				mapping.targetIsotope?.isotopeName,
+				mapping.measuredIsotope?.isotopeId,
+				mapping.targetIsotope?.isotopeId,
 				mapping.notes ?? ''
 			]
 				.join(' ')
@@ -62,13 +57,13 @@
 
 	$effect(() => {
 		if (measuredSelection.length > 1) {
-			measuredSelection = [measuredSelection[measuredSelection.length - 1]];
+			measuredSelection = keepOneIsotope(measuredSelection);
 		}
 	});
 
 	$effect(() => {
 		if (targetSelection.length > 1) {
-			targetSelection = [targetSelection[targetSelection.length - 1]];
+			targetSelection = keepOneIsotope(targetSelection);
 		}
 	});
 
@@ -76,16 +71,28 @@
 		void loadMappings();
 	});
 
+	function keepOneIsotope(selection: IsotopeInfo[]): IsotopeInfo[] {
+		if (selection.length <= 1) {
+			return selection;
+		}
+
+		for (let index = selection.length - 1; index >= 0; index -= 1) {
+			const isotope = selection[index];
+			if (isotope.id && isotope.id.trim().length > 0) {
+				return [isotope];
+			}
+		}
+
+		return [selection[selection.length - 1]];
+	}
+
 	function toSelectionPayload(isotope: IsotopeInfo): IsotopeSelectionPayload {
 		if (!isotope.id || isotope.id.trim().length === 0) {
 			throw new Error('Selected isotope is missing an ID. Please re-select from the isotope list.');
 		}
 
 		return {
-			isotopeId: isotope.id,
-			energy: isotope.energy,
-			elementName: isotope.elementName,
-			isotopeName: isotope.isotopeName
+			isotopeId: isotope.id
 		};
 	}
 
@@ -199,12 +206,12 @@
 			<div class="mapping-grid">
 				<div class="writer-block">
 					<h3 class="mapping-title">Measured Isotope (A)</h3>
-					<p class="mapping-hint">Pick exactly one isotope. If you add multiple, only the latest one is kept.</p>
+					<p class="mapping-hint">Pick exactly one isotope species. Energy is ignored and all energies are included.</p>
 					<IsotopeViewer bind:selectedIsotopes={measuredSelection} />
 				</div>
 				<div class="writer-block">
 					<h3 class="mapping-title">Target Isotope (B)</h3>
-					<p class="mapping-hint">Pick the isotope that A is used to quantify.</p>
+					<p class="mapping-hint">Pick one target isotope species that A is used to quantify.</p>
 					<IsotopeViewer bind:selectedIsotopes={targetSelection} />
 				</div>
 			</div>
@@ -252,7 +259,7 @@
 
 			<label class="label writer-block">
 				<span>Search mappings</span>
-				<input class="input w-full" type="search" bind:value={mappingsSearchTerm} placeholder="Search by isotope or notes" />
+				<input class="input w-full" type="search" bind:value={mappingsSearchTerm} placeholder="Search by isotope ID or notes" />
 			</label>
 
 			{#if isLoadingMappings}
@@ -263,16 +270,12 @@
 				<p>No isotope mappings found.</p>
 			{:else}
 				<div class="mapping-list">
-					{#each filteredMappings as mapping}
+					{#each filteredMappings as mapping (mapping.id)}
 						<div class="mapping-item">
 							<div class="mapping-row">
-								<strong>{mapping.measuredIsotope.isotopeName}</strong>
+								<strong>{mapping.measuredIsotope.isotopeId}</strong>
 								<span class="mapping-arrow">measures</span>
-								<strong>{mapping.targetIsotope.isotopeName}</strong>
-							</div>
-							<div class="mapping-row mapping-meta">
-								<span>{mapping.measuredIsotope.elementName} ({mapping.measuredIsotope.energy} keV)</span>
-								<span>{mapping.targetIsotope.elementName} ({mapping.targetIsotope.energy} keV)</span>
+								<strong>{mapping.targetIsotope.isotopeId}</strong>
 							</div>
 							{#if mapping.notes}
 								<p class="mapping-notes">{mapping.notes}</p>
@@ -317,12 +320,6 @@
 		gap: 0.5rem;
 		align-items: center;
 		flex-wrap: wrap;
-	}
-
-	.mapping-meta {
-		font-size: 0.9rem;
-		opacity: 0.9;
-		justify-content: space-between;
 	}
 
 	.mapping-arrow {

@@ -13,14 +13,6 @@ function toTrimmedString(value) {
 	return typeof value === 'string' ? value.trim() : '';
 }
 
-function normalizeFiniteNumber(value, fieldName, { min = -Infinity, max = Infinity } = {}) {
-	const parsed = Number(value);
-	if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
-		throw new Error(`'${fieldName}' must be a finite number between ${min} and ${max}.`);
-	}
-	return parsed;
-}
-
 function normalizeIsotopeSelection(payload, fieldPrefix) {
 	if (typeof payload !== 'object' || payload === null) {
 		throw new Error(`'${fieldPrefix}' must be an object.`);
@@ -32,10 +24,7 @@ function normalizeIsotopeSelection(payload, fieldPrefix) {
 	}
 
 	return {
-		isotopeId,
-		energy: normalizeFiniteNumber(payload.energy, `${fieldPrefix}.energy`, { min: 0 }),
-		elementName: toTrimmedString(payload.elementName),
-		isotopeName: toTrimmedString(payload.isotopeName)
+		isotopeId
 	};
 }
 
@@ -48,10 +37,7 @@ function normalizePayload(body, principal) {
 	const targetIsotope = normalizeIsotopeSelection(body.targetIsotope, 'targetIsotope');
 	const notes = toTrimmedString(body.notes).slice(0, 1000);
 
-	if (
-		measuredIsotope.isotopeId === targetIsotope.isotopeId &&
-		measuredIsotope.energy === targetIsotope.energy
-	) {
+	if (measuredIsotope.isotopeId === targetIsotope.isotopeId) {
 		throw new Error('Measured isotope and target isotope cannot be identical.');
 	}
 
@@ -72,16 +58,12 @@ async function findExistingLink(container, measuredIsotope, targetIsotope) {
 			SELECT TOP 1 * FROM c
 			WHERE c.docType = @docType
 				AND c.measuredIsotope.isotopeId = @measuredId
-				AND c.measuredIsotope.energy = @measuredEnergy
 				AND c.targetIsotope.isotopeId = @targetId
-				AND c.targetIsotope.energy = @targetEnergy
 		`,
 		parameters: [
 			{ name: '@docType', value: 'isotope-measurement-link' },
 			{ name: '@measuredId', value: measuredIsotope.isotopeId },
-			{ name: '@measuredEnergy', value: measuredIsotope.energy },
-			{ name: '@targetId', value: targetIsotope.isotopeId },
-			{ name: '@targetEnergy', value: targetIsotope.energy }
+			{ name: '@targetId', value: targetIsotope.isotopeId }
 		]
 	});
 
