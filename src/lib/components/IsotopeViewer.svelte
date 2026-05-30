@@ -22,6 +22,31 @@
 		energy: number;
 	};
 
+	function normalizeEnergy(value: unknown): number | null {
+		const parsed = Number(value);
+		if (!Number.isFinite(parsed) || parsed < 0) {
+			return null;
+		}
+
+		return parsed;
+	}
+
+	function getDistinctEnergies(item: IsotopeCatalogItem): number[] {
+		const energies = Array.isArray(item.energies) ? item.energies : [];
+		const distinct: number[] = [];
+
+		for (const rawEnergy of energies) {
+			const energy = normalizeEnergy(rawEnergy);
+			if (energy === null || distinct.includes(energy)) {
+				continue;
+			}
+
+			distinct.push(energy);
+		}
+
+		return distinct;
+	}
+
 	function getSelectionKey(item: IsotopeCatalogItem, energy: number): string {
 		const halfLife = item.halfLife.number || item.halfLifeSeconds;
 		return `${item.id}|${item.elementName}|${getIsotopeName(item)}|${energy}|${halfLife}|${item.halfLife.unit}`;
@@ -173,16 +198,18 @@
 		const rows: EnergyResultRow[] = [];
 
 		for (const item of cachedItems) {
+			const distinctEnergies = getDistinctEnergies(item);
+
 			if (singleEntryPerIsotope) {
 				rows.push({
 					id: `${item.id}-single`,
 					item,
-					energy: item.energies.length > 0 ? item.energies[0] : 0
+					energy: distinctEnergies.length > 0 ? distinctEnergies[0] : 0
 				});
 				continue;
 			}
 
-			if (item.energies.length === 0) {
+			if (distinctEnergies.length === 0) {
 				rows.push({
 					id: `${item.id}-no-energy`,
 					item,
@@ -191,7 +218,7 @@
 				continue;
 			}
 
-			for (const energy of item.energies) {
+			for (const energy of distinctEnergies) {
 				rows.push({
 					id: `${item.id}-${energy}`,
 					item,
