@@ -186,6 +186,26 @@
 		return true;
 	}
 
+	function uniqueNormalizedLabels(labels: string[]): string[] {
+		const normalized = labels
+			.map((label) => normalizeLabel(label))
+			.filter((label) => label.length > 0);
+
+		return normalized.filter((label, index) => normalized.indexOf(label) === index);
+	}
+
+	function extractIsotopeId(link: IsotopeMeasurementLink, side: 'measured' | 'target'): string {
+		const entry = side === 'measured' ? link.measuredIsotope : link.targetIsotope;
+		const objectId = (entry as { isotopeId?: string; id?: string } | undefined)?.isotopeId
+			?? (entry as { isotopeId?: string; id?: string } | undefined)?.id
+			?? '';
+		const flatId = (link as unknown as Record<string, unknown>)[
+			side === 'measured' ? 'measuredIsotopeId' : 'targetIsotopeId'
+		];
+		const candidate = typeof flatId === 'string' && flatId.trim().length > 0 ? flatId : objectId;
+		return candidate.trim();
+	}
+
 	function isotopeLabelCandidates(isotope: IsotopeInfo): string[] {
 		const isotopeName = typeof isotope.isotopeName === 'string' ? isotope.isotopeName : '';
 		const elementName = typeof isotope.elementName === 'string' ? isotope.elementName : '';
@@ -197,7 +217,7 @@
 			candidates.push(isotopeMatch[1]);
 		}
 
-		return [...new Set(candidates.map((label) => normalizeLabel(label)).filter((label) => label.length > 0))];
+		return uniqueNormalizedLabels(candidates);
 	}
 
 	function catalogLabelCandidates(isotopeId: string): string[] {
@@ -212,28 +232,39 @@
 			`${catalogItem.shortName}-${catalogItem.massNumber}${catalogItem.suffix}`
 		];
 
-		return [...new Set(candidates.map((label) => normalizeLabel(label)).filter((label) => label.length > 0))];
+		return uniqueNormalizedLabels(candidates);
 	}
 
 	function proxyLabelCandidates(isotope: IsotopeInfo): string[] {
-		const candidates = new Set(isotopeLabelCandidates(isotope));
+		const candidates = [...isotopeLabelCandidates(isotope)];
 		const measuredId = isotope.id?.trim();
 
 		if (!measuredId) {
-			return [...candidates];
+			return candidates;
 		}
 
 		for (const link of isotopeMeasurementLinks) {
-			if (link.measuredIsotope?.isotopeId !== measuredId) {
-				continue;
+			const linkMeasuredId = extractIsotopeId(link, 'measured');
+			const linkTargetId = extractIsotopeId(link, 'target');
+
+			if (linkMeasuredId === measuredId) {
+				for (const proxyCandidate of catalogLabelCandidates(linkTargetId)) {
+					if (!candidates.includes(proxyCandidate)) {
+						candidates.push(proxyCandidate);
+					}
+				}
 			}
 
-			for (const proxyCandidate of catalogLabelCandidates(link.targetIsotope?.isotopeId ?? '')) {
-				candidates.add(proxyCandidate);
+			if (linkTargetId === measuredId) {
+				for (const proxyCandidate of catalogLabelCandidates(linkMeasuredId)) {
+					if (!candidates.includes(proxyCandidate)) {
+						candidates.push(proxyCandidate);
+					}
+				}
 			}
 		}
 
-		return [...candidates];
+		return candidates;
 	}
 
 	async function loadReferenceDatasheets() {
@@ -318,7 +349,7 @@
 			return;
 		}
 
-		const entryMap = new Map<string, ReferenceDatasheetEntry>();
+		const entryMap = new SvelteMap<string, ReferenceDatasheetEntry>();
 		for (const entry of selectedDatasheet.entries ?? []) {
 			const key = normalizeLabel(entry.label);
 			if (!key || entryMap.has(key)) {
@@ -400,6 +431,10 @@
 	$effect(() => {
 		if (activeTab !== 'irradiation') {
 			return;
+		}
+
+		if (isotopeCatalogById.size === 0) {
+			void loadIsotopeCatalog();
 		}
 
 		if (isotopeMeasurementLinks.length === 0) {
@@ -650,7 +685,7 @@
 						<span>Reference Datasheet</span>
 						<select class="select w-full" bind:value={selectedReferenceDatasheetId} disabled={datasheetsLoading}>
 							<option value="" disabled selected>Select a saved datasheet</option>
-							{#each filteredReferenceDatasheets as datasheet}
+							{#each filteredReferenceDatasheets as datasheet (datasheet.id)}
 								<option value={datasheet.id}>{datasheet.sampleName}</option>
 							{/each}
 						</select>
