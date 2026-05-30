@@ -1,10 +1,11 @@
 <script lang="ts">
+    import { SvelteMap } from 'svelte/reactivity';
 	import IsotopeViewer from '$lib/components/IsotopeViewer.svelte';
 	import AuthGate from '$lib/components/AuthGate.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
 	import ReferenceDatasheetForm from '$lib/components/ReferenceDatasheetForm.svelte';
 	import IsotopeMeasurementMappingForm from '$lib/components/IsotopeMeasurementMappingForm.svelte';
-	import type { IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
+	import type { IsotopeCatalogItem, IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
 	import { createReferenceMaterial } from '$lib/utils/naaUtils.js';
 
 	type ReferenceMaterialCountingWriteRequest = {
@@ -35,6 +36,18 @@
 		sampleName: string;
 		entries: ReferenceDatasheetEntry[];
 		createdAt?: string | null;
+	};
+
+	type IsotopeMeasurementLink = {
+		id: string;
+		measuredIsotope: {
+			isotopeId: string;
+		};
+		targetIsotope: {
+			isotopeId: string;
+		};
+		notes?: string;
+		createdAt?: string;
 	};
 
 	type SaveReferenceMaterialResult = {
@@ -120,6 +133,8 @@
 	let selectedReferenceDatasheetId = $state('');
 	let datasheetSearchTerm = $state('');
 	let datasheetMatchError = $state('');
+	let isotopeMeasurementLinks = $state<IsotopeMeasurementLink[]>([]);
+	let isotopeCatalogById = new SvelteMap<string, IsotopeCatalogItem>();
 	let countingLabels = $state<string[]>([defaultCountingLabel(0)]);
 	let countings = $state<ReferenceMaterial[]>([createCounting(0)]);
 	let countingRefs = $state<(RefMatInfo | undefined)[]>([undefined]);
@@ -171,6 +186,42 @@
 		return [...new Set(candidates.map((label) => normalizeLabel(label)).filter((label) => label.length > 0))];
 	}
 
+	function catalogLabelCandidates(isotopeId: string): string[] {
+		const catalogItem = isotopeCatalogById.get(isotopeId);
+		if (!catalogItem) {
+			return [];
+		}
+
+		const candidates = [
+			catalogItem.elementName,
+			catalogItem.shortName,
+			`${catalogItem.shortName}-${catalogItem.massNumber}${catalogItem.suffix}`
+		];
+
+		return [...new Set(candidates.map((label) => normalizeLabel(label)).filter((label) => label.length > 0))];
+	}
+
+	function proxyLabelCandidates(isotope: IsotopeInfo): string[] {
+		const candidates = new Set(isotopeLabelCandidates(isotope));
+		const measuredId = isotope.id?.trim();
+
+		if (!measuredId) {
+			return [...candidates];
+		}
+
+		for (const link of isotopeMeasurementLinks) {
+			if (link.measuredIsotope?.isotopeId !== measuredId) {
+				continue;
+			}
+
+			for (const proxyCandidate of catalogLabelCandidates(link.targetIsotope?.isotopeId ?? '')) {
+				candidates.add(proxyCandidate);
+			}
+		}
+
+		return [...candidates];
+	}
+
 	async function loadReferenceDatasheets() {
 		datasheetsLoading = true;
 		datasheetsError = '';
@@ -196,6 +247,49 @@
 			datasheetsError = error instanceof Error ? error.message : 'Unable to load reference datasheets.';
 		} finally {
 			datasheetsLoading = false;
+		}
+	}
+
+	async function loadIsotopeCatalog() {
+		try {
+			const response = await fetch('/api/isotopes?limit=1000', {
+				method: 'GET',
+				headers: { accept: 'application/json' }
+			});
+
+			const body = await response.json().catch(() => null);
+			if (!response.ok) {
+				return;
+			}
+
+			const items = Array.isArray(body?.items) ? body.items : [];
+			const nextCatalog = new SvelteMap<string, IsotopeCatalogItem>();
+			for (const item of items as IsotopeCatalogItem[]) {
+				if (item?.id) {
+					nextCatalog.set(item.id, item);
+				}
+			}
+			isotopeCatalogById = nextCatalog;
+		} catch {
+			// Best effort only. If the catalog is unavailable, the direct isotope labels still work.
+		}
+	}
+
+	async function loadIsotopeMeasurementLinks() {
+		try {
+			const response = await fetch('/api/isotope-measurements', {
+				method: 'GET',
+				headers: { accept: 'application/json' }
+			});
+
+			const body = await response.json().catch(() => null);
+			if (!response.ok) {
+				return;
+			}
+
+			isotopeMeasurementLinks = Array.isArray(body?.items) ? body.items : [];
+		} catch {
+			// Best effort only. If proxy links are unavailable, direct matching still works.
 		}
 	}
 
@@ -278,6 +372,10 @@
 	$effect(() => {
 		if (activeTab !== 'irradiation') {
 			return;
+		}
+
+		if (isotopeMeasurementLinks.length === 0) {
+			void loadIsotopeMeasurementLinks();
 		}
 
 		if (!datasheetsLoading && referenceDatasheets.length === 0 && !datasheetsError) {
