@@ -5,7 +5,8 @@
 	import { getIsotopeCatalogAccessMessage } from '$lib/utils/authEnvironment.js';
 
 	let {
-		selectedIsotopes = $bindable<IsotopeInfo[]>([])
+		selectedIsotopes = $bindable<IsotopeInfo[]>([]),
+		singleEntryPerIsotope = false
 	} = $props();
 
 	let isLoading = $state(false);
@@ -26,8 +27,16 @@
 		return `${item.id}|${item.elementName}|${getIsotopeName(item)}|${energy}|${halfLife}|${item.halfLife.unit}`;
 	}
 
+	function getIsotopeIdSelectionKey(item: IsotopeCatalogItem): string {
+		return `${item.id}`;
+	}
+
 	function getIsotopeSelectionKey(isotope: IsotopeInfo): string {
 		return `${isotope.id ?? ''}|${isotope.elementName}|${isotope.isotopeName}|${isotope.energy}|${isotope.halfLife}|${isotope.unit}`;
+	}
+
+	function getSelectedIsotopeIdKey(isotope: IsotopeInfo): string {
+		return `${isotope.id ?? ''}`;
 	}
 
 	function normalizeItems(payload: unknown): IsotopeCatalogItem[] {
@@ -97,6 +106,9 @@
 	}
 
 	function isExactIsotopeSelected(item: IsotopeCatalogItem, energy: number): boolean {
+		if (singleEntryPerIsotope) {
+			return selectedIsotopeIdKeys.has(getIsotopeIdSelectionKey(item));
+		}
 		return selectedIsotopeKeys.has(getSelectionKey(item, energy));
 	}
 
@@ -161,6 +173,15 @@
 		const rows: EnergyResultRow[] = [];
 
 		for (const item of cachedItems) {
+			if (singleEntryPerIsotope) {
+				rows.push({
+					id: `${item.id}-single`,
+					item,
+					energy: item.energies.length > 0 ? item.energies[0] : 0
+				});
+				continue;
+			}
+
 			if (item.energies.length === 0) {
 				rows.push({
 					id: `${item.id}-no-energy`,
@@ -197,6 +218,7 @@
 	);
 	let visibleRows = $derived(sortedRows.slice(0, 25));
 	let selectedIsotopeKeys = $derived(new Set(selectedIsotopes.map(getIsotopeSelectionKey)));
+	let selectedIsotopeIdKeys = $derived(new Set(selectedIsotopes.map(getSelectedIsotopeIdKey)));
 
 	$effect(() => {
 		const nextSearch = searchTerm.trim();

@@ -207,12 +207,12 @@
 				<div class="writer-block">
 					<h3 class="mapping-title">Measured Isotope (A)</h3>
 					<p class="mapping-hint">Pick exactly one isotope species. Energy is ignored and all energies are included.</p>
-					<IsotopeViewer bind:selectedIsotopes={measuredSelection} />
+					<IsotopeViewer bind:selectedIsotopes={measuredSelection} singleEntryPerIsotope={true} />
 				</div>
 				<div class="writer-block">
 					<h3 class="mapping-title">Target Isotope (B)</h3>
 					<p class="mapping-hint">Pick one target isotope species that A is used to quantify.</p>
-					<IsotopeViewer bind:selectedIsotopes={targetSelection} />
+					<IsotopeViewer bind:selectedIsotopes={targetSelection} singleEntryPerIsotope={true} />
 				</div>
 			</div>
 
