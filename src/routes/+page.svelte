@@ -452,6 +452,20 @@
 		materials.reference.map((ref) => materials.unknown.map((unk) => MMGA(ref, unk)))
 	);
 
+	const ENERGY_MATCH_TOLERANCE_KEV = 0.5;
+
+	function getFiniteEnergy(value: number | null | undefined): number | null {
+		return typeof value === 'number' && Number.isFinite(value) ? value : null;
+	}
+
+	function energiesMatch(targetEnergy: number | null, catalogEnergy: number | null): boolean {
+		if (targetEnergy === null || catalogEnergy === null) {
+			return false;
+		}
+
+		return Math.abs(targetEnergy - catalogEnergy) <= ENERGY_MATCH_TOLERANCE_KEV;
+	}
+
 	function getIsotopeSelectionKey(index: number): string {
 		return `isotope:${index}`;
 	}
@@ -628,15 +642,38 @@
 	): number {
 		const isotopes = Array.isArray(catalogItem.isotopes) ? catalogItem.isotopes : [];
 		const targetId = targetIsotope.id?.trim();
+		const targetEnergy = getFiniteEnergy(targetIsotope.energy);
 
 		if (!targetId) {
 			return -1;
 		}
 
+		const idMatches: number[] = [];
+
 		for (let index = 0; index < isotopes.length; index++) {
 			if (!usedIndices.has(index) && isotopes[index]?.isotopeId === targetId) {
+				idMatches.push(index);
+			}
+		}
+
+		if (idMatches.length === 0) {
+			return -1;
+		}
+
+		if (targetEnergy === null) {
+			return idMatches[0];
+		}
+
+		for (const index of idMatches) {
+			const catalogEnergy = getFiniteEnergy(isotopes[index]?.energy);
+			if (energiesMatch(targetEnergy, catalogEnergy)) {
 				return index;
 			}
+		}
+
+		// Backward-compatible fallback for legacy catalog entries that don't carry energy.
+		if (idMatches.length === 1 && getFiniteEnergy(isotopes[idMatches[0]]?.energy) === null) {
+			return idMatches[0];
 		}
 
 		return -1;
@@ -807,11 +844,14 @@
 	}
 
 	function getIsotopeDisplayName(isotope: IsotopeInfoType, index: number): string {
+		const energy = getFiniteEnergy(isotope.energy);
+		const energyLabel = energy !== null ? ` @ ${energy.toLocaleString()} keV` : '';
+
 		if (isotope.elementName && isotope.isotopeName) {
-			return `${isotope.elementName}-${isotope.isotopeName}`;
+			return `${isotope.elementName}-${isotope.isotopeName}${energyLabel}`;
 		}
 
-		return `Isotope ${index + 1}`;
+		return `Isotope ${index + 1}${energyLabel}`;
 	}
 
 	function validateCurrentStep(): boolean {
