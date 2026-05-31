@@ -92,7 +92,12 @@ function getNavigationStepLabel(
 		case StepType.REFERENCE_COUNT:
 			return 'Number of Reference Materials';
 		case StepType.REFERENCE_INFO: {
+			if (authenticated) {
+				return 'Select Reference Materials';
+			}
+
 			const refIndex = step - getReferenceInfoStartStep(isotopeCount, authenticated);
+
 			return referenceCount === 1
 				? 'Reference Material Information'
 				: `Reference Material ${refIndex + 1} Information`;
@@ -329,7 +334,12 @@ export function getStepTitle(
 		case StepType.REFERENCE_COUNT:
 			return `Step ${stepNum}: Number of Reference Materials`;
 		case StepType.REFERENCE_INFO: {
+			if (authenticated) {
+				return `Step ${stepNum}: Select Reference Materials`;
+			}
+
 			const refIndex = step - getReferenceInfoStartStep(isotopeCount, authenticated);
+
 			return `Step ${stepNum}: Reference Material Information for Reference ${refIndex + 1}`;
 		}
 		case StepType.UNKNOWN_COUNT:

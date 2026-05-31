@@ -70,7 +70,7 @@ describe('stepUtils navigation button text', () => {
 		);
 		// Reference count step is skipped for authenticated users — goes straight to reference info
 		expect(getNextButtonText(selectStep, isotopeCount, referenceCount, unknownCount, true)).toBe(
-			'Next: Reference Material 1 Information'
+			'Next: Select Reference Materials'
 		);
 		expect(getBackButtonText(firstReferenceInfoStep, isotopeCount, referenceCount, unknownCount, true)).toBe(
 			'Back: Select Isotopes'

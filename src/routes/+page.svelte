@@ -61,6 +61,7 @@
 		};
 		referenceIsotopeSelections: string[][];
 		isotopeReferenceMap: number[];
+		referenceCatalogItemIds?: (string | null)[];
 	};
 
 	// Using findRoiIndices from naaUtils
@@ -243,6 +244,11 @@
 			i < existingSelections.length ? existingSelections[i] : new Set<string>()
 		);
 
+		const existingCatalogItemIds = [...referenceCatalogItemIds];
+		referenceCatalogItemIds = Array.from({ length: referenceCount }, (_, i) =>
+			i < existingCatalogItemIds.length ? existingCatalogItemIds[i] : null
+		);
+
 		updateIsotopeReferenceMap(isotopeCount, referenceCount);
 	}
 
@@ -293,7 +299,8 @@
 			referenceIsotopeSelections: referenceIsotopeSelections.map((selection) =>
 				Array.from(selection ?? [])
 			),
-			isotopeReferenceMap
+			isotopeReferenceMap,
+			referenceCatalogItemIds
 		};
 	}
 
@@ -345,6 +352,9 @@
 			isotopeReferenceMap = Array.isArray(savedState.isotopeReferenceMap)
 				? savedState.isotopeReferenceMap
 				: [0];
+			referenceCatalogItemIds = Array.isArray(savedState.referenceCatalogItemIds)
+				? savedState.referenceCatalogItemIds.map((id) => id ?? null)
+				: [null];
 
 			isoRef = Array.from({ length: isotopeInfo.length }, () => undefined);
 			matRefs = {
@@ -420,6 +430,7 @@
 		unknown: [undefined] as (MaterialInfo | undefined)[]
 	});
 	let referenceIsotopeSelections = $state<Set<string>[]>([new Set<string>()]);
+	let referenceCatalogItemIds = $state<(string | null)[]>([null]);
 	let referenceCatalogMessage = $state('');
 	let referenceCatalogError = $state('');
 	let materials = $state({
@@ -589,56 +600,20 @@
 		return used;
 	}
 
-	function findBestCatalogIsotopeIndex(
+	function findCatalogIsotopeIndexById(
 		targetIsotope: IsotopeInfoType,
-		targetIndex: number,
 		catalogItem: ReferenceMaterialCatalogItem,
 		usedIndices: Set<number>
 	): number {
 		const isotopes = Array.isArray(catalogItem.isotopes) ? catalogItem.isotopes : [];
 		const targetId = targetIsotope.id?.trim();
 
-		if (targetId) {
-			for (let index = 0; index < isotopes.length; index++) {
-				if (!usedIndices.has(index) && isotopes[index]?.isotopeId === targetId) {
-					return index;
-				}
-			}
-		}
-
-		const targetEnergy = Number(targetIsotope.energy);
-		if (Number.isFinite(targetEnergy)) {
-			let bestIndex = -1;
-			let bestDiff = Infinity;
-
-			for (let index = 0; index < isotopes.length; index++) {
-				if (usedIndices.has(index)) {
-					continue;
-				}
-
-				const energy = isotopes[index]?.energy;
-				if (typeof energy !== 'number' || !Number.isFinite(energy)) {
-					continue;
-				}
-
-				const diff = Math.abs(targetEnergy - energy);
-				if (diff < bestDiff) {
-					bestDiff = diff;
-					bestIndex = index;
-				}
-			}
-
-			if (bestIndex >= 0) {
-				return bestIndex;
-			}
-		}
-
-		if (targetIndex < isotopes.length && !usedIndices.has(targetIndex)) {
-			return targetIndex;
+		if (!targetId) {
+			return -1;
 		}
 
 		for (let index = 0; index < isotopes.length; index++) {
-			if (!usedIndices.has(index)) {
+			if (!usedIndices.has(index) && isotopes[index]?.isotopeId === targetId) {
 				return index;
 			}
 		}
@@ -688,10 +663,17 @@
 
 		const usedIndices = new Set<number>();
 		const matchedSelection = new Set<string>();
+		const missingIsotopes: string[] = [];
 
 		for (let index = 0; index < isotopeCount; index++) {
-			const sourceIndex = findBestCatalogIsotopeIndex(isotopeInfo[index], index, item, usedIndices);
+			const sourceIndex = findCatalogIsotopeIndexById(isotopeInfo[index], item, usedIndices);
 			if (sourceIndex < 0) {
+				const iso = isotopeInfo[index];
+				missingIsotopes.push(
+					(iso?.elementName && iso?.isotopeName)
+						? `${iso.elementName}-${iso.isotopeName}`
+						: `Isotope ${index + 1}`
+				);
 				continue;
 			}
 
@@ -715,6 +697,12 @@
 			nextReference.concentrationUnits[index] = sourceUnits[sourceIndex];
 		}
 
+		if (missingIsotopes.length > 0) {
+			referenceCatalogError =
+				`This irradiation cannot be used for the selected analysis. Missing reference irradiation data for: ${missingIsotopes.join(', ')}.`;
+			return;
+		}
+
 		const nextReferences = [...materials.reference];
 		nextReferences[referenceIndex] = nextReference;
 		materials = {
@@ -726,10 +714,12 @@
 		nextSelections[referenceIndex] = matchedSelection;
 		referenceIsotopeSelections = nextSelections;
 
+		const nextCatalogItemIds = [...referenceCatalogItemIds];
+		nextCatalogItemIds[referenceIndex] = item.id;
+		referenceCatalogItemIds = nextCatalogItemIds;
+
 		referenceCatalogMessage =
-			matchedSelection.size > 0
-				? `Loaded ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName}). Matched ${matchedSelection.size} isotope row(s).`
-				: `Loaded ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName}), but no isotope rows could be matched.`;
+			`Loaded ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName}). Matched ${matchedSelection.size} isotope row(s).`;
 	}
 
 	function validateCurrentStep(): boolean {
@@ -797,6 +787,23 @@
 				const ref = materials.reference[refIdx];
 				if (!ref?.NETL_code && !ref?.sampleName) {
 					validationErrors = ['Please load a reference material from the catalog before continuing.'];
+					return false;
+				}
+
+				const selectedSet = referenceIsotopeSelections[refIdx] ?? new Set<string>();
+				const missingReferenceIrradiations = isotopeInfo
+					.map((iso, index) => ({ iso, index }))
+					.filter(({ index }) => !selectedSet.has(getIsotopeSelectionKey(index)))
+					.map(({ iso, index }) =>
+						(iso?.elementName && iso?.isotopeName)
+							? `${iso.elementName}-${iso.isotopeName}`
+							: `Isotope ${index + 1}`
+					);
+
+				if (missingReferenceIrradiations.length > 0) {
+					validationErrors = [
+						`Missing reference irradiations for selected isotopes: ${missingReferenceIrradiations.join(', ')}`
+					];
 					return false;
 				}
 			} else {
@@ -1111,7 +1118,7 @@
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			{#if userIsAuthenticated}
 				<p>
-					Select a reference material from the catalog below. All fields will be filled in
+					Select reference materials from the catalog below. All fields will be filled in
 					automatically when you click Load.
 				</p>
 				<br />
@@ -1119,6 +1126,8 @@
 					isotopeIds={isotopeInfo
 						.map((iso) => iso.id)
 						.filter((id): id is string => typeof id === 'string')}
+					selectedItemIds={referenceCatalogItemIds.filter((id): id is string => typeof id === 'string')}
+					currentSelectionId={referenceCatalogItemIds[refIdx] ?? null}
 					onSelectItem={(item: ReferenceMaterialCatalogItem) => {
 						applyReferenceMaterialCatalogItem(item, refIdx);
 					}}

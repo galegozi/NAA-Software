@@ -6,6 +6,8 @@
 
 	let {
 		isotopeIds = [] as string[],
+		selectedItemIds = [] as string[],
+		currentSelectionId = null as string | null,
 		onSelectItem = (_item: ReferenceMaterialCatalogItem) => {}
 	} = $props();
 
@@ -34,6 +36,13 @@
 		return formatDatetime(new Date(endMs - rm.irradiationTime * 1000).toISOString());
 	}
 
+	function getIrradiationStartIso(rm: ReferenceMaterial | undefined): string {
+		if (!rm?.irradiationEnd || !rm?.irradiationTime) return '';
+		const endMs = new Date(rm.irradiationEnd).getTime();
+		if (Number.isNaN(endMs)) return '';
+		return new Date(endMs - rm.irradiationTime * 1000).toISOString();
+	}
+
 	let isLoading = $state(false);
 	let errorMessage = $state('');
 	let searchTerm = $state('');
@@ -60,11 +69,30 @@
 
 	function getSearchText(item: ReferenceMaterialCatalogItem): string {
 		const material = item.latestCounting?.referenceMaterial;
+		const latestCounting = item.latestCounting;
 		return [
 			item.referenceKey,
 			material?.NETL_code,
 			material?.sampleName,
-			item.notes
+			item.notes,
+			latestCounting?.countingLabel,
+			latestCounting?.createdAt,
+			material?.referenceDatasheetId,
+			material?.irradiationEnd,
+			material?.measurementStartTime,
+			material?.irradiationType,
+			material?.dtType,
+			material?.irradiationTime,
+			material?.decayTime,
+			material?.liveTime,
+			material?.realTime,
+			material?.fluence,
+			material?.mass,
+			formatDatetime(material?.irradiationEnd),
+			formatDatetime(material?.measurementStartTime),
+			getIrradiationStart(material),
+			getIrradiationStartIso(material),
+			formatDuration(material?.irradiationTime)
 		]
 			.filter(Boolean)
 			.join(' ')
@@ -203,7 +231,7 @@
 				<input
 					class="input w-full"
 					type="search"
-					placeholder="Search by NETL code or sample name"
+					placeholder="Search by code, sample, irradiation start/end, measurement start, mode, and more"
 					bind:value={searchTerm}
 				/>
 			</label>
@@ -216,6 +244,8 @@
 				{:else if visibleItems.length > 0}
 					{#each visibleItems as item (item.id)}
 						{@const material = item.latestCounting?.referenceMaterial}
+						{@const isUsedByAnotherReference =
+							selectedItemIds.includes(item.id) && item.id !== currentSelectionId}
 						<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
 							<div class="flex items-start justify-between gap-4">
 								<div class="space-y-1">
@@ -239,9 +269,10 @@
 								<button
 									class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400"
 									type="button"
+									disabled={isUsedByAnotherReference}
 									onclick={() => onSelectItem(item)}
 								>
-									Load
+									{isUsedByAnotherReference ? 'Already selected' : 'Load'}
 								</button>
 							</div>
 						</div>

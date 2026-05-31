@@ -120,6 +120,7 @@ function buildSearchQuery(rawSearch, rawLimit) {
 			WHERE c.docType = @docType
 				AND (
 					(IS_DEFINED(c.referenceKey) AND IS_STRING(c.referenceKey) AND CONTAINS(LOWER(c.referenceKey), @search))
+					OR (IS_DEFINED(c.notes) AND IS_STRING(c.notes) AND CONTAINS(LOWER(c.notes), @search))
 					OR EXISTS(
 						SELECT VALUE counting FROM counting IN c.countings
 						WHERE IS_DEFINED(counting.referenceMaterial.sampleName)
@@ -131,6 +132,48 @@ function buildSearchQuery(rawSearch, rawLimit) {
 						WHERE IS_DEFINED(counting.referenceMaterial.NETL_code)
 							AND IS_STRING(counting.referenceMaterial.NETL_code)
 							AND CONTAINS(LOWER(counting.referenceMaterial.NETL_code), @search)
+					)
+					OR EXISTS(
+						SELECT VALUE counting FROM counting IN c.countings
+						WHERE IS_DEFINED(counting.countingLabel)
+							AND IS_STRING(counting.countingLabel)
+							AND CONTAINS(LOWER(counting.countingLabel), @search)
+					)
+					OR EXISTS(
+						SELECT VALUE counting FROM counting IN c.countings
+						WHERE IS_DEFINED(counting.createdAt)
+							AND IS_STRING(counting.createdAt)
+							AND CONTAINS(LOWER(counting.createdAt), @search)
+					)
+					OR EXISTS(
+						SELECT VALUE counting FROM counting IN c.countings
+						WHERE IS_DEFINED(counting.referenceMaterial.referenceDatasheetId)
+							AND IS_STRING(counting.referenceMaterial.referenceDatasheetId)
+							AND CONTAINS(LOWER(counting.referenceMaterial.referenceDatasheetId), @search)
+					)
+					OR EXISTS(
+						SELECT VALUE counting FROM counting IN c.countings
+						WHERE IS_DEFINED(counting.referenceMaterial.irradiationEnd)
+							AND IS_STRING(counting.referenceMaterial.irradiationEnd)
+							AND CONTAINS(LOWER(counting.referenceMaterial.irradiationEnd), @search)
+					)
+					OR EXISTS(
+						SELECT VALUE counting FROM counting IN c.countings
+						WHERE IS_DEFINED(counting.referenceMaterial.measurementStartTime)
+							AND IS_STRING(counting.referenceMaterial.measurementStartTime)
+							AND CONTAINS(LOWER(counting.referenceMaterial.measurementStartTime), @search)
+					)
+					OR EXISTS(
+						SELECT VALUE counting FROM counting IN c.countings
+						WHERE IS_DEFINED(counting.referenceMaterial.irradiationType)
+							AND IS_STRING(counting.referenceMaterial.irradiationType)
+							AND CONTAINS(LOWER(counting.referenceMaterial.irradiationType), @search)
+					)
+					OR EXISTS(
+						SELECT VALUE counting FROM counting IN c.countings
+						WHERE IS_DEFINED(counting.referenceMaterial.dtType)
+							AND IS_STRING(counting.referenceMaterial.dtType)
+							AND CONTAINS(LOWER(counting.referenceMaterial.dtType), @search)
 					)
 				)
 			ORDER BY c._ts DESC
@@ -187,11 +230,19 @@ function matchesMockSearch(item, normalizedSearch) {
 	}
 
 	const latestMaterial = getLatestCounting(item)?.referenceMaterial;
+	const latestCounting = getLatestCounting(item);
 	const haystack = [
 		item.referenceKey,
 		latestMaterial?.NETL_code,
 		latestMaterial?.sampleName,
-		item.notes
+		item.notes,
+		latestCounting?.countingLabel,
+		latestCounting?.createdAt,
+		latestMaterial?.referenceDatasheetId,
+		latestMaterial?.irradiationEnd,
+		latestMaterial?.measurementStartTime,
+		latestMaterial?.irradiationType,
+		latestMaterial?.dtType
 	]
 		.filter(Boolean)
 		.join(' ')
