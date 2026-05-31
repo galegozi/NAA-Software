@@ -792,18 +792,27 @@
 
 		// Validate reference material steps
 		if (refIdx >= 0 && refIdx < referenceCount) {
-			const currentRef = matRefs.reference[refIdx];
-			if (currentRef && typeof currentRef.validateRefMatInfo === 'function') {
-				const isValid = currentRef.validateRefMatInfo();
-				if (!isValid) {
-					if (typeof currentRef.showValidationErrors === 'function') {
-						currentRef.showValidationErrors();
-					}
-					const errors = currentRef.getValidationErrors?.() || [
-						'Please fill in all required fields'
-					];
-					validationErrors = errors;
+			if (userIsAuthenticated) {
+				// For authenticated users the form is hidden; just ensure a material was loaded
+				const ref = materials.reference[refIdx];
+				if (!ref?.NETL_code && !ref?.sampleName) {
+					validationErrors = ['Please load a reference material from the catalog before continuing.'];
 					return false;
+				}
+			} else {
+				const currentRef = matRefs.reference[refIdx];
+				if (currentRef && typeof currentRef.validateRefMatInfo === 'function') {
+					const isValid = currentRef.validateRefMatInfo();
+					if (!isValid) {
+						if (typeof currentRef.showValidationErrors === 'function') {
+							currentRef.showValidationErrors();
+						}
+						const errors = currentRef.getValidationErrors?.() || [
+							'Please fill in all required fields'
+						];
+						validationErrors = errors;
+						return false;
+					}
 				}
 			}
 		}
@@ -1100,13 +1109,16 @@
 			<button type="button" onclick={next}> {nextButtonText} </button>
 		{:else if refIdx >= 0 && refIdx < referenceCount}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<p>
-				This is where you enter information about the reference material. This is used when
-				comparing to the unknown material to determine concentrations.
-			</p>
-			<br /><br />
 			{#if userIsAuthenticated}
+				<p>
+					Select a reference material from the catalog below. All fields will be filled in
+					automatically when you click Load.
+				</p>
+				<br />
 				<ReferenceMaterialViewer
+					isotopeIds={isotopeInfo
+						.map((iso) => iso.id)
+						.filter((id): id is string => typeof id === 'string')}
 					onSelectItem={(item: ReferenceMaterialCatalogItem) => {
 						applyReferenceMaterialCatalogItem(item, refIdx);
 					}}
@@ -1117,24 +1129,29 @@
 				{#if referenceCatalogMessage}
 					<p class="mt-3 text-sm text-emerald-700">{referenceCatalogMessage}</p>
 				{/if}
-				<br />
-			{/if}
-			<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
-			<RefMatInfo
-				{isotopeCount}
-				{isotopeInfo}
-				usedIsotopeLabels={getUsedIsotopeLabels(refIdx)}
-				getRoiIndex={getRoiIndexFn}
-				bind:selected={referenceIsotopeSelections[refIdx]}
-				bind:refMatInfo={materials.reference[refIdx]}
-				bind:this={matRefs.reference[refIdx]}
-			/>
+			{:else}
+				<p>
+					This is where you enter information about the reference material. This is used when
+					comparing to the unknown material to determine concentrations.
+				</p>
+				<br /><br />
+				<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
+				<RefMatInfo
+					{isotopeCount}
+					{isotopeInfo}
+					usedIsotopeLabels={getUsedIsotopeLabels(refIdx)}
+					getRoiIndex={getRoiIndexFn}
+					bind:selected={referenceIsotopeSelections[refIdx]}
+					bind:refMatInfo={materials.reference[refIdx]}
+					bind:this={matRefs.reference[refIdx]}
+				/>
 
-			<ComputedDisplay title="Reference Material Information" data={matComp.reference[refIdx]} />
-			<ComputedDisplay
-				title="Reference and Isotope Information"
-				data={matIsoComp.map((item) => item.reference[refIdx])}
-			/>
+				<ComputedDisplay title="Reference Material Information" data={matComp.reference[refIdx]} />
+				<ComputedDisplay
+					title="Reference and Isotope Information"
+					data={matIsoComp.map((item) => item.reference[refIdx])}
+				/>
+			{/if}
 
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;

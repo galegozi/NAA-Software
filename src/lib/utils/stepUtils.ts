@@ -126,16 +126,20 @@ function getNavigationStepLabel(
 // }
 
 /**
- * Calculate the step number for reference material count input
+ * Calculate the step number for reference material count input.
+ * Returns -1 for authenticated users (step is skipped; reference count defaults to 1).
  */
 export function getReferenceCountStep(isotopeCount: number, authenticated = false): number {
-	return authenticated ? getInitialIsotopeStep(true) + 1 : STEP_CONSTANTS.UNAUTHED.REFERENCE_COUNT_OFFSET + isotopeCount;
+	if (authenticated) return -1;
+	return STEP_CONSTANTS.UNAUTHED.REFERENCE_COUNT_OFFSET + isotopeCount;
 }
 
 /**
- * Calculate the start step for reference material info
+ * Calculate the start step for reference material info.
+ * For authenticated users this is directly after the isotope select step (no count step).
  */
 export function getReferenceInfoStartStep(isotopeCount: number, authenticated = false): number {
+	if (authenticated) return getInitialIsotopeStep(true) + 1;
 	return getReferenceCountStep(isotopeCount, authenticated) + 1;
 }
 

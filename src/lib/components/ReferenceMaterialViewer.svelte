@@ -1,12 +1,38 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { env } from '$env/dynamic/public';
-	import type { ReferenceMaterialCatalogItem } from '$lib/types.js';
+	import type { ReferenceMaterialCatalogItem, ReferenceMaterial } from '$lib/types.js';
 	import { getReferenceMaterialCatalogAccessMessage } from '$lib/utils/authEnvironment.js';
 
 	let {
+		isotopeIds = [] as string[],
 		onSelectItem = (_item: ReferenceMaterialCatalogItem) => {}
 	} = $props();
+
+	function formatDatetime(str: string | undefined): string {
+		if (!str) return '—';
+		const d = new Date(str);
+		return Number.isNaN(d.getTime()) ? str : d.toLocaleString();
+	}
+
+	function formatDuration(seconds: number | undefined): string {
+		if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '—';
+		const h = Math.floor(seconds / 3600);
+		const m = Math.floor((seconds % 3600) / 60);
+		const s = Math.round(seconds % 60);
+		const parts: string[] = [];
+		if (h > 0) parts.push(`${h}h`);
+		if (m > 0) parts.push(`${m}m`);
+		if (s > 0 || parts.length === 0) parts.push(`${s}s`);
+		return parts.join(' ');
+	}
+
+	function getIrradiationStart(rm: ReferenceMaterial | undefined): string {
+		if (!rm?.irradiationEnd || !rm?.irradiationTime) return '—';
+		const endMs = new Date(rm.irradiationEnd).getTime();
+		if (Number.isNaN(endMs)) return '—';
+		return formatDatetime(new Date(endMs - rm.irradiationTime * 1000).toISOString());
+	}
 
 	let isLoading = $state(false);
 	let errorMessage = $state('');
@@ -115,7 +141,15 @@
 		}
 	}
 
-	let filteredItems = $derived(cachedItems.filter((item) => matchesSearch(item, searchTerm)));
+	let filteredItems = $derived(
+		cachedItems.filter((item) => {
+			if (!matchesSearch(item, searchTerm)) return false;
+			if (isotopeIds.length > 0) {
+				return item.isotopes.some((iso) => isotopeIds.includes(iso.isotopeId));
+			}
+			return true;
+		})
+	);
 	let sortedItems = $derived(
 		[...filteredItems].sort((a, b) => {
 			const materialA = a.latestCounting?.referenceMaterial;
@@ -169,7 +203,7 @@
 				<input
 					class="input w-full"
 					type="search"
-					placeholder="Search by NETL code, sample name, or reference key"
+					placeholder="Search by NETL code or sample name"
 					bind:value={searchTerm}
 				/>
 			</label>
@@ -188,7 +222,17 @@
 									<div class="font-bold">
 										{material?.NETL_code || 'Unknown code'} ({material?.sampleName || 'Unknown sample'})
 									</div>
-									<div class="text-sm">Reference key: {item.referenceKey}</div>
+								{#if material?.irradiationEnd || material?.irradiationTime}
+									<div class="text-sm">Irradiation start: {getIrradiationStart(material)}</div>
+									<div class="text-sm">Irradiation end: {formatDatetime(material?.irradiationEnd)}</div>
+									<div class="text-sm">Duration: {formatDuration(material?.irradiationTime)}</div>
+								{/if}
+								{#if material?.irradiationType}
+									<div class="text-sm">Mode: {material.irradiationType}</div>
+								{/if}
+								{#if material?.dtType}
+									<div class="text-sm">Dead time correction: {material.dtType}</div>
+								{/if}
 									<div class="text-sm">Countings saved: {item.countingCount}</div>
 									<div class="text-sm">Isotopes saved: {item.isotopes.length}</div>
 								</div>
