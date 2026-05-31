@@ -75,7 +75,7 @@ describe('stepUtils navigation button text', () => {
 		expect(getBackButtonText(firstReferenceInfoStep, isotopeCount, referenceCount, unknownCount, true)).toBe(
 			'Back: Select Isotopes'
 		);
-		expect(getNextButtonText(firstReferenceInfoStep + 1, isotopeCount, referenceCount, unknownCount, true)).toBe(
+		expect(getNextButtonText(firstReferenceInfoStep, isotopeCount, referenceCount, unknownCount, true)).toBe(
 			'Next: Number of Unknown Materials'
 		);
 	});

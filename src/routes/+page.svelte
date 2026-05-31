@@ -468,13 +468,34 @@
 		const currentMap = isotopeReferenceMap ?? [];
 		const nextMap = Array.from({ length: isotopeCount }, (_, index) => {
 			const selectionKey = getIsotopeSelectionKey(index);
+			const coveringRefs = referenceIsotopeSelections
+				.map((selection, refIndex) =>
+					selection instanceof Set && selection.has(selectionKey) ? refIndex : -1
+				)
+				.filter((refIndex) => refIndex >= 0 && refIndex < referenceCount);
 
-			const selectedRefIndex = referenceIsotopeSelections.findIndex(
-				(selection) => selection instanceof Set && selection.has(selectionKey)
-			);
+			const linkedReference = isotopeInfo[index]?.linkedReference;
+			if (
+				typeof linkedReference === 'number' &&
+				coveringRefs.includes(linkedReference) &&
+				linkedReference >= 0 &&
+				linkedReference < referenceCount
+			) {
+				return linkedReference;
+			}
 
-			if (selectedRefIndex >= 0 && selectedRefIndex < referenceCount) {
-				return selectedRefIndex;
+			const currentReference = currentMap[index];
+			if (
+				typeof currentReference === 'number' &&
+				coveringRefs.includes(currentReference) &&
+				currentReference >= 0 &&
+				currentReference < referenceCount
+			) {
+				return currentReference;
+			}
+
+			if (coveringRefs.length > 0) {
+				return coveringRefs[0];
 			}
 
 			const fallback = isotopeInfo[index]?.linkedReference ?? 0;
@@ -621,12 +642,12 @@
 		return -1;
 	}
 
-	function applyReferenceMaterialCatalogItem(item: ReferenceMaterialCatalogItem, referenceIndex: number) {
+	function applyReferenceMaterialCatalogItem(item: ReferenceMaterialCatalogItem) {
 		referenceCatalogMessage = '';
 		referenceCatalogError = '';
 
-		if (referenceIndex < 0 || referenceIndex >= referenceCount) {
-			referenceCatalogError = 'Reference index is out of range.';
+		if (referenceCatalogItemIds.includes(item.id)) {
+			referenceCatalogError = 'This reference irradiation is already selected.';
 			return;
 		}
 
@@ -663,17 +684,10 @@
 
 		const usedIndices = new Set<number>();
 		const matchedSelection = new Set<string>();
-		const missingIsotopes: string[] = [];
 
 		for (let index = 0; index < isotopeCount; index++) {
 			const sourceIndex = findCatalogIsotopeIndexById(isotopeInfo[index], item, usedIndices);
 			if (sourceIndex < 0) {
-				const iso = isotopeInfo[index];
-				missingIsotopes.push(
-					(iso?.elementName && iso?.isotopeName)
-						? `${iso.elementName}-${iso.isotopeName}`
-						: `Isotope ${index + 1}`
-				);
 				continue;
 			}
 
@@ -697,29 +711,107 @@
 			nextReference.concentrationUnits[index] = sourceUnits[sourceIndex];
 		}
 
-		if (missingIsotopes.length > 0) {
+		if (matchedSelection.size === 0) {
 			referenceCatalogError =
-				`This irradiation cannot be used for the selected analysis. Missing reference irradiation data for: ${missingIsotopes.join(', ')}.`;
+				'This reference irradiation does not cover any currently selected isotopes.';
 			return;
 		}
 
-		const nextReferences = [...materials.reference];
-		nextReferences[referenceIndex] = nextReference;
+		const hasOnlyPlaceholder =
+			referenceCatalogItemIds.length === 1 && referenceCatalogItemIds[0] === null;
+
+		let nextReferences: ReferenceMaterial[];
+		let nextSelections: Set<string>[];
+		let nextCatalogItemIds: (string | null)[];
+
+		if (hasOnlyPlaceholder) {
+			nextReferences = [nextReference];
+			nextSelections = [matchedSelection];
+			nextCatalogItemIds = [item.id];
+		} else {
+			nextReferences = [...materials.reference, nextReference];
+			nextSelections = [...referenceIsotopeSelections, matchedSelection];
+			nextCatalogItemIds = [...referenceCatalogItemIds, item.id];
+		}
+
 		materials = {
 			...materials,
 			reference: nextReferences
 		};
-
-		const nextSelections = [...referenceIsotopeSelections];
-		nextSelections[referenceIndex] = matchedSelection;
 		referenceIsotopeSelections = nextSelections;
-
-		const nextCatalogItemIds = [...referenceCatalogItemIds];
-		nextCatalogItemIds[referenceIndex] = item.id;
 		referenceCatalogItemIds = nextCatalogItemIds;
+		referenceCount = nextReferences.length;
+		updateIsotopeReferenceMap(isotopeCount, nextReferences.length);
 
 		referenceCatalogMessage =
-			`Loaded ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName}). Matched ${matchedSelection.size} isotope row(s).`;
+			`Added ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName}). Covers ${matchedSelection.size} isotope row(s).`;
+	}
+
+	function removeReferenceMaterialCatalogItem(referenceIndex: number) {
+		if (referenceIndex < 0 || referenceIndex >= materials.reference.length) {
+			return;
+		}
+
+		referenceCatalogMessage = '';
+		referenceCatalogError = '';
+
+		const nextReferences = materials.reference.filter((_, idx) => idx !== referenceIndex);
+		const nextSelections = referenceIsotopeSelections.filter((_, idx) => idx !== referenceIndex);
+		const nextCatalogItemIds = referenceCatalogItemIds.filter((_, idx) => idx !== referenceIndex);
+
+		if (nextReferences.length === 0) {
+			materials = {
+				...materials,
+				reference: [createReferenceMaterial(isotopeCount)]
+			};
+			referenceIsotopeSelections = [new Set<string>()];
+			referenceCatalogItemIds = [null];
+			referenceCount = 1;
+			updateIsotopeReferenceMap(isotopeCount, 1);
+			return;
+		}
+
+		materials = {
+			...materials,
+			reference: nextReferences
+		};
+		referenceIsotopeSelections = nextSelections;
+		referenceCatalogItemIds = nextCatalogItemIds;
+		referenceCount = nextReferences.length;
+		updateIsotopeReferenceMap(isotopeCount, nextReferences.length);
+	}
+
+	function getCoveringReferenceIndicesForIsotope(isotopeIndex: number): number[] {
+		const selectionKey = getIsotopeSelectionKey(isotopeIndex);
+		return referenceIsotopeSelections
+			.map((selection, referenceIndex) =>
+				selection instanceof Set && selection.has(selectionKey) ? referenceIndex : -1
+			)
+			.filter((referenceIndex) => referenceIndex >= 0 && referenceIndex < referenceCount);
+	}
+
+	function setReferenceForIsotope(isotopeIndex: number, referenceIndex: number) {
+		const coveringReferences = getCoveringReferenceIndicesForIsotope(isotopeIndex);
+		if (!coveringReferences.includes(referenceIndex)) {
+			return;
+		}
+
+		isotopeInfo = isotopeInfo.map((iso, index) =>
+			index === isotopeIndex
+				? {
+					...iso,
+					linkedReference: referenceIndex
+				}
+				: iso
+		);
+	}
+
+	function getIsotopeDisplayName(isotope: IsotopeInfoType, index: number): string {
+		if (isotope.elementName && isotope.isotopeName) {
+			return `${isotope.elementName}-${isotope.isotopeName}`;
+		}
+
+		return `Isotope ${index + 1}`;
 	}
 
 	function validateCurrentStep(): boolean {
@@ -783,22 +875,18 @@
 		// Validate reference material steps
 		if (refIdx >= 0 && refIdx < referenceCount) {
 			if (userIsAuthenticated) {
-				// For authenticated users the form is hidden; just ensure a material was loaded
-				const ref = materials.reference[refIdx];
-				if (!ref?.NETL_code && !ref?.sampleName) {
-					validationErrors = ['Please load a reference material from the catalog before continuing.'];
+				const selectedReferenceIds = referenceCatalogItemIds.filter(
+					(id): id is string => typeof id === 'string'
+				);
+				if (selectedReferenceIds.length === 0) {
+					validationErrors = ['Please select at least one reference irradiation before continuing.'];
 					return false;
 				}
 
-				const selectedSet = referenceIsotopeSelections[refIdx] ?? new Set<string>();
 				const missingReferenceIrradiations = isotopeInfo
 					.map((iso, index) => ({ iso, index }))
-					.filter(({ index }) => !selectedSet.has(getIsotopeSelectionKey(index)))
-					.map(({ iso, index }) =>
-						(iso?.elementName && iso?.isotopeName)
-							? `${iso.elementName}-${iso.isotopeName}`
-							: `Isotope ${index + 1}`
-					);
+					.filter(({ index }) => getCoveringReferenceIndicesForIsotope(index).length === 0)
+					.map(({ iso, index }) => getIsotopeDisplayName(iso, index));
 
 				if (missingReferenceIrradiations.length > 0) {
 					validationErrors = [
@@ -1118,8 +1206,8 @@
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			{#if userIsAuthenticated}
 				<p>
-					Select reference materials from the catalog below. All fields will be filled in
-					automatically when you click Load.
+					Select reference irradiations from the catalog below. You can combine multiple
+					irradiations to cover all isotopes, then choose which irradiation to use per isotope.
 				</p>
 				<br />
 				<ReferenceMaterialViewer
@@ -1127,11 +1215,65 @@
 						.map((iso) => iso.id)
 						.filter((id): id is string => typeof id === 'string')}
 					selectedItemIds={referenceCatalogItemIds.filter((id): id is string => typeof id === 'string')}
-					currentSelectionId={referenceCatalogItemIds[refIdx] ?? null}
+					currentSelectionId={null}
 					onSelectItem={(item: ReferenceMaterialCatalogItem) => {
-						applyReferenceMaterialCatalogItem(item, refIdx);
+						applyReferenceMaterialCatalogItem(item);
 					}}
 				/>
+
+				{#if referenceCatalogItemIds.filter((id): id is string => typeof id === 'string').length > 0}
+					<div class="mt-4 space-y-2 rounded border border-gray-300 p-3">
+						<h3 class="text-lg font-bold">Selected reference irradiations</h3>
+						{#each referenceCatalogItemIds as catalogId, selectedIndex (selectedIndex)}
+							{#if catalogId}
+								<div class="flex items-center justify-between gap-3 rounded border border-gray-200 p-2">
+									<div>
+										<strong>{getReferenceLabel(selectedIndex)}</strong>
+										<span class="ml-2 text-sm text-gray-600">({catalogId})</span>
+									</div>
+									<button
+										type="button"
+										class="rounded border border-gray-300 px-2 py-1 text-sm"
+										onclick={() => removeReferenceMaterialCatalogItem(selectedIndex)}
+									>
+										Remove
+									</button>
+								</div>
+							{/if}
+						{/each}
+					</div>
+
+					<div class="mt-4 space-y-2 rounded border border-gray-300 p-3">
+						<h3 class="text-lg font-bold">Isotope to reference irradiation mapping</h3>
+						{#each isotopeInfo as isotope, isotopeIndex (isotopeIndex)}
+							{@const availableReferences = getCoveringReferenceIndicesForIsotope(isotopeIndex)}
+							<div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(240px,360px)] md:items-center">
+								<div class="text-sm">
+									<strong>{getIsotopeDisplayName(isotope, isotopeIndex)}</strong>
+								</div>
+								{#if availableReferences.length > 0}
+									<select
+										class="input"
+										value={String(getLinkedReferenceIndex(isotopeIndex))}
+										onchange={(event) => {
+											const target = event.currentTarget as HTMLSelectElement;
+											setReferenceForIsotope(isotopeIndex, Number(target.value));
+										}}
+									>
+										{#each availableReferences as availableReferenceIndex (availableReferenceIndex)}
+											<option value={String(availableReferenceIndex)}>
+												{getReferenceLabel(availableReferenceIndex)}
+											</option>
+										{/each}
+									</select>
+								{:else}
+									<p class="text-sm text-red-700">No selected irradiation covers this isotope.</p>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
+
 				{#if referenceCatalogError}
 					<p class="mt-3 text-sm text-red-700">{referenceCatalogError}</p>
 				{/if}

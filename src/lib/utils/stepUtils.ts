@@ -167,6 +167,11 @@ export function getUnknownCountStep(
 	referenceCount = 1,
 	authenticated = false
 ): number {
+	if (authenticated) {
+		// Authenticated flow uses a single "Select Reference Materials" step.
+		return getReferenceInfoStartStep(isotopeCount, true) + 1;
+	}
+
 	return getReferenceInfoStartStep(isotopeCount, authenticated) + referenceCount;
 }
 
@@ -189,8 +194,10 @@ export function getReviewStep(
 ): number {
 	const { referenceCount, unknownCount: resolvedUnknownCount } =
 		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
+	const effectiveReferenceCount = authenticated ? 1 : referenceCount;
 	return (
-		getUnknownInfoStartStep(isotopeCount, referenceCount, authenticated) + resolvedUnknownCount
+		getUnknownInfoStartStep(isotopeCount, effectiveReferenceCount, authenticated) +
+		resolvedUnknownCount
 	);
 }
 
