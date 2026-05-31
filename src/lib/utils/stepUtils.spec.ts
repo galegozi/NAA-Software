@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	getBackButtonText,
 	getNextButtonText,
+	getReferenceCountStep,
 	getReferenceInfoStartStep,
 	getReviewStep,
 	getUnknownCountStep,
