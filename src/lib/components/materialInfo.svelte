@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import IsotopeEnable from './isotopeEnable.svelte';
 
 	import type { MaestroParsedData, MaestroRoiEntry } from '$lib/NAAMath/types.js';
@@ -101,7 +102,7 @@
 
 		const computedDecayTime =
 			(measurementStartDate.getTime() - irradiationEndDate.getTime()) / 1000;
-		const inputDecayTime = Number(materialInfo.decayTime);
+		const inputDecayTime = untrack(() => Number(materialInfo.decayTime));
 
 		if (!Number.isFinite(computedDecayTime)) {
 			return;
@@ -511,7 +512,7 @@
 		class="input w-50"
 		type="number"
 		bind:value={materialInfo.decayTime}
-		onchange={() => trackDecayTimeChange()}
+		oninput={() => trackDecayTimeChange()}
 		placeholder="e.g., 7200"
 		min="0"
 		required
@@ -704,6 +705,6 @@
 	}
 
 	:global(input:focus, textarea:focus, select:focus) {
-		scroll-margin: 10rem;
+		scroll-margin-top: 5rem;
 	}
 </style>
