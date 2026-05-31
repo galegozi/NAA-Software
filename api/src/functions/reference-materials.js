@@ -4,20 +4,308 @@ import { getReferenceMaterialsContainer } from '../lib/cosmosClient.js';
 import { mergeReferenceMaterialWrite, normalizeReferenceMaterialWritePayload } from '../lib/referenceMaterialWritePayload.js';
 import { canWriteIsotopes } from '../lib/staticWebAppsAuth.js';
 
+const MOCK_REFERENCE_MATERIALS = [
+	{
+		id: 'mock-rm-1',
+		docType: 'reference-material',
+		referenceKey: 'mock-ab0053-srm1633c',
+		notes: 'Mock reference material for local development.',
+		isotopes: [
+			{ isotopeId: 'mock-co-60', energy: 1173.2 },
+			{ isotopeId: 'mock-cs-137', energy: 661.657 }
+		],
+		countings: [
+			{
+				countingId: 'mock-counting-1',
+				countingLabel: 'Counting 1',
+				createdAt: new Date('2026-01-12T12:00:00.000Z').toISOString(),
+				referenceMaterial: {
+					NETL_code: 'AB0053',
+					sampleName: 'SRM1633c',
+					referenceDatasheetId: 'mock-ds-001',
+					mass: 0.5,
+					irradiationTime: 3600,
+					irradiationEnd: '2026-01-11T10:00',
+					measurementStartTime: '2026-01-12T12:00',
+					decayTime: 93600,
+					liveTime: 1800,
+					realTime: 1820,
+					fluence: 1.2e13,
+					counts: [
+						{
+							grossCounts: 5000,
+							netCounts: 4500,
+							uncertainty: 67,
+							grossCountsPositionalCorrectionFactor: 1,
+							netCountsPositionalCorrectionFactor: 1,
+							uncertaintyPositionalCorrectionFactor: 1
+						},
+						{
+							grossCounts: 1200,
+							netCounts: 1100,
+							uncertainty: 40,
+							grossCountsPositionalCorrectionFactor: 1,
+							netCountsPositionalCorrectionFactor: 1,
+							uncertaintyPositionalCorrectionFactor: 1
+						}
+					],
+					irradiationType: 'total',
+					dtType: 'simple',
+					knownConcentration: [0.1, 0.02],
+					knownUncertainty: [0.005, 0.001],
+					concentrationUnits: ['ppm', 'ppm']
+				}
+			}
+		],
+		createdAt: new Date('2026-01-12T12:00:00.000Z').toISOString(),
+		updatedAt: new Date('2026-01-12T12:30:00.000Z').toISOString()
+	}
+];
+
 function isMockCosmosEnabled() {
 	const value = process.env.MOCK_COSMOS?.trim().toLowerCase();
 	return value === '1' || value === 'true' || value === 'yes';
 }
 
-async function referenceMaterialsHandler(request, context) {
-	if (request.method !== 'POST') {
+function isLocalDevelopmentEnvironment() {
+	const runtime = process.env.AZURE_FUNCTIONS_ENVIRONMENT?.trim().toLowerCase();
+	const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
+	return runtime === 'development' || nodeEnv === 'development';
+}
+
+function hasCosmosConfiguration() {
+	const endpoint = process.env.COSMOSDB_ENDPOINT?.trim();
+	const key = process.env.COSMOSDB_KEY?.trim();
+	const database = process.env.COSMOSDB_DATABASE?.trim();
+	const container = process.env.COSMOSDB_REFERENCE_CONTAINER?.trim();
+
+	return Boolean(endpoint && key && database && container);
+}
+
+function shouldUseMockCatalog() {
+	if (isMockCosmosEnabled()) {
+		return true;
+	}
+
+	return isLocalDevelopmentEnvironment() && !hasCosmosConfiguration();
+}
+
+function clampLimit(rawValue) {
+	const parsed = Number.parseInt(rawValue ?? '25', 10);
+	if (!Number.isFinite(parsed)) {
+		return 25;
+	}
+
+	return Math.min(Math.max(parsed, 1), 100);
+}
+
+function buildSearchQuery(rawSearch, rawLimit) {
+	const limit = clampLimit(rawLimit);
+	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
+
+	if (!normalizedSearch) {
 		return {
-			status: 405,
+			query: `
+				SELECT TOP ${limit} * FROM c
+				WHERE c.docType = @docType
+				ORDER BY c._ts DESC
+			`,
+			parameters: [{ name: '@docType', value: 'reference-material' }]
+		};
+	}
+
+	return {
+		query: `
+			SELECT TOP ${limit} * FROM c
+			WHERE c.docType = @docType
+				AND (
+					(IS_DEFINED(c.referenceKey) AND IS_STRING(c.referenceKey) AND CONTAINS(LOWER(c.referenceKey), @search))
+					OR EXISTS(
+						SELECT VALUE counting FROM counting IN c.countings
+						WHERE IS_DEFINED(counting.referenceMaterial.sampleName)
+							AND IS_STRING(counting.referenceMaterial.sampleName)
+							AND CONTAINS(LOWER(counting.referenceMaterial.sampleName), @search)
+					)
+					OR EXISTS(
+						SELECT VALUE counting FROM counting IN c.countings
+						WHERE IS_DEFINED(counting.referenceMaterial.NETL_code)
+							AND IS_STRING(counting.referenceMaterial.NETL_code)
+							AND CONTAINS(LOWER(counting.referenceMaterial.NETL_code), @search)
+					)
+				)
+			ORDER BY c._ts DESC
+		`,
+		parameters: [
+			{ name: '@docType', value: 'reference-material' },
+			{ name: '@search', value: normalizedSearch }
+		]
+	};
+}
+
+function getLatestCounting(item) {
+	if (!Array.isArray(item?.countings) || item.countings.length === 0) {
+		return null;
+	}
+
+	return item.countings[item.countings.length - 1] ?? null;
+}
+
+function mapReferenceMaterialItem(item) {
+	const latestCounting = getLatestCounting(item);
+
+	return {
+		id: typeof item?.id === 'string' ? item.id : '',
+		referenceKey: typeof item?.referenceKey === 'string' ? item.referenceKey : '',
+		notes: typeof item?.notes === 'string' ? item.notes : '',
+		isotopes: Array.isArray(item?.isotopes)
+			? item.isotopes.map((isotope) => ({
+					isotopeId: typeof isotope?.isotopeId === 'string' ? isotope.isotopeId : '',
+					energy: Number.isFinite(Number(isotope?.energy)) ? Number(isotope.energy) : null
+				}))
+			: [],
+		countingCount: Array.isArray(item?.countings) ? item.countings.length : 0,
+		latestCounting: latestCounting
+			? {
+				countingId: typeof latestCounting.countingId === 'string' ? latestCounting.countingId : '',
+				countingLabel:
+					typeof latestCounting.countingLabel === 'string'
+						? latestCounting.countingLabel
+						: 'Counting',
+				createdAt:
+					typeof latestCounting.createdAt === 'string' ? latestCounting.createdAt : undefined,
+				referenceMaterial: latestCounting.referenceMaterial
+			}
+			: null,
+		createdAt: typeof item?.createdAt === 'string' ? item.createdAt : null,
+		updatedAt: typeof item?.updatedAt === 'string' ? item.updatedAt : null
+	};
+}
+
+function matchesMockSearch(item, normalizedSearch) {
+	if (!normalizedSearch) {
+		return true;
+	}
+
+	const latestMaterial = getLatestCounting(item)?.referenceMaterial;
+	const haystack = [
+		item.referenceKey,
+		latestMaterial?.NETL_code,
+		latestMaterial?.sampleName,
+		item.notes
+	]
+		.filter(Boolean)
+		.join(' ')
+		.toLowerCase();
+
+	return haystack.includes(normalizedSearch);
+}
+
+function getMockSearchResults(rawSearch, rawLimit) {
+	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
+	const limit = clampLimit(rawLimit);
+
+	return MOCK_REFERENCE_MATERIALS.filter((item) => matchesMockSearch(item, normalizedSearch)).slice(0, limit);
+}
+
+async function referenceMaterialsHandler(request, context) {
+	if (request.method === 'GET') {
+		return getReferenceMaterialsHandler(request, context);
+	}
+
+	if (request.method === 'POST') {
+		return createReferenceMaterialHandler(request, context);
+	}
+
+	return {
+		status: 405,
+		jsonBody: {
+			error: 'Method not allowed.'
+		}
+	};
+}
+
+async function getReferenceMaterialsHandler(request, context) {
+	if (shouldUseMockCatalog()) {
+		const url = new URL(request.url);
+		const search = url.searchParams.get('q') ?? '';
+		const limit = url.searchParams.get('limit');
+		const mockItems = getMockSearchResults(search, limit);
+
+		context.log('Returning mock reference material catalog results.', {
+			search,
+			count: mockItems.length,
+			mockCosmos: isMockCosmosEnabled(),
+			fallbackLocal: !isMockCosmosEnabled() && isLocalDevelopmentEnvironment()
+		});
+
+		return {
+			status: 200,
 			jsonBody: {
-				error: 'Method not allowed.'
+				items: mockItems.map(mapReferenceMaterialItem),
+				count: mockItems.length,
+				search,
+				mocked: true
 			}
 		};
 	}
+
+	try {
+		const url = new URL(request.url);
+		const search = url.searchParams.get('q') ?? '';
+		const limit = url.searchParams.get('limit');
+		const queryText = buildSearchQuery(search, limit);
+		const container = getReferenceMaterialsContainer();
+		const query = container.items.query(queryText);
+		const { resources } = await query.fetchAll();
+
+		return {
+			status: 200,
+			jsonBody: {
+				items: resources.map(mapReferenceMaterialItem),
+				count: resources.length,
+				search
+			}
+		};
+	} catch (error) {
+		if (isLocalDevelopmentEnvironment()) {
+			const url = new URL(request.url);
+			const search = url.searchParams.get('q') ?? '';
+			const limit = url.searchParams.get('limit');
+			const mockItems = getMockSearchResults(search, limit);
+
+			context.warn(
+				'Cosmos query failed in local development. Falling back to mock reference material catalog.',
+				{
+					search,
+					count: mockItems.length,
+					error: error instanceof Error ? error.message : String(error)
+				}
+			);
+
+			return {
+				status: 200,
+				jsonBody: {
+					items: mockItems.map(mapReferenceMaterialItem),
+					count: mockItems.length,
+					search,
+					mocked: true,
+					fallback: 'local-cosmos-error'
+				}
+			};
+		}
+
+		context.error('Failed to load reference materials from Cosmos DB.', error);
+
+		return {
+			status: 500,
+			jsonBody: {
+				error: 'Failed to load reference materials from Cosmos DB.'
+			}
+		};
+	}
+}
+
+async function createReferenceMaterialHandler(request, context) {
 
 	const authorization = canWriteIsotopes(request);
 	if (!authorization.authorized) {
@@ -135,7 +423,7 @@ async function findExistingReferenceMaterial(container, referenceKey) {
 
 app.http('reference-materials', {
 	route: 'reference-materials',
-	methods: ['POST'],
+	methods: ['GET', 'POST'],
 	authLevel: 'anonymous',
 	handler: referenceMaterialsHandler
 });

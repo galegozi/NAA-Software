@@ -52,9 +52,11 @@ This project now includes an integrated Azure Functions backend under `api/` for
 
 - `GET /api/isotopes`
 - `POST /api/isotopes`
+- `GET /api/reference-materials`
 - `POST /api/reference-materials`
 
 The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
+The reference material viewer calls `/api/reference-materials` by default. You can override that by setting `PUBLIC_REFERENCE_MATERIAL_API_URL`.
 
 ### API access control
 The integrated Azure Functions endpoint stays at `authLevel: 'anonymous'`, because Azure Static Web Apps is the layer that authenticates and authorizes requests before forwarding them to the function.

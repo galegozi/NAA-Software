@@ -83,6 +83,29 @@ export interface IsotopeCatalogItem {
 	halfLifeSeconds: number;
 }
 
+export interface ReferenceMaterialCatalogIsotopeSelection {
+	isotopeId: string;
+	energy: number | null;
+}
+
+export interface ReferenceMaterialCatalogCounting {
+	countingId: string;
+	countingLabel: string;
+	createdAt?: string;
+	referenceMaterial: ReferenceMaterial;
+}
+
+export interface ReferenceMaterialCatalogItem {
+	id: string;
+	referenceKey: string;
+	notes: string;
+	isotopes: ReferenceMaterialCatalogIsotopeSelection[];
+	countingCount: number;
+	latestCounting: ReferenceMaterialCatalogCounting | null;
+	createdAt?: string | null;
+	updatedAt?: string | null;
+}
+
 export interface IsotopeWriteForm {
 	elementName: string;
 	shortName: string;

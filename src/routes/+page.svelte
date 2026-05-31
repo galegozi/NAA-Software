@@ -7,6 +7,7 @@
 	import ComputedDisplay from '$lib/components/ComputedDisplay.svelte';
 	import ProgressIndicator from '$lib/components/ProgressIndicator.svelte';
 	import IsotopeViewer from '$lib/components/IsotopeViewer.svelte';
+	import ReferenceMaterialViewer from '$lib/components/ReferenceMaterialViewer.svelte';
 
 	import { getAll as isoGA } from '../lib/NAAMath/isotopeMath.ts';
 	import { getAll as matGA } from '../lib/NAAMath/MaterialMath.ts';
@@ -16,6 +17,7 @@
 
 	import type {
 		IsotopeInfo as IsotopeInfoType,
+		ReferenceMaterialCatalogItem,
 		ReferenceMaterial,
 		UnknownMaterial
 	} from '$lib/types.js';
@@ -418,6 +420,8 @@
 		unknown: [undefined] as (MaterialInfo | undefined)[]
 	});
 	let referenceIsotopeSelections = $state<Set<string>[]>([new Set<string>()]);
+	let referenceCatalogMessage = $state('');
+	let referenceCatalogError = $state('');
 	let materials = $state({
 		reference: [createReferenceMaterial(1)],
 		unknown: [createUnknownMaterial(1)]
@@ -583,6 +587,149 @@
 			}
 		}
 		return used;
+	}
+
+	function findBestCatalogIsotopeIndex(
+		targetIsotope: IsotopeInfoType,
+		targetIndex: number,
+		catalogItem: ReferenceMaterialCatalogItem,
+		usedIndices: Set<number>
+	): number {
+		const isotopes = Array.isArray(catalogItem.isotopes) ? catalogItem.isotopes : [];
+		const targetId = targetIsotope.id?.trim();
+
+		if (targetId) {
+			for (let index = 0; index < isotopes.length; index++) {
+				if (!usedIndices.has(index) && isotopes[index]?.isotopeId === targetId) {
+					return index;
+				}
+			}
+		}
+
+		const targetEnergy = Number(targetIsotope.energy);
+		if (Number.isFinite(targetEnergy)) {
+			let bestIndex = -1;
+			let bestDiff = Infinity;
+
+			for (let index = 0; index < isotopes.length; index++) {
+				if (usedIndices.has(index)) {
+					continue;
+				}
+
+				const energy = isotopes[index]?.energy;
+				if (typeof energy !== 'number' || !Number.isFinite(energy)) {
+					continue;
+				}
+
+				const diff = Math.abs(targetEnergy - energy);
+				if (diff < bestDiff) {
+					bestDiff = diff;
+					bestIndex = index;
+				}
+			}
+
+			if (bestIndex >= 0) {
+				return bestIndex;
+			}
+		}
+
+		if (targetIndex < isotopes.length && !usedIndices.has(targetIndex)) {
+			return targetIndex;
+		}
+
+		for (let index = 0; index < isotopes.length; index++) {
+			if (!usedIndices.has(index)) {
+				return index;
+			}
+		}
+
+		return -1;
+	}
+
+	function applyReferenceMaterialCatalogItem(item: ReferenceMaterialCatalogItem, referenceIndex: number) {
+		referenceCatalogMessage = '';
+		referenceCatalogError = '';
+
+		if (referenceIndex < 0 || referenceIndex >= referenceCount) {
+			referenceCatalogError = 'Reference index is out of range.';
+			return;
+		}
+
+		const sourceMaterial = item.latestCounting?.referenceMaterial;
+		if (!sourceMaterial) {
+			referenceCatalogError = 'Selected catalog entry does not contain a saved counting.';
+			return;
+		}
+
+		const nextReference = createReferenceMaterial(isotopeCount);
+		nextReference.NETL_code = sourceMaterial.NETL_code;
+		nextReference.sampleName = sourceMaterial.sampleName;
+		nextReference.mass = sourceMaterial.mass;
+		nextReference.irradiationTime = sourceMaterial.irradiationTime;
+		nextReference.irradiationEnd = sourceMaterial.irradiationEnd;
+		nextReference.measurementStartTime = sourceMaterial.measurementStartTime;
+		nextReference.decayTime = sourceMaterial.decayTime;
+		nextReference.liveTime = sourceMaterial.liveTime;
+		nextReference.realTime = sourceMaterial.realTime;
+		nextReference.fluence = sourceMaterial.fluence;
+		nextReference.irradiationType = sourceMaterial.irradiationType;
+		nextReference.dtType = sourceMaterial.dtType;
+
+		const sourceCounts = Array.isArray(sourceMaterial.counts) ? sourceMaterial.counts : [];
+		const sourceConcentrations = Array.isArray(sourceMaterial.knownConcentration)
+			? sourceMaterial.knownConcentration
+			: [];
+		const sourceUncertainties = Array.isArray(sourceMaterial.knownUncertainty)
+			? sourceMaterial.knownUncertainty
+			: [];
+		const sourceUnits = Array.isArray(sourceMaterial.concentrationUnits)
+			? sourceMaterial.concentrationUnits
+			: [];
+
+		const usedIndices = new Set<number>();
+		const matchedSelection = new Set<string>();
+
+		for (let index = 0; index < isotopeCount; index++) {
+			const sourceIndex = findBestCatalogIsotopeIndex(isotopeInfo[index], index, item, usedIndices);
+			if (sourceIndex < 0) {
+				continue;
+			}
+
+			usedIndices.add(sourceIndex);
+			matchedSelection.add(getIsotopeSelectionKey(index));
+
+			nextReference.counts[index] = {
+				grossCounts: sourceCounts[sourceIndex]?.grossCounts ?? 0,
+				netCounts: sourceCounts[sourceIndex]?.netCounts ?? 0,
+				uncertainty: sourceCounts[sourceIndex]?.uncertainty ?? 0,
+				grossCountsPositionalCorrectionFactor:
+					sourceCounts[sourceIndex]?.grossCountsPositionalCorrectionFactor ?? 1,
+				netCountsPositionalCorrectionFactor:
+					sourceCounts[sourceIndex]?.netCountsPositionalCorrectionFactor ?? 1,
+				uncertaintyPositionalCorrectionFactor:
+					sourceCounts[sourceIndex]?.uncertaintyPositionalCorrectionFactor ?? 1
+			};
+
+			nextReference.knownConcentration[index] = sourceConcentrations[sourceIndex] ?? 0;
+			nextReference.knownUncertainty[index] = sourceUncertainties[sourceIndex] ?? 0;
+			nextReference.concentrationUnits[index] = sourceUnits[sourceIndex];
+		}
+
+		const nextReferences = [...materials.reference];
+		nextReferences[referenceIndex] = nextReference;
+		materials = {
+			...materials,
+			reference: nextReferences
+		};
+
+		const nextSelections = [...referenceIsotopeSelections];
+		nextSelections[referenceIndex] = matchedSelection;
+		referenceIsotopeSelections = nextSelections;
+
+		referenceCatalogMessage =
+			matchedSelection.size > 0
+				? `Loaded ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName}). Matched ${matchedSelection.size} isotope row(s).`
+				: `Loaded ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName}), but no isotope rows could be matched.`;
 	}
 
 	function validateCurrentStep(): boolean {
@@ -958,6 +1105,20 @@
 				comparing to the unknown material to determine concentrations.
 			</p>
 			<br /><br />
+			{#if userIsAuthenticated}
+				<ReferenceMaterialViewer
+					onSelectItem={(item: ReferenceMaterialCatalogItem) => {
+						applyReferenceMaterialCatalogItem(item, refIdx);
+					}}
+				/>
+				{#if referenceCatalogError}
+					<p class="mt-3 text-sm text-red-700">{referenceCatalogError}</p>
+				{/if}
+				{#if referenceCatalogMessage}
+					<p class="mt-3 text-sm text-emerald-700">{referenceCatalogMessage}</p>
+				{/if}
+				<br />
+			{/if}
 			<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
 			<RefMatInfo
 				{isotopeCount}
