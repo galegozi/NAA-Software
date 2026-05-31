@@ -1226,10 +1226,14 @@
 						<h3 class="text-lg font-bold">Selected reference irradiations</h3>
 						{#each referenceCatalogItemIds as catalogId, selectedIndex (selectedIndex)}
 							{#if catalogId}
+								{@const refMat = materials.reference[selectedIndex]}
+								{@const irrEnd = refMat?.irradiationEnd ? new Date(refMat.irradiationEnd).toLocaleString() : '—'}
+								{@const irrStart = (refMat?.irradiationEnd && refMat?.irradiationTime) ? new Date(new Date(refMat.irradiationEnd).getTime() - refMat.irradiationTime * 1000).toLocaleString() : '—'}
 								<div class="flex items-center justify-between gap-3 rounded border border-gray-200 p-2">
 									<div>
 										<strong>{getReferenceLabel(selectedIndex)}</strong>
-										<span class="ml-2 text-sm text-gray-600">({catalogId})</span>
+										<span class="ml-2 text-sm">{refMat?.NETL_code ?? ''}{refMat?.sampleName ? ` (${refMat.sampleName})` : ''}</span>
+										<span class="ml-2 text-sm text-gray-500">{irrStart} → {irrEnd}</span>
 									</div>
 									<button
 										type="button"
@@ -1243,35 +1247,40 @@
 						{/each}
 					</div>
 
-					<div class="mt-4 space-y-2 rounded border border-gray-300 p-3">
-						<h3 class="text-lg font-bold">Isotope to reference irradiation mapping</h3>
-						{#each isotopeInfo as isotope, isotopeIndex (isotopeIndex)}
-							{@const availableReferences = getCoveringReferenceIndicesForIsotope(isotopeIndex)}
-							<div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(240px,360px)] md:items-center">
-								<div class="text-sm">
-									<strong>{getIsotopeDisplayName(isotope, isotopeIndex)}</strong>
-								</div>
-								{#if availableReferences.length > 0}
-									<select
-										class="input"
-										value={String(getLinkedReferenceIndex(isotopeIndex))}
-										onchange={(event) => {
-											const target = event.currentTarget as HTMLSelectElement;
-											setReferenceForIsotope(isotopeIndex, Number(target.value));
-										}}
-									>
-										{#each availableReferences as availableReferenceIndex (availableReferenceIndex)}
-											<option value={String(availableReferenceIndex)}>
-												{getReferenceLabel(availableReferenceIndex)}
-											</option>
-										{/each}
-									</select>
-								{:else}
-									<p class="text-sm text-red-700">No selected irradiation covers this isotope.</p>
+					{@const isotopesMappingNeeded = isotopeInfo.filter((_, i) => getCoveringReferenceIndicesForIsotope(i).length !== 1)}
+					{#if isotopesMappingNeeded.length > 0}
+						<div class="mt-4 space-y-2 rounded border border-gray-300 p-3">
+							<h3 class="text-lg font-bold">Isotope assignment</h3>
+							{#each isotopeInfo as isotope, isotopeIndex (isotopeIndex)}
+								{@const availableReferences = getCoveringReferenceIndicesForIsotope(isotopeIndex)}
+								{#if availableReferences.length !== 1}
+									<div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(240px,360px)] md:items-center">
+										<div class="text-sm">
+											<strong>{getIsotopeDisplayName(isotope, isotopeIndex)}</strong>
+										</div>
+										{#if availableReferences.length > 1}
+											<select
+												class="input"
+												value={String(getLinkedReferenceIndex(isotopeIndex))}
+												onchange={(event) => {
+													const target = event.currentTarget as HTMLSelectElement;
+													setReferenceForIsotope(isotopeIndex, Number(target.value));
+												}}
+											>
+												{#each availableReferences as availableReferenceIndex (availableReferenceIndex)}
+													<option value={String(availableReferenceIndex)}>
+														{getReferenceLabel(availableReferenceIndex)}
+													</option>
+												{/each}
+											</select>
+										{:else}
+											<p class="text-sm text-red-700">No selected irradiation covers this isotope.</p>
+										{/if}
+									</div>
 								{/if}
-							</div>
-						{/each}
-					</div>
+							{/each}
+						</div>
+					{/if}
 				{/if}
 
 				{#if referenceCatalogError}
