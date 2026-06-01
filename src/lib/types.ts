@@ -101,6 +101,7 @@ export interface ReferenceMaterialCatalogItem {
 	notes: string;
 	isotopes: ReferenceMaterialCatalogIsotopeSelection[];
 	countingCount: number;
+	countings?: ReferenceMaterialCatalogCounting[];
 	latestCounting: ReferenceMaterialCatalogCounting | null;
 	createdAt?: string | null;
 	updatedAt?: string | null;

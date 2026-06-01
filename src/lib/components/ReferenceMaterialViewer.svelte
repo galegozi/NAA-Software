@@ -1,15 +1,41 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { env } from '$env/dynamic/public';
-	import type { ReferenceMaterialCatalogItem, ReferenceMaterial } from '$lib/types.js';
+	import type {
+		ReferenceMaterialCatalogItem,
+		ReferenceMaterial,
+		ReferenceMaterialCatalogCounting
+	} from '$lib/types.js';
 	import { getReferenceMaterialCatalogAccessMessage } from '$lib/utils/authEnvironment.js';
 
 	let {
 		isotopeIds = [] as string[],
 		selectedItemIds = [] as string[],
 		currentSelectionId = null as string | null,
-		onSelectItem = (_item: ReferenceMaterialCatalogItem) => {}
+		onSelectItem = ((() => {}) as (
+			item: ReferenceMaterialCatalogItem,
+			counting: ReferenceMaterialCatalogCounting
+		) => void)
 	} = $props();
+
+	function getCountingSelectionId(
+		item: ReferenceMaterialCatalogItem,
+		counting: ReferenceMaterialCatalogCounting
+	): string {
+		const countingId = counting.countingId?.trim();
+		if (countingId) {
+			return `${item.id}::${countingId}`;
+		}
+
+		const material = counting.referenceMaterial;
+		const createdAt = counting.createdAt?.trim() ?? '';
+		const measurementStart = material?.measurementStartTime?.trim?.() ?? '';
+		const irradiationEnd = material?.irradiationEnd?.trim?.() ?? '';
+		const irradiationType = material?.irradiationType?.trim?.() ?? '';
+		const countingLabel = counting.countingLabel?.trim() ?? 'counting';
+
+		return `${item.id}::${countingLabel}::${createdAt}::${measurementStart}::${irradiationEnd}::${irradiationType}`;
+	}
 
 	function formatDatetime(str: string | undefined): string {
 		if (!str) return '—';
@@ -68,31 +94,46 @@
 	}
 
 	function getSearchText(item: ReferenceMaterialCatalogItem): string {
-		const material = item.latestCounting?.referenceMaterial;
-		const latestCounting = item.latestCounting;
+		const countingEntries = Array.isArray(item.countings) && item.countings.length > 0
+			? item.countings
+			: item.latestCounting
+				? [item.latestCounting]
+				: [];
+
+		const countingText = countingEntries
+			.map((counting) => {
+				const material = counting.referenceMaterial;
+				return [
+					counting.countingLabel,
+					counting.createdAt,
+					material?.NETL_code,
+					material?.sampleName,
+					material?.referenceDatasheetId,
+					material?.irradiationEnd,
+					material?.measurementStartTime,
+					material?.irradiationType,
+					material?.dtType,
+					material?.irradiationTime,
+					material?.decayTime,
+					material?.liveTime,
+					material?.realTime,
+					material?.fluence,
+					material?.mass,
+					formatDatetime(material?.irradiationEnd),
+					formatDatetime(material?.measurementStartTime),
+					getIrradiationStart(material),
+					getIrradiationStartIso(material),
+					formatDuration(material?.irradiationTime)
+				]
+					.filter(Boolean)
+					.join(' ');
+			})
+			.join(' ');
+
 		return [
 			item.referenceKey,
-			material?.NETL_code,
-			material?.sampleName,
 			item.notes,
-			latestCounting?.countingLabel,
-			latestCounting?.createdAt,
-			material?.referenceDatasheetId,
-			material?.irradiationEnd,
-			material?.measurementStartTime,
-			material?.irradiationType,
-			material?.dtType,
-			material?.irradiationTime,
-			material?.decayTime,
-			material?.liveTime,
-			material?.realTime,
-			material?.fluence,
-			material?.mass,
-			formatDatetime(material?.irradiationEnd),
-			formatDatetime(material?.measurementStartTime),
-			getIrradiationStart(material),
-			getIrradiationStartIso(material),
-			formatDuration(material?.irradiationTime)
+			countingText
 		]
 			.filter(Boolean)
 			.join(' ')
@@ -109,7 +150,13 @@
 	}
 
 	function getFetchSearch(query: string): string {
-		return query.trim();
+		const trimmedQuery = query.trim();
+		// Keep short search terms local-only to avoid frequent list refreshes while typing.
+		if (trimmedQuery.length > 0 && trimmedQuery.length < 3) {
+			return '';
+		}
+
+		return trimmedQuery;
 	}
 
 	async function loadItems(search: string) {
@@ -193,6 +240,21 @@
 		})
 	);
 	let visibleItems = $derived(sortedItems.slice(0, 25));
+	let visibleCountings = $derived(
+		visibleItems.flatMap((item) => {
+			const countings = Array.isArray(item.countings) && item.countings.length > 0
+				? item.countings
+				: item.latestCounting
+					? [item.latestCounting]
+					: [];
+
+			return countings.map((counting) => ({
+				item,
+				counting,
+				selectionId: getCountingSelectionId(item, counting)
+			}));
+		})
+	);
 
 	$effect(() => {
 		const nextSearch = searchTerm.trim();
@@ -241,36 +303,39 @@
 					<p class="p-2">Loading reference material catalog...</p>
 				{:else if errorMessage && cachedItems.length === 0}
 					<p class="p-2">Unable to load reference material catalog: {errorMessage}</p>
-				{:else if visibleItems.length > 0}
-					{#each visibleItems as item (item.id)}
-						{@const material = item.latestCounting?.referenceMaterial}
+				{:else if visibleCountings.length > 0}
+					{#each visibleCountings as entry (`${entry.item.id}:${entry.selectionId}`)}
+						{@const material = entry.counting.referenceMaterial}
 						{@const isUsedByAnotherReference =
-							selectedItemIds.includes(item.id) && item.id !== currentSelectionId}
+							selectedItemIds.includes(entry.selectionId) && entry.selectionId !== currentSelectionId}
 						<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
 							<div class="flex items-start justify-between gap-4">
 								<div class="space-y-1">
 									<div class="font-bold">
 										{material?.NETL_code || 'Unknown code'} ({material?.sampleName || 'Unknown sample'})
 									</div>
+									{#if entry.counting.countingLabel}
+										<div class="text-sm">Counting: {entry.counting.countingLabel}</div>
+									{/if}
+									{#if material?.irradiationType}
+										<div class="text-sm">Mode: {material.irradiationType}</div>
+									{/if}
 								{#if material?.irradiationEnd || material?.irradiationTime}
 									<div class="text-sm">Irradiation start: {getIrradiationStart(material)}</div>
 									<div class="text-sm">Irradiation end: {formatDatetime(material?.irradiationEnd)}</div>
 									<div class="text-sm">Duration: {formatDuration(material?.irradiationTime)}</div>
 								{/if}
-								{#if material?.irradiationType}
-									<div class="text-sm">Mode: {material.irradiationType}</div>
-								{/if}
 								{#if material?.dtType}
 									<div class="text-sm">Dead time correction: {material.dtType}</div>
 								{/if}
-									<div class="text-sm">Countings saved: {item.countingCount}</div>
-									<div class="text-sm">Isotopes saved: {item.isotopes.length}</div>
+									<div class="text-sm">Countings saved: {entry.item.countingCount}</div>
+									<div class="text-sm">Isotopes saved: {entry.item.isotopes.length}</div>
 								</div>
 								<button
 									class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400"
 									type="button"
 									disabled={isUsedByAnotherReference}
-									onclick={() => onSelectItem(item)}
+									onclick={() => onSelectItem(entry.item, entry.counting)}
 								>
 									{isUsedByAnotherReference ? 'Already selected' : 'Load'}
 								</button>
@@ -285,7 +350,7 @@
 			</div>
 
 			{#if sortedItems.length > visibleItems.length}
-				<p>Showing the first {visibleItems.length} matches. Keep typing to narrow the list.</p>
+				<p>Showing the first {visibleCountings.length} counting entries. Keep typing to narrow the list.</p>
 			{/if}
 		</div>
 	</div>

@@ -18,6 +18,7 @@
 	import type {
 		IsotopeCatalogItem,
 		IsotopeInfo as IsotopeInfoType,
+		ReferenceMaterialCatalogCounting,
 		ReferenceMaterialCatalogItem,
 		ReferenceMaterial,
 		UnknownMaterial
@@ -819,17 +820,42 @@
 		}
 	}
 
-	function applyReferenceMaterialCatalogItem(item: ReferenceMaterialCatalogItem) {
+	function getCatalogSelectionId(
+		itemId: string,
+		counting: ReferenceMaterialCatalogCounting | null | undefined
+	): string {
+		const countingId = counting?.countingId?.trim();
+		if (countingId) {
+			return `${itemId}::${countingId}`;
+		}
+
+		const material = counting?.referenceMaterial;
+		const countingLabel = counting?.countingLabel?.trim() ?? 'counting';
+		const createdAt = counting?.createdAt?.trim() ?? '';
+		const measurementStart = material?.measurementStartTime?.trim?.() ?? '';
+		const irradiationEnd = material?.irradiationEnd?.trim?.() ?? '';
+		const irradiationType = material?.irradiationType?.trim?.() ?? '';
+
+		return `${itemId}::${countingLabel}::${createdAt}::${measurementStart}::${irradiationEnd}::${irradiationType}`;
+	}
+
+	function applyReferenceMaterialCatalogItem(
+		item: ReferenceMaterialCatalogItem,
+		selectedCounting?: ReferenceMaterialCatalogCounting
+	) {
 		referenceCatalogMessage = '';
 		referenceCatalogError = '';
 		referenceCatalogWarning = '';
 
-		if (referenceCatalogItemIds.includes(item.id)) {
+		const sourceCounting = selectedCounting ?? item.latestCounting ?? undefined;
+		const selectionId = getCatalogSelectionId(item.id, sourceCounting);
+
+		if (referenceCatalogItemIds.includes(selectionId)) {
 			referenceCatalogError = 'This reference irradiation is already selected.';
 			return;
 		}
 
-		const sourceMaterial = item.latestCounting?.referenceMaterial;
+		const sourceMaterial = sourceCounting?.referenceMaterial;
 		if (!sourceMaterial) {
 			referenceCatalogError = 'Selected catalog entry does not contain a saved counting.';
 			return;
@@ -915,11 +941,11 @@
 		if (hasOnlyPlaceholder) {
 			nextReferences = [nextReference];
 			nextSelections = [matchedSelection];
-			nextCatalogItemIds = [item.id];
+			nextCatalogItemIds = [selectionId];
 		} else {
 			nextReferences = [...materials.reference, nextReference];
 			nextSelections = [...referenceIsotopeSelections, matchedSelection];
-			nextCatalogItemIds = [...referenceCatalogItemIds, item.id];
+			nextCatalogItemIds = [...referenceCatalogItemIds, selectionId];
 		}
 
 		materials = {
@@ -932,7 +958,7 @@
 		updateIsotopeReferenceMap(isotopeCount, nextReferences.length);
 
 		referenceCatalogMessage =
-			`Added ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName}). Covers ${matchedSelection.size} isotope row(s).`;
+			`Added ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName})${sourceMaterial.irradiationType ? ` [${sourceMaterial.irradiationType}]` : ''}. Covers ${matchedSelection.size} isotope row(s).`;
 		referenceCatalogWarning = proxyWarnings.join(' ');
 	}
 
@@ -1138,8 +1164,13 @@
 
 	function getReferenceLabel(index: number): string {
 		const ref = materials.reference[index];
-		const labelBase = ref?.NETL_code || ref?.sampleName;
-		return labelBase ? `${labelBase}` : `Reference ${index + 1}`;
+		const labelBase = ref?.NETL_code || ref?.sampleName || `Reference ${index + 1}`;
+		const modeLabel = ref?.irradiationType ? ` [${ref.irradiationType}]` : '';
+		const measurementLabel = ref?.measurementStartTime
+			? ` @ ${new Date(ref.measurementStartTime).toLocaleString()}`
+			: '';
+
+		return `${labelBase}${modeLabel}${measurementLabel}`;
 	}
 
 	const next = () => {
@@ -1407,8 +1438,8 @@
 					isotopeIds={selectableReferenceCatalogIsotopeIds}
 					selectedItemIds={referenceCatalogItemIds.filter((id): id is string => typeof id === 'string')}
 					currentSelectionId={null}
-					onSelectItem={(item: ReferenceMaterialCatalogItem) => {
-						applyReferenceMaterialCatalogItem(item);
+					onSelectItem={(item: ReferenceMaterialCatalogItem, counting: ReferenceMaterialCatalogCounting) => {
+						applyReferenceMaterialCatalogItem(item, counting);
 					}}
 				/>
 

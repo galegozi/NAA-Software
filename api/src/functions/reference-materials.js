@@ -195,6 +195,17 @@ function getLatestCounting(item) {
 
 function mapReferenceMaterialItem(item) {
 	const latestCounting = getLatestCounting(item);
+	const countings = Array.isArray(item?.countings)
+		? item.countings
+				.filter((counting) => counting && typeof counting === 'object')
+				.map((counting) => ({
+					countingId: typeof counting.countingId === 'string' ? counting.countingId : '',
+					countingLabel:
+						typeof counting.countingLabel === 'string' ? counting.countingLabel : 'Counting',
+					createdAt: typeof counting.createdAt === 'string' ? counting.createdAt : undefined,
+					referenceMaterial: counting.referenceMaterial
+				}))
+		: [];
 
 	return {
 		id: typeof item?.id === 'string' ? item.id : '',
@@ -207,6 +218,7 @@ function mapReferenceMaterialItem(item) {
 				}))
 			: [],
 		countingCount: Array.isArray(item?.countings) ? item.countings.length : 0,
+		countings,
 		latestCounting: latestCounting
 			? {
 				countingId: typeof latestCounting.countingId === 'string' ? latestCounting.countingId : '',
