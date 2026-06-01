@@ -1502,11 +1502,17 @@
 					bind:this={matRefs.reference[refIdx]}
 				/>
 
-				<ComputedDisplay title="Reference Material Information" data={matComp.reference[refIdx]} />
-				<ComputedDisplay
-					title="Reference and Isotope Information"
-					data={matIsoComp.map((item) => item.reference[refIdx])}
-				/>
+				<details class="mt-4 rounded border border-gray-300 p-3">
+					<summary class="cursor-pointer font-semibold">Expand for debug information</summary>
+					<div class="mt-3 space-y-4">
+						<ComputedDisplay title="Reference Material Information" data={matComp.reference[refIdx]} />
+						<ComputedDisplay
+							title="Reference and Isotope Information"
+							data={matIsoComp.map((item) => item.reference[refIdx])}
+						/>
+						<pre class="overflow-x-auto whitespace-pre-wrap text-sm">{JSON.stringify(materials, null, 2)}</pre>
+					</div>
+				</details>
 			{/if}
 
 			<button type="button" onclick={prev}>{backButtonText}</button>
@@ -1536,15 +1542,19 @@
 				bind:materialInfo={materials.unknown[unknownIdx]}
 			/>
 
-			<br />
-			<ComputedDisplay
-				title="Unknown Material Information for Unknown {unknownIdx + 1}"
-				data={matComp.unknown[unknownIdx]}
-			/>
-			<ComputedDisplay
-				title="Unknown and Isotope Information for Unknown {unknownIdx + 1}"
-				data={matIsoComp.map((item) => item.unknown[unknownIdx])}
-			/>
+			<details class="mt-4 rounded border border-gray-300 p-3">
+				<summary class="cursor-pointer font-semibold">Expand for debug information</summary>
+				<div class="mt-3 space-y-4">
+					<ComputedDisplay
+						title="Unknown Material Information for Unknown {unknownIdx + 1}"
+						data={matComp.unknown[unknownIdx]}
+					/>
+					<ComputedDisplay
+						title="Unknown and Isotope Information for Unknown {unknownIdx + 1}"
+						data={matIsoComp.map((item) => item.unknown[unknownIdx])}
+					/>
+				</div>
+			</details>
 
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
@@ -1617,21 +1627,26 @@
 			</button>
 			<br /><br />
 
-			<ComputedDisplay title="Isotope Information" data={isotopeInfo} />
-			<br />
-			<ComputedDisplay title="Material Information" data={materials} />
-			<br /><br />
-
-			<h3 class="text-xl font-bold">Computed Values:</h3>
-			<ComputedDisplay level={4} title="Isotope Computed Values" data={isoComp} />
-			<ComputedDisplay level={4} title="Material Computed Values" data={matComp} />
-			<ComputedDisplay level={4} title="Material and Isotope Computed Values" data={matIsoComp} />
-			<ComputedDisplay level={4} title="Multi Material Computed Values" data={multiMatComp} />
-			<ComputedDisplay
-				level={4}
-				title="Computed Values that use everything"
-				data={everythingComp}
-			/>
+			<details class="mt-4 rounded border border-gray-300 p-3">
+				<summary class="cursor-pointer font-semibold">Expand for debug information</summary>
+				<div class="mt-3 space-y-4">
+					<ComputedDisplay title="Isotope Information" data={isotopeInfo} />
+					<ComputedDisplay title="Material Information" data={materials} />
+					<ComputedDisplay level={4} title="Isotope Computed Values" data={isoComp} />
+					<ComputedDisplay level={4} title="Material Computed Values" data={matComp} />
+					<ComputedDisplay
+						level={4}
+						title="Material and Isotope Computed Values"
+						data={matIsoComp}
+					/>
+					<ComputedDisplay level={4} title="Multi Material Computed Values" data={multiMatComp} />
+					<ComputedDisplay
+						level={4}
+						title="Computed Values that use everything"
+						data={everythingComp}
+					/>
+				</div>
+			</details>
 			<br />
 			<button type="button" onclick={prev}>{backButtonText}</button>
 		{/if}
