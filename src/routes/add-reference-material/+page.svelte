@@ -717,7 +717,7 @@
 					</label>
 				</div>
 
-				{#each countings as counting, index (`${counting.NETL_code || 'counting'}-${index}`)}
+				{#each countings as counting, index (index)}
 					<div class="writer-block writer-block--counting">
 						<div class="writer-counting__header">
 							<h3>{defaultCountingLabel(index)}</h3>
