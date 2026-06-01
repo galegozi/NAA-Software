@@ -72,7 +72,6 @@
 	let isLoading = $state(false);
 	let errorMessage = $state('');
 	let searchTerm = $state('');
-	let lastFetchedSearch = '';
 	let lastFetchSequence = 0;
 	let cachedItems: ReferenceMaterialCatalogItem[] = $state([]);
 
@@ -149,21 +148,11 @@
 		return getSearchText(item).includes(normalizedQuery);
 	}
 
-	function getFetchSearch(query: string): string {
-		const trimmedQuery = query.trim();
-		// Keep short search terms local-only to avoid frequent list refreshes while typing.
-		if (trimmedQuery.length > 0 && trimmedQuery.length < 3) {
-			return '';
-		}
-
-		return trimmedQuery;
-	}
-
 	async function loadItems(search: string) {
 		const apiUrl = env.PUBLIC_REFERENCE_MATERIAL_API_URL?.trim() || '/api/reference-materials';
 		const requestUrl = new URL(apiUrl, window.location.origin);
 		const trimmedSearch = search.trim();
-		requestUrl.searchParams.set('limit', trimmedSearch ? '25' : '100');
+		requestUrl.searchParams.set('limit', '1000');
 		if (trimmedSearch) {
 			requestUrl.searchParams.set('q', trimmedSearch);
 		}
@@ -199,7 +188,6 @@
 				),
 				...nextItems
 			];
-			lastFetchedSearch = trimmedSearch;
 		} catch (error) {
 			if (fetchSequence !== lastFetchSequence) {
 				return;
@@ -257,30 +245,11 @@
 	);
 
 	$effect(() => {
-		const nextSearch = searchTerm.trim();
-		const nextFetchSearch = getFetchSearch(nextSearch);
-		if (nextFetchSearch === lastFetchedSearch && cachedItems.length > 0) {
+		if (cachedItems.length > 0) {
 			return;
 		}
 
-		const shouldFetchImmediately =
-			cachedItems.length === 0 ||
-			nextFetchSearch.length === 0 ||
-			Math.abs(nextFetchSearch.length - lastFetchedSearch.length) >= 3 ||
-			nextFetchSearch.length < lastFetchedSearch.length;
-
-		if (shouldFetchImmediately) {
-			void loadItems(nextFetchSearch);
-			return;
-		}
-
-		const timeoutId = window.setTimeout(() => {
-			void loadItems(nextFetchSearch);
-		}, 100);
-
-		return () => {
-			window.clearTimeout(timeoutId);
-		};
+		void loadItems('');
 	});
 </script>
 

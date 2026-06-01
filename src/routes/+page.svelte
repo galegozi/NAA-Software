@@ -1165,12 +1165,20 @@
 	function getReferenceLabel(index: number): string {
 		const ref = materials.reference[index];
 		const labelBase = ref?.NETL_code || ref?.sampleName || `Reference ${index + 1}`;
-		const modeLabel = ref?.irradiationType ? ` [${ref.irradiationType}]` : '';
-		const measurementLabel = ref?.measurementStartTime
-			? ` @ ${new Date(ref.measurementStartTime).toLocaleString()}`
-			: '';
+		const details = [
+			ref?.irradiationType ? ref.irradiationType : '',
+			ref?.measurementStartTime ? new Date(ref.measurementStartTime).toLocaleString() : '',
+			ref?.irradiationEnd ? new Date(ref.irradiationEnd).toLocaleString() : ''
+		].filter(Boolean);
 
-		return `${labelBase}${modeLabel}${measurementLabel}`;
+		return details.length > 0 ? `${labelBase} — ${details.join(' · ')}` : labelBase;
+	}
+
+	function handleReferenceMaterialSelect(
+		item: ReferenceMaterialCatalogItem,
+		counting: ReferenceMaterialCatalogCounting
+	) {
+		applyReferenceMaterialCatalogItem(item, counting);
 	}
 
 	const next = () => {
@@ -1438,9 +1446,7 @@
 					isotopeIds={selectableReferenceCatalogIsotopeIds}
 					selectedItemIds={referenceCatalogItemIds.filter((id): id is string => typeof id === 'string')}
 					currentSelectionId={null}
-					onSelectItem={(item: ReferenceMaterialCatalogItem, counting: ReferenceMaterialCatalogCounting) => {
-						applyReferenceMaterialCatalogItem(item, counting);
-					}}
+					onSelectItem={handleReferenceMaterialSelect}
 				/>
 
 				{#if referenceCatalogItemIds.filter((id): id is string => typeof id === 'string').length > 0}
@@ -1454,7 +1460,6 @@
 								<div class="flex items-center justify-between gap-3 rounded border border-gray-200 p-2">
 									<div>
 										<strong>{getReferenceLabel(selectedIndex)}</strong>
-										<span class="ml-2 text-sm">{refMat?.NETL_code ?? ''}{refMat?.sampleName ? ` (${refMat.sampleName})` : ''}</span>
 										<span class="ml-2 text-sm text-gray-500">{irrStart} → {irrEnd}</span>
 									</div>
 									<button

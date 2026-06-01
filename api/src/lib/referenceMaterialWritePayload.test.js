@@ -91,7 +91,7 @@ test('normalizeReferenceMaterialWritePayload computes decayTime from measurement
 	assert.equal(material.irradiationStartTime, '2026-01-11T09:00');
 });
 
-test('normalizeReferenceMaterialWritePayload changes identity when irradiation changes', () => {
+test('normalizeReferenceMaterialWritePayload keeps identity stable when only irradiation mode changes', () => {
 	const payloadA = buildValidPayload();
 	const payloadB = buildValidPayload();
 	payloadB.countings[0].referenceMaterial.irradiationType = 'gated';
@@ -99,23 +99,34 @@ test('normalizeReferenceMaterialWritePayload changes identity when irradiation c
 	const resultA = normalizeReferenceMaterialWritePayload(payloadA, { userId: 'writer-1' });
 	const resultB = normalizeReferenceMaterialWritePayload(payloadB, { userId: 'writer-1' });
 
-	assert.notEqual(resultA.referenceKey, resultB.referenceKey);
+	assert.equal(resultA.referenceKey, resultB.referenceKey);
 });
 
-test('normalizeReferenceMaterialWritePayload rejects mixed irradiation identities in one submission', () => {
+test('normalizeReferenceMaterialWritePayload allows total and gated countings in one submission', () => {
 	const payload = buildValidPayload();
 	payload.countings.push({
 		countingLabel: 'Second irradiation',
 		referenceMaterial: {
 			...payload.countings[0].referenceMaterial,
-			irradiationEnd: '2026-02-11T10:00'
+			irradiationType: 'gated',
+			counts: [
+				{
+					grossCounts: 2500,
+					netCounts: 2400,
+					uncertainty: 33,
+					grossCountsPositionalCorrectionFactor: 1,
+					netCountsPositionalCorrectionFactor: 1,
+					uncertaintyPositionalCorrectionFactor: 1
+				}
+			]
 		}
 	});
 
-	assert.throws(
-		() => normalizeReferenceMaterialWritePayload(payload, { userId: 'writer-1' }),
-		/same material metadata and irradiation/iu
-	);
+	const result = normalizeReferenceMaterialWritePayload(payload, { userId: 'writer-1' });
+
+	assert.equal(result.countings.length, 2);
+	assert.equal(result.countings[0].referenceMaterial.irradiationType, 'total');
+	assert.equal(result.countings[1].referenceMaterial.irradiationType, 'gated');
 });
 
 test('normalizeReferenceMaterialWritePayload rejects mismatched isotope/count arrays', () => {

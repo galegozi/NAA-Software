@@ -349,7 +349,6 @@ function buildReferenceIdentityMaterial(material, isotopes) {
 		liveTime: material.liveTime,
 		realTime: material.realTime,
 		fluence: material.fluence,
-		irradiationType: material.irradiationType || 'total',
 		dtType: material.dtType || '',
 		isotopes
 	};
@@ -408,7 +407,7 @@ export function normalizeReferenceMaterialWritePayload(payload, principal) {
 	const hasMixedIdentity = normalizedCountings.some((counting) => counting.identityKey !== referenceKey);
 	if (hasMixedIdentity) {
 		throw new Error(
-			"All submitted countings must represent the same material metadata and irradiation. Submit different irradiations separately."
+			"All submitted countings must represent the same material metadata and isotope set. Submit different materials separately."
 		);
 	}
 	const now = new Date().toISOString();
