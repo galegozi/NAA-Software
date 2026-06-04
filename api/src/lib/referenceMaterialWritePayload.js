@@ -208,7 +208,21 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 			normalizeCountData(countData, `${fieldPrefix}.counts[${index}]`)
 		),
 		irradiationType,
-		dtType: dtType || undefined
+		dtType: dtType || undefined,
+		knownConcentration: Array.from({ length: isotopeCount }, (_, i) => {
+			const val = Array.isArray(payload.knownConcentration) ? payload.knownConcentration[i] : undefined;
+			const n = Number(val);
+			return Number.isFinite(n) && n >= 0 ? n : 0;
+		}),
+		knownUncertainty: Array.from({ length: isotopeCount }, (_, i) => {
+			const val = Array.isArray(payload.knownUncertainty) ? payload.knownUncertainty[i] : undefined;
+			const n = Number(val);
+			return Number.isFinite(n) && n >= 0 ? n : 0;
+		}),
+		concentrationUnits: Array.from({ length: isotopeCount }, (_, i) => {
+			const val = Array.isArray(payload.concentrationUnits) ? toTrimmedString(payload.concentrationUnits[i]) : '';
+			return ALLOWED_CONCENTRATION_UNITS.has(val) ? val : undefined;
+		})
 	};
 
 	const timing = normalizeMaterialTiming(normalizedMaterial);

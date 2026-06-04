@@ -42,7 +42,10 @@ function buildValidPayload() {
 							uncertaintyPositionalCorrectionFactor: 1
 						}
 					],
-					dtType: 'simple'
+					dtType: 'simple',
+					knownConcentration: [0.1],
+					knownUncertainty: [0.005],
+					concentrationUnits: ['ppm']
 				}
 			}
 		]
@@ -61,7 +64,9 @@ test('normalizeReferenceMaterialWritePayload normalizes a valid payload', () => 
 	assert.equal(result.isotopes[0].energy, 1173.2);
 	assert.equal(result.countings[0].referenceMaterial.counts[0].netCounts, 4500);
 	assert.equal(result.countings[0].referenceMaterial.referenceDatasheetId, 'ds-001');
-	assert.equal(result.countings[0].referenceMaterial.knownConcentration, undefined);
+	assert.deepEqual(result.countings[0].referenceMaterial.knownConcentration, [0.1]);
+	assert.deepEqual(result.countings[0].referenceMaterial.knownUncertainty, [0.005]);
+	assert.deepEqual(result.countings[0].referenceMaterial.concentrationUnits, ['ppm']);
 	assert.equal(result.countings[0].referenceMaterial.irradiationStartTime, '2026-01-11T09:00');
 	assert.equal(result.countings[0].referenceMaterial.decayTime, 93600);
 	assert.equal(result.countings[0].referenceMaterial.irradiationStartEpochMs !== null, true);
