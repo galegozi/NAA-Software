@@ -51,16 +51,10 @@ function getCatalogLabelCandidates(catalogItem) {
 	}
 
 	const shortName = toTrimmedString(catalogItem.shortName);
-	const massNumber = Number.isFinite(Number(catalogItem.massNumber))
-		? String(Number(catalogItem.massNumber))
-		: '';
-	const suffix = toTrimmedString(catalogItem.suffix);
 
 	return uniqueNormalizedLabels([
 		catalogItem.elementName,
-		shortName,
-		shortName && massNumber ? `${shortName}-${massNumber}${suffix}` : '',
-		shortName && massNumber ? `${shortName}${massNumber}${suffix}` : ''
+		shortName
 	]);
 }
 

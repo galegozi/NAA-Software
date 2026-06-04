@@ -203,43 +203,23 @@ function getLatestCounting(item) {
 function mapReferenceMaterialItem(item) {
 	const latestCounting = getLatestCounting(item);
 	const countings = Array.isArray(item?.countings)
-		? item.countings
-				.filter((counting) => counting && typeof counting === 'object')
-				.map((counting) => ({
-					countingId: typeof counting.countingId === 'string' ? counting.countingId : '',
-					countingLabel:
-						typeof counting.countingLabel === 'string' ? counting.countingLabel : 'Counting',
-					createdAt: typeof counting.createdAt === 'string' ? counting.createdAt : undefined,
-					referenceMaterial: counting.referenceMaterial
-				}))
+		? item.countings.filter((counting) => counting && typeof counting === 'object')
+		: [];
+	const isotopes = Array.isArray(item?.isotopes)
+		? item.isotopes.filter((isotope) => isotope && typeof isotope === 'object')
 		: [];
 
 	return {
 		id: typeof item?.id === 'string' ? item.id : '',
 		referenceKey: typeof item?.referenceKey === 'string' ? item.referenceKey : '',
 		notes: typeof item?.notes === 'string' ? item.notes : '',
-		isotopes: Array.isArray(item?.isotopes)
-			? item.isotopes.map((isotope) => ({
-					isotopeId: typeof isotope?.isotopeId === 'string' ? isotope.isotopeId : '',
-					energy: Number.isFinite(Number(isotope?.energy)) ? Number(isotope.energy) : null
-				}))
-			: [],
-		countingCount: Array.isArray(item?.countings) ? item.countings.length : 0,
+		isotopes,
+		countingCount: countings.length,
 		countings,
-		latestCounting: latestCounting
-			? {
-				countingId: typeof latestCounting.countingId === 'string' ? latestCounting.countingId : '',
-				countingLabel:
-					typeof latestCounting.countingLabel === 'string'
-						? latestCounting.countingLabel
-						: 'Counting',
-				createdAt:
-					typeof latestCounting.createdAt === 'string' ? latestCounting.createdAt : undefined,
-				referenceMaterial: latestCounting.referenceMaterial
-			}
-			: null,
+		latestCounting: latestCounting && typeof latestCounting === 'object' ? latestCounting : null,
 		createdAt: typeof item?.createdAt === 'string' ? item.createdAt : null,
-		updatedAt: typeof item?.updatedAt === 'string' ? item.updatedAt : null
+		updatedAt: typeof item?.updatedAt === 'string' ? item.updatedAt : null,
+		raw: item
 	};
 }
 
