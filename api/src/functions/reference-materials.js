@@ -1,6 +1,13 @@
 import { app } from '@azure/functions';
 
-import { getReferenceMaterialsContainer } from '../lib/cosmosClient.js';
+import {
+	getCosmosContainer,
+	getIsotopeMeasurementLinksContainer,
+	getReferenceDatasheetContainer,
+	getReferenceMaterialsContainer
+} from '../lib/cosmosClient.js';
+import { mapIsotopeItem } from '../lib/isotopeMapper.js';
+import { enrichReferenceMaterialCatalogItems } from '../lib/referenceMaterialCatalogEnrichment.js';
 import { mergeReferenceMaterialWrite, normalizeReferenceMaterialWritePayload } from '../lib/referenceMaterialWritePayload.js';
 import { canWriteIsotopes } from '../lib/staticWebAppsAuth.js';
 
@@ -270,6 +277,97 @@ function getMockSearchResults(rawSearch, rawLimit) {
 	return MOCK_REFERENCE_MATERIALS.filter((item) => matchesMockSearch(item, normalizedSearch)).slice(0, limit);
 }
 
+async function fetchItemsByIds(container, ids) {
+	const uniqueIds = Array.from(new Set((Array.isArray(ids) ? ids : []).filter(Boolean)));
+	const results = await Promise.all(
+		uniqueIds.map(async (id) => {
+			const query = container.items.query({
+				query: 'SELECT TOP 1 * FROM c WHERE c.id = @id',
+				parameters: [{ name: '@id', value: id }]
+			});
+
+			const { resources } = await query.fetchAll();
+			return resources[0] ?? null;
+		})
+	);
+
+	return results.filter(Boolean);
+}
+
+async function fetchMeasurementLinks() {
+	const container = getIsotopeMeasurementLinksContainer();
+	const query = container.items.query({
+		query: 'SELECT * FROM c WHERE c.docType = @docType',
+		parameters: [{ name: '@docType', value: 'isotope-measurement-link' }]
+	});
+
+	const { resources } = await query.fetchAll();
+	return Array.isArray(resources) ? resources : [];
+}
+
+async function buildReferenceMaterialEnrichmentLookups(items) {
+	const datasheetIds = [];
+	const isotopeIds = [];
+
+	for (const item of items) {
+		for (const isotope of Array.isArray(item?.isotopes) ? item.isotopes : []) {
+			if (typeof isotope?.isotopeId === 'string' && isotope.isotopeId.trim().length > 0) {
+				isotopeIds.push(isotope.isotopeId.trim());
+			}
+		}
+
+		for (const counting of Array.isArray(item?.countings) ? item.countings : []) {
+			const datasheetId = counting?.referenceMaterial?.referenceDatasheetId?.trim?.();
+			if (datasheetId) {
+				datasheetIds.push(datasheetId);
+			}
+		}
+
+		const latestDatasheetId = item?.latestCounting?.referenceMaterial?.referenceDatasheetId?.trim?.();
+		if (latestDatasheetId) {
+			datasheetIds.push(latestDatasheetId);
+		}
+	}
+
+	if (datasheetIds.length === 0 || isotopeIds.length === 0) {
+		return {
+			datasheetsById: {},
+			isotopeCatalogById: {},
+			measurementLinks: []
+		};
+	}
+
+	const measurementLinks = await fetchMeasurementLinks().catch(() => []);
+	for (const link of measurementLinks) {
+		const measuredId = link?.measuredIsotope?.isotopeId?.trim?.();
+		const targetId = link?.targetIsotope?.isotopeId?.trim?.();
+
+		if (measuredId && isotopeIds.includes(measuredId) && targetId) {
+			isotopeIds.push(targetId);
+		}
+
+		if (targetId && isotopeIds.includes(targetId) && measuredId) {
+			isotopeIds.push(measuredId);
+		}
+	}
+
+	const [datasheets, isotopes] = await Promise.all([
+		fetchItemsByIds(getReferenceDatasheetContainer(), datasheetIds),
+		fetchItemsByIds(getCosmosContainer(), isotopeIds)
+	]);
+
+	return {
+		datasheetsById: Object.fromEntries(datasheets.map((item) => [item.id, item])),
+		isotopeCatalogById: Object.fromEntries(
+			isotopes.map((item) => {
+				const mapped = mapIsotopeItem(item);
+				return [mapped.id, mapped];
+			})
+		),
+		measurementLinks
+	};
+}
+
 async function referenceMaterialsHandler(request, context) {
 	if (request.method === 'GET') {
 		return getReferenceMaterialsHandler(request, context);
@@ -320,11 +418,20 @@ async function getReferenceMaterialsHandler(request, context) {
 		const container = getReferenceMaterialsContainer();
 		const query = container.items.query(queryText);
 		const { resources } = await query.fetchAll();
+		const mappedItems = resources.map(mapReferenceMaterialItem);
+
+		let enrichedItems = mappedItems;
+		try {
+			const lookups = await buildReferenceMaterialEnrichmentLookups(mappedItems);
+			enrichedItems = enrichReferenceMaterialCatalogItems(mappedItems, lookups);
+		} catch (error) {
+			context.warn('Failed to enrich reference materials with datasheet concentrations.', error);
+		}
 
 		return {
 			status: 200,
 			jsonBody: {
-				items: resources.map(mapReferenceMaterialItem),
+				items: enrichedItems,
 				count: resources.length,
 				search
 			}
