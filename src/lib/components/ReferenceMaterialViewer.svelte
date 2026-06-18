@@ -249,7 +249,7 @@
 			return a.referenceKey.localeCompare(b.referenceKey);
 		})
 	);
-	let visibleItems = $derived(sortedItems.slice(0, 25));
+	let visibleItems = $derived(sortedItems.slice(0, 24));
 	let visibleCountings = $derived(
 		visibleItems.flatMap((item) => {
 			const countings = Array.isArray(item.countings) && item.countings.length > 0

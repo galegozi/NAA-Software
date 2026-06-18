@@ -7,6 +7,7 @@
 	import IsotopeMeasurementMappingForm from '$lib/components/IsotopeMeasurementMappingForm.svelte';
 	import type { IsotopeCatalogItem, IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
 	import { createReferenceMaterial } from '$lib/utils/naaUtils.js';
+	import { lookupElementName } from '$lib/utils/elementNames.js';
 
 	type ReferenceMaterialCountingWriteRequest = {
 		countingLabel: string;
@@ -142,6 +143,38 @@
 	let lastResizedIsotopeCount = $state(-1);
 
 	let isotopeCount = $derived(selectedIsotopes.length);
+	let allowedElementNames = $derived.by(() => {
+		if (!selectedReferenceDatasheetId) {
+			return [];
+		}
+
+		const datasheet = referenceDatasheets.find((d) => d.id === selectedReferenceDatasheetId);
+		if (!datasheet?.entries) {
+			return [];
+		}
+
+		const elementNames = new Set<string>();
+		for (const entry of datasheet.entries) {
+			const label = entry.label?.trim() ?? '';
+			if (!label) continue;
+
+			// Try to extract element name from label (e.g., "Au" from "Au-198", "Gold" from "Gold")
+			// First, try treating the first part as a symbol and look up the element name
+			const parts = label.split(/[\s\-]/);
+			if (parts.length > 0) {
+				const symbol = parts[0];
+				const elementName = lookupElementName(symbol);
+				if (elementName) {
+					elementNames.add(elementName);
+				} else if (label.match(/^[A-Z][a-z]*$/)) {
+					// If it looks like an element name, add it directly
+					elementNames.add(label);
+				}
+			}
+		}
+
+		return Array.from(elementNames).sort();
+	});
 	let filteredReferenceDatasheets = $derived.by(() => {
 		const query = datasheetSearchTerm.trim().toLowerCase();
 		if (!query) {
@@ -703,7 +736,7 @@
 				</div>
 
 				<div class="writer-block">
-					<IsotopeViewer bind:selectedIsotopes />
+					<IsotopeViewer bind:selectedIsotopes {allowedElementNames} />
 				</div>
 
 				<div class="writer-block">

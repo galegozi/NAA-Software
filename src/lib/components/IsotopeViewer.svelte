@@ -6,7 +6,8 @@
 
 	let {
 		selectedIsotopes = $bindable<IsotopeInfo[]>([]),
-		singleEntryPerIsotope = false
+		singleEntryPerIsotope = false,
+		allowedElementNames = [] as string[]
 	} = $props();
 
 	let isLoading = $state(false);
@@ -231,7 +232,13 @@
 	});
 
 	let filteredRows = $derived(
-		energyRows.filter((row) => matchesSearch(row.item, row.energy, searchTerm))
+		energyRows.filter((row) => {
+			if (!matchesSearch(row.item, row.energy, searchTerm)) return false;
+			if (allowedElementNames.length > 0) {
+				return allowedElementNames.includes(row.item.elementName);
+			}
+			return true;
+		})
 	);
 	let sortedRows = $derived(
 		[...filteredRows].sort((a, b) => {
@@ -243,7 +250,7 @@
 			return a.energy - b.energy;
 		})
 	);
-	let visibleRows = $derived(sortedRows.slice(0, 25));
+	let visibleRows = $derived(sortedRows.slice(0, 24));
 	let selectedIsotopeKeys = $derived(new Set(selectedIsotopes.map(getIsotopeSelectionKey)));
 	let selectedIsotopeIdKeys = $derived(new Set(selectedIsotopes.map(getSelectedIsotopeIdKey)));
 
