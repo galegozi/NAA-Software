@@ -80,6 +80,7 @@
 		nextReference.NETL_code = reference.NETL_code;
 		nextReference.sampleName = reference.sampleName;
 		nextReference.mass = reference.mass;
+		nextReference.reactorPower = reference.reactorPower ?? 0;
 		nextReference.irradiationTime = reference.irradiationTime;
 		nextReference.irradiationEnd = reference.irradiationEnd;
 		nextReference.measurementStartTime = reference.measurementStartTime;

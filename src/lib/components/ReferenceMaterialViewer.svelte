@@ -55,6 +55,11 @@
 		return parts.join(' ');
 	}
 
+	function formatNumber(value: number | undefined, decimals = 3): string {
+		if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+		return Number(value.toFixed(decimals)).toString();
+	}
+
 	function getIrradiationStart(rm: ReferenceMaterial | undefined): string {
 		if (!rm?.irradiationEnd || !rm?.irradiationTime) return '—';
 		const endMs = new Date(rm.irradiationEnd).getTime();
@@ -102,6 +107,13 @@
 		const countingText = countingEntries
 			.map((counting) => {
 				const material = counting.referenceMaterial;
+				const irradiationStart = getIrradiationStart(material);
+				const irradiationEnd = formatDatetime(material?.irradiationEnd);
+				const irradiationTime = formatDuration(material?.irradiationTime);
+				const decayTime = formatDuration(material?.decayTime);
+				const countingTime = formatDuration(material?.liveTime);
+				const sampleMass = `${formatNumber(material?.mass)} g`;
+				const power = formatNumber(material?.reactorPower);
 				return [
 					counting.countingLabel,
 					counting.createdAt,
@@ -118,11 +130,18 @@
 					material?.realTime,
 					material?.fluence,
 					material?.mass,
-					formatDatetime(material?.irradiationEnd),
+					material?.reactorPower,
+					irradiationStart,
+					irradiationEnd,
 					formatDatetime(material?.measurementStartTime),
-					getIrradiationStart(material),
 					getIrradiationStartIso(material),
-					formatDuration(material?.irradiationTime)
+					irradiationTime,
+					decayTime,
+					countingTime,
+					sampleMass,
+					power,
+					item.countingCount,
+					item.isotopes.length
 				]
 					.filter(Boolean)
 					.join(' ');
@@ -267,7 +286,7 @@
 				/>
 			</label>
 
-			<div class="max-h-80 space-y-2 overflow-y-auto rounded border border-gray-300 p-2">
+			<div class="catalog-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2">
 				{#if isLoading && cachedItems.length === 0}
 					<p class="p-2">Loading reference material catalog...</p>
 				{:else if errorMessage && cachedItems.length === 0}
@@ -292,8 +311,12 @@
 								{#if material?.irradiationEnd || material?.irradiationTime}
 									<div class="text-sm">Irradiation start: {getIrradiationStart(material)}</div>
 									<div class="text-sm">Irradiation end: {formatDatetime(material?.irradiationEnd)}</div>
-									<div class="text-sm">Duration: {formatDuration(material?.irradiationTime)}</div>
+									<div class="text-sm">Irradiation Time: {formatDuration(material?.irradiationTime)}</div>
 								{/if}
+									<div class="text-sm">Decay Time: {formatDuration(material?.decayTime)}</div>
+									<div class="text-sm">Counting Time: {formatDuration(material?.liveTime)}</div>
+									<div class="text-sm">Sample Mass: {formatNumber(material?.mass)} g</div>
+									<div class="text-sm">Power: {formatNumber(material?.reactorPower)}</div>
 								{#if material?.dtType}
 									<div class="text-sm">Dead time correction: {material.dtType}</div>
 								{/if}
@@ -324,3 +347,23 @@
 		</div>
 	</div>
 </div>
+
+<style>
+	.catalog-grid {
+		display: grid;
+		gap: 0.5rem;
+		grid-template-columns: 1fr;
+	}
+
+	@media (min-width: 768px) {
+		.catalog-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (min-width: 1280px) {
+		.catalog-grid {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+</style>

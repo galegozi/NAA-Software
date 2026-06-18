@@ -192,6 +192,7 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 		sampleName: requireString(payload.sampleName, `${fieldPrefix}.sampleName`, 120),
 		referenceDatasheetId,
 		mass: normalizeFiniteNumber(payload.mass, `${fieldPrefix}.mass`, { min: 0 }),
+		reactorPower: normalizeFiniteNumber(payload.reactorPower, `${fieldPrefix}.reactorPower`),
 		irradiationTime: normalizeFiniteNumber(payload.irradiationTime, `${fieldPrefix}.irradiationTime`, {
 			min: 0
 		}),
@@ -327,6 +328,7 @@ function referenceMaterialEqual(left, right, { includeCounts = true } = {}) {
 		left.sampleName === right.sampleName &&
 		left.referenceDatasheetId === right.referenceDatasheetId &&
 		left.mass === right.mass &&
+		left.reactorPower === right.reactorPower &&
 		left.irradiationTime === right.irradiationTime &&
 		left.irradiationStartTime === right.irradiationStartTime &&
 		left.irradiationEnd === right.irradiationEnd &&
@@ -355,6 +357,7 @@ function buildReferenceIdentityMaterial(material, isotopes) {
 		sampleName: material.sampleName,
 		referenceDatasheetId: material.referenceDatasheetId,
 		mass: material.mass,
+		reactorPower: material.reactorPower,
 		irradiationTime: material.irradiationTime,
 		irradiationStartTime: material.irradiationStartTime,
 		irradiationEnd: material.irradiationEnd,

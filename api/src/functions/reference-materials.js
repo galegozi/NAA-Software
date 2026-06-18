@@ -31,6 +31,7 @@ const MOCK_REFERENCE_MATERIALS = [
 					sampleName: 'SRM1633c',
 					referenceDatasheetId: 'mock-ds-001',
 					mass: 0.5,
+					reactorPower: 1.25,
 					irradiationTime: 3600,
 					irradiationEnd: '2026-01-11T10:00',
 					measurementStartTime: '2026-01-12T12:00',

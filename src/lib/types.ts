@@ -35,6 +35,7 @@ export interface BaseMaterialInfo {
 	NETL_code: string;
 	sampleName: string;
 	mass: number;
+	reactorPower: number;
 	irradiationTime: number;
 	irradiationEnd: string;
 	measurementStartTime: string;

@@ -865,6 +865,7 @@
 		nextReference.NETL_code = sourceMaterial.NETL_code;
 		nextReference.sampleName = sourceMaterial.sampleName;
 		nextReference.mass = sourceMaterial.mass;
+		nextReference.reactorPower = sourceMaterial.reactorPower ?? 0;
 		nextReference.irradiationTime = sourceMaterial.irradiationTime;
 		nextReference.irradiationEnd = sourceMaterial.irradiationEnd;
 		nextReference.measurementStartTime = sourceMaterial.measurementStartTime;

@@ -11,6 +11,7 @@
 			NETL_code: '',
 			sampleName: '',
 			mass: 0,
+			reactorPower: 0,
 			irradiationTime: 0,
 			irradiationEnd: '',
 			measurementStartTime: '',
@@ -388,6 +389,10 @@
 			errors.push('Mass must be greater than 0');
 		}
 
+		if (!Number.isFinite(materialInfo.reactorPower)) {
+			errors.push('Reactor Power must be a valid number');
+		}
+
 		if (materialInfo.irradiationTime <= 0) {
 			errors.push('Irradiation time must be greater than 0');
 		}
@@ -474,6 +479,20 @@
 	/>
 	{#if showErrors && materialInfo.mass <= 0}
 		<span class="field-error">Mass must be greater than 0</span>
+	{/if}
+</label>
+<label class="label">
+	<span>Reactor Power</span>
+	<input
+		class="input w-50"
+		type="number"
+		bind:value={materialInfo.reactorPower}
+		placeholder="e.g., 1.2"
+		step="any"
+		required
+	/>
+	{#if showErrors && !Number.isFinite(materialInfo.reactorPower)}
+		<span class="field-error">Reactor Power must be a valid number</span>
 	{/if}
 </label>
 <label class="label">

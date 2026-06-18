@@ -9,6 +9,7 @@
 			NETL_code: '',
 			sampleName: '',
 			mass: 0,
+			reactorPower: 0,
 			irradiationTime: 0,
 			irradiationEnd: '',
 			measurementStartTime: '',

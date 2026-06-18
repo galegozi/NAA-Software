@@ -24,6 +24,7 @@ function buildValidPayload() {
 					sampleName: 'SRM1633c',
 					referenceDatasheetId: 'ds-001',
 					mass: 0.5,
+					reactorPower: 1.25,
 					irradiationTime: 3600,
 					irradiationEnd: '2026-01-11T10:00',
 					measurementStartTime: '2026-01-12T12:00',
@@ -64,6 +65,7 @@ test('normalizeReferenceMaterialWritePayload normalizes a valid payload', () => 
 	assert.equal(result.isotopes[0].energy, 1173.2);
 	assert.equal(result.countings[0].referenceMaterial.counts[0].netCounts, 4500);
 	assert.equal(result.countings[0].referenceMaterial.referenceDatasheetId, 'ds-001');
+	assert.equal(result.countings[0].referenceMaterial.reactorPower, 1.25);
 	assert.deepEqual(result.countings[0].referenceMaterial.knownConcentration, [0.1]);
 	assert.deepEqual(result.countings[0].referenceMaterial.knownUncertainty, [0.005]);
 	assert.deepEqual(result.countings[0].referenceMaterial.concentrationUnits, ['ppm']);
