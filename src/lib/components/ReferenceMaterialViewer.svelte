@@ -45,14 +45,13 @@
 
 	function formatDuration(seconds: number | undefined): string {
 		if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '—';
-		if (seconds >= 24 * 60 * 60) {
-			const days = seconds / (24 * 60 * 60);
-			return `${Number(days.toFixed(2)).toString()}d`;
-		}
-		const h = Math.floor(seconds / 3600);
+		
+        const days = Math.floor(seconds / (24 * 60 * 60));
+		const h = Math.floor((seconds % (24 * 60 * 60)) / 3600);
 		const m = Math.floor((seconds % 3600) / 60);
 		const s = Math.round(seconds % 60);
 		const parts: string[] = [];
+        if (days > 0) parts.push(`${days}d`);
 		if (h > 0) parts.push(`${h}h`);
 		if (m > 0) parts.push(`${m}m`);
 		if (s > 0 || parts.length === 0) parts.push(`${s}s`);
