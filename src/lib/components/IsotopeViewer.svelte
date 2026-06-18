@@ -302,7 +302,7 @@
 				/>
 			</label>
 
-			<div class="max-h-80 space-y-2 overflow-y-auto rounded border border-gray-300 p-2">
+			<div class="isotope-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2">
 				{#if isLoading && cachedItems.length === 0}
 					<p class="p-2">Loading isotope catalog...</p>
 				{:else if errorMessage && cachedItems.length === 0}
@@ -354,18 +354,40 @@
 			{#if selectedIsotopes.length === 0}
 				<p>Select one or more isotopes to continue.</p>
 			{:else}
-				{#each selectedIsotopes as isotope, index (`${isotope.isotopeName}-${index}`)}
-					<div class="rounded border border-gray-300 p-4">
-						<div class="flex items-start justify-between gap-4">
-							<div>
-								<div class="font-bold">{isotope.elementName} ({isotope.isotopeName})</div>
-								<div>Energy: {isotope.energy} keV</div>
-								<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
+				<div class="isotope-grid">
+					{#each selectedIsotopes as isotope, index (`${isotope.isotopeName}-${index}`)}
+						<div class="rounded border border-gray-300 p-4">
+							<div class="flex items-start justify-between gap-4">
+								<div>
+									<div class="font-bold">{isotope.elementName} ({isotope.isotopeName})</div>
+									<div>Energy: {isotope.energy} keV</div>
+									<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
+								</div>
+								<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
 							</div>
-							<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
 						</div>
-					</div>
-				{/each}
+					{/each}
+				</div>
 			{/if}
 		</div>
 </div>
+
+<style>
+	.isotope-grid {
+		display: grid;
+		gap: 0.5rem;
+		grid-template-columns: 1fr;
+	}
+
+	@media (min-width: 768px) {
+		.isotope-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (min-width: 1280px) {
+		.isotope-grid {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+</style>

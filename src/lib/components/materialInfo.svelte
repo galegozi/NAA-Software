@@ -482,7 +482,7 @@
 	{/if}
 </label>
 <label class="label">
-	<span>Reactor Power</span>
+	<span>Reactor Power (kW)</span>
 	<input
 		class="input w-50"
 		type="number"
