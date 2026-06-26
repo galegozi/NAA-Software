@@ -1357,14 +1357,18 @@
 			</p>
 			<br />
 			<h2 class="text-2xl font-bold">
+				Next planned releases
+			</h2>
+			<ol class="ml-6 list-outside list-decimal">
+				<li>Version 7.1: Minor updates and bug fixes, including significant figure handling and the normal/compton selector for ROI files.</li>
+				<li>Version 8.0: Interference</li>
+			</ol>
+			<br />
+			<h2 class="text-2xl font-bold">
 				Future additions, not planned yet (note: can be implemented in any order):
 			</h2>
 			<ul class="list-inside list-disc">
-				<li>Authentication</li>
-				<li>Modifications to the database</li>
-				<li>Automatic loading of irradiation data.</li>
-				<li>Exporting reports</li>
-				<li>Interference Adjustment</li>
+				<li>Edit/Delete operations to the database through the UI.</li>
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
