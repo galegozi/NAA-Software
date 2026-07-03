@@ -88,7 +88,10 @@ function getFuncDD(material: BaseMaterialInfo, isotope: IsotopeInfo, isoIndex: n
 	} else if (material.dtType === 'simple') {
 		return getSimpleDD(material, isotope, isoIndex);
 	} else if (material.dtType === undefined) {
-		return 0;
+		// No dead time correction selected: use raw (positionally-corrected) net counts.
+		// This is equivalent to applying a correction factor of 1, keeping the
+		// comparative NAA formula well-defined when no correction type is chosen.
+		return getNetCountsAtIndex(material, isoIndex);
 	} else {
 		throw new Error('Invalid dead time correction type specified in material.');
 	}

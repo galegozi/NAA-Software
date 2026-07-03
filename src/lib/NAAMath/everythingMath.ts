@@ -22,6 +22,44 @@ function getUnitAtIndex(
 	return values?.[index];
 }
 
+function concentrationToMassFraction(
+	concentration: number,
+	unit: ReferenceMaterial['concentrationUnits'][number]
+): number {
+	if (!Number.isFinite(concentration)) {
+		return 0;
+	}
+
+	if (unit === 'percentage') {
+		return concentration / 100;
+	}
+
+	if (unit === 'ppm') {
+		return concentration / 1_000_000;
+	}
+
+	return concentration;
+}
+
+function massFractionToConcentration(
+	massFraction: number,
+	unit: ReferenceMaterial['concentrationUnits'][number]
+): number {
+	if (!Number.isFinite(massFraction)) {
+		return 0;
+	}
+
+	if (unit === 'percentage') {
+		return massFraction * 100;
+	}
+
+	if (unit === 'ppm') {
+		return massFraction * 1_000_000;
+	}
+
+	return massFraction;
+}
+
 function getKnownConcentrationUncertaintyPercent(
 	refMaterial: ReferenceMaterial,
 	isotopeIndex: number
@@ -80,14 +118,20 @@ function getUnknownConcentration(
 	isotopeIndex: number
 ): number {
 	const multimaterial = MMGA(refMaterial, unkMaterial);
-	const result =
-		getNumberAtIndex(refMaterial.knownConcentration, isotopeIndex) *
+	const outputUnit = getUnitAtIndex(refMaterial.concentrationUnits, isotopeIndex);
+	const knownConcentrationMassFraction = concentrationToMassFraction(
+		getNumberAtIndex(refMaterial.knownConcentration, isotopeIndex),
+		outputUnit
+	);
+	const resultMassFraction =
+		knownConcentrationMassFraction *
 		getDeadTimeCorrectionRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
 		getSaturationFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
 		getDecayCorrectionFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
 		multimaterial.massCorrection *
 		multimaterial.fluenceCorrection;
-	return result;
+
+	return massFractionToConcentration(resultMassFraction, outputUnit);
 }
 
 function getUnknownConcentrationUncertainty(

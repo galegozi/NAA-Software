@@ -24,3 +24,11 @@ export function getIsotopeCatalogAccessMessage(hostname: string): string {
 
 	return 'Sign in with an account that has been assigned the Static Web Apps role required to view isotope data.';
 }
+
+export function getReferenceMaterialCatalogAccessMessage(hostname: string): string {
+	if (isEnvironmentWithoutSignIn(hostname)) {
+		return 'The reference material catalog is not available in this environment.';
+	}
+
+	return 'Sign in with an account that has been assigned the Static Web Apps role required to view reference material data.';
+}

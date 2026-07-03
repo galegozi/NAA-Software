@@ -63,19 +63,20 @@ describe('stepUtils navigation button text', () => {
 		const referenceCount = 2;
 		const unknownCount = 1;
 		const selectStep = 1;
-		const referenceCountStep = getReferenceCountStep(isotopeCount, true);
+		const firstReferenceInfoStep = getReferenceInfoStartStep(isotopeCount, true);
 
 		expect(getBackButtonText(selectStep, isotopeCount, referenceCount, unknownCount, true)).toBe(
 			'Back: Welcome'
 		);
+		// Reference count step is skipped for authenticated users — goes straight to reference info
 		expect(getNextButtonText(selectStep, isotopeCount, referenceCount, unknownCount, true)).toBe(
-			'Next: Number of Reference Materials'
+			'Next: Select Reference Materials'
 		);
-		expect(getBackButtonText(referenceCountStep, isotopeCount, referenceCount, unknownCount, true)).toBe(
+		expect(getBackButtonText(firstReferenceInfoStep, isotopeCount, referenceCount, unknownCount, true)).toBe(
 			'Back: Select Isotopes'
 		);
-		expect(getNextButtonText(referenceCountStep, isotopeCount, referenceCount, unknownCount, true)).toBe(
-			'Next: Reference Material 1 Information'
+		expect(getNextButtonText(firstReferenceInfoStep, isotopeCount, referenceCount, unknownCount, true)).toBe(
+			'Next: Number of Unknown Materials'
 		);
 	});
 });

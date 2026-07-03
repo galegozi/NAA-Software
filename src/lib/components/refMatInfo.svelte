@@ -9,6 +9,7 @@
 			NETL_code: '',
 			sampleName: '',
 			mass: 0,
+			reactorPower: 0,
 			irradiationTime: 0,
 			irradiationEnd: '',
 			measurementStartTime: '',
@@ -24,6 +25,7 @@
 				netCountsPositionalCorrectionFactor: 1,
 				uncertaintyPositionalCorrectionFactor: 1
 			})),
+			irradiationType: 'total',
 			dtType: undefined,
 
 			// specific to Reference Material
@@ -34,6 +36,7 @@
 		}),
 		getRoiIndex,
 		isotopeInfo = [],
+		concentrationReadOnly = false,
 		selected = $bindable<Set<string>>(new Set<string>()),
 		usedIsotopeLabels = new Set<string>()
 	} = $props();
@@ -191,6 +194,7 @@
 				bind:value={refMatInfo.knownConcentration[index]}
 				placeholder="e.g., 0.35"
 				min="0"
+				disabled={concentrationReadOnly}
 				required
 			/>
 			{#if showErrors && refMatInfo.knownConcentration[index] <= 0}
@@ -206,6 +210,7 @@
 				placeholder="e.g., 0.006"
 				min="0"
 				step="any"
+				disabled={concentrationReadOnly}
 				required
 			/>
 			{#if showErrors && refMatInfo.knownUncertainty[index] < 0}
@@ -214,7 +219,7 @@
 		</label>
 		<label class="label">
 			<span>Reference Material Concentration Units</span>
-			<select class="select w-50" bind:value={refMatInfo.concentrationUnits[index]}>
+			<select class="select w-50" bind:value={refMatInfo.concentrationUnits[index]} disabled={concentrationReadOnly}>
 				<option value={undefined} disabled selected>Select units</option>
 				<option value="percentage">Percentage (%)</option>
 				<option value="ppm">Parts per million (ppm)</option>

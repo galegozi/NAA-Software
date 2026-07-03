@@ -2,7 +2,7 @@
  * Enhanced step utilities with user-facing step numbers and display helpers
  */
 
-export const APP_VERSION = '6.0 ALPHA';
+export const APP_VERSION = '7.0 ALPHA';
 
 export const STEP_CONSTANTS = {
 	UNAUTHED: {
@@ -92,7 +92,12 @@ function getNavigationStepLabel(
 		case StepType.REFERENCE_COUNT:
 			return 'Number of Reference Materials';
 		case StepType.REFERENCE_INFO: {
+			if (authenticated) {
+				return 'Select Reference Materials';
+			}
+
 			const refIndex = step - getReferenceInfoStartStep(isotopeCount, authenticated);
+
 			return referenceCount === 1
 				? 'Reference Material Information'
 				: `Reference Material ${refIndex + 1} Information`;
@@ -126,16 +131,20 @@ function getNavigationStepLabel(
 // }
 
 /**
- * Calculate the step number for reference material count input
+ * Calculate the step number for reference material count input.
+ * Returns -1 for authenticated users (step is skipped; reference count defaults to 1).
  */
 export function getReferenceCountStep(isotopeCount: number, authenticated = false): number {
-	return authenticated ? getInitialIsotopeStep(true) + 1 : STEP_CONSTANTS.UNAUTHED.REFERENCE_COUNT_OFFSET + isotopeCount;
+	if (authenticated) return -1;
+	return STEP_CONSTANTS.UNAUTHED.REFERENCE_COUNT_OFFSET + isotopeCount;
 }
 
 /**
- * Calculate the start step for reference material info
+ * Calculate the start step for reference material info.
+ * For authenticated users this is directly after the isotope select step (no count step).
  */
 export function getReferenceInfoStartStep(isotopeCount: number, authenticated = false): number {
+	if (authenticated) return getInitialIsotopeStep(true) + 1;
 	return getReferenceCountStep(isotopeCount, authenticated) + 1;
 }
 
@@ -158,6 +167,11 @@ export function getUnknownCountStep(
 	referenceCount = 1,
 	authenticated = false
 ): number {
+	if (authenticated) {
+		// Authenticated flow uses a single "Select Reference Materials" step.
+		return getReferenceInfoStartStep(isotopeCount, true) + 1;
+	}
+
 	return getReferenceInfoStartStep(isotopeCount, authenticated) + referenceCount;
 }
 
@@ -180,8 +194,10 @@ export function getReviewStep(
 ): number {
 	const { referenceCount, unknownCount: resolvedUnknownCount } =
 		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
+	const effectiveReferenceCount = authenticated ? 1 : referenceCount;
 	return (
-		getUnknownInfoStartStep(isotopeCount, referenceCount, authenticated) + resolvedUnknownCount
+		getUnknownInfoStartStep(isotopeCount, effectiveReferenceCount, authenticated) +
+		resolvedUnknownCount
 	);
 }
 
@@ -325,7 +341,12 @@ export function getStepTitle(
 		case StepType.REFERENCE_COUNT:
 			return `Step ${stepNum}: Number of Reference Materials`;
 		case StepType.REFERENCE_INFO: {
+			if (authenticated) {
+				return `Step ${stepNum}: Select Reference Materials`;
+			}
+
 			const refIndex = step - getReferenceInfoStartStep(isotopeCount, authenticated);
+
 			return `Step ${stepNum}: Reference Material Information for Reference ${refIndex + 1}`;
 		}
 		case StepType.UNKNOWN_COUNT:

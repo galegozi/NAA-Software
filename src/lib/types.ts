@@ -3,6 +3,7 @@
  */
 
 export interface IsotopeInfo {
+	id?: string;
 	elementName: string;
 	isotopeName: string;
 	energy: number;
@@ -27,12 +28,14 @@ export interface CountData {
  * Avoid using `'mixed'` in new code and prefer `'short'` or `'simple'` instead.
  */
 export type DeadTimeType = 'short' | 'simple' | 'mixed' | undefined;
+export type IrradiationType = 'gated' | 'total' | undefined;
 export type ConcUnitType = 'percentage' | 'ppm' | undefined;
 
 export interface BaseMaterialInfo {
 	NETL_code: string;
 	sampleName: string;
 	mass: number;
+	reactorPower: number;
 	irradiationTime: number;
 	irradiationEnd: string;
 	measurementStartTime: string;
@@ -41,10 +44,12 @@ export interface BaseMaterialInfo {
 	realTime: number;
 	fluence: number;
 	counts: CountData[];
+	irradiationType: IrradiationType;
 	dtType: DeadTimeType;
 }
 
 export interface ReferenceMaterial extends BaseMaterialInfo {
+	referenceDatasheetId?: string;
 	concentrationUnits: ConcUnitType[];
 	knownConcentration: number[];
 	knownUncertainty: number[];
@@ -77,6 +82,30 @@ export interface IsotopeCatalogItem {
 	energies: number[];
 	halfLife: HalfLife;
 	halfLifeSeconds: number;
+}
+
+export interface ReferenceMaterialCatalogIsotopeSelection {
+	isotopeId: string;
+	energy: number | null;
+}
+
+export interface ReferenceMaterialCatalogCounting {
+	countingId: string;
+	countingLabel: string;
+	createdAt?: string;
+	referenceMaterial: ReferenceMaterial;
+}
+
+export interface ReferenceMaterialCatalogItem {
+	id: string;
+	referenceKey: string;
+	notes: string;
+	isotopes: ReferenceMaterialCatalogIsotopeSelection[];
+	countingCount: number;
+	countings?: ReferenceMaterialCatalogCounting[];
+	latestCounting: ReferenceMaterialCatalogCounting | null;
+	createdAt?: string | null;
+	updatedAt?: string | null;
 }
 
 export interface IsotopeWriteForm {

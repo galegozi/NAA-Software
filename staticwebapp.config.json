@@ -4,6 +4,16 @@
 			"route": "/api/isotopes",
 			"methods": ["POST"],
 			"allowedRoles": ["isotope_writer"]
+		},
+		{
+			"route": "/api/reference-materials",
+			"methods": ["POST"],
+			"allowedRoles": ["isotope_writer"]
+		},
+		{
+			"route": "/api/isotope-measurements",
+			"methods": ["GET", "POST"],
+			"allowedRoles": ["isotope_writer"]
 		}
 	],
 	"responseOverrides": {

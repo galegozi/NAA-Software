@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import IsotopeEnable from './isotopeEnable.svelte';
 
 	import type { MaestroParsedData, MaestroRoiEntry } from '$lib/NAAMath/types.js';
@@ -10,6 +11,7 @@
 			NETL_code: '',
 			sampleName: '',
 			mass: 0,
+			reactorPower: 0,
 			irradiationTime: 0,
 			irradiationEnd: '',
 			measurementStartTime: '',
@@ -25,6 +27,7 @@
 				netCountsPositionalCorrectionFactor: 1,
 				uncertaintyPositionalCorrectionFactor: 1
 			})),
+			irradiationType: 'total',
 			dtType: undefined,
 
 		}),
@@ -53,10 +56,17 @@
 			});
 			materialInfo.counts = newCounts;
 		}
+
+		if (pendingMaestroData && isotopeCount > 0 && materialInfo.counts.length === isotopeCount) {
+			const parsedData = pendingMaestroData;
+			pendingMaestroData = null;
+			applyParsedMaestroData(parsedData);
+		}
 	});
 
 	let roiData = $state<MaestroRoiEntry[] | null>(null);
 	let roiSelections = $state<number[]>([]);
+	let pendingMaestroData = $state<MaestroParsedData | null>(null);
 
 	$effect(() => {
 		const currentSelections = roiSelections ?? [];
@@ -64,6 +74,9 @@
 			roiSelections = Array.from({ length: isotopeCount }, (_, i) => currentSelections[i] ?? -1);
 		}
 	});
+
+	// Track if decay time was manually set to avoid overwriting user input
+	let lastManualDecayTime = $state<number | null>(null);
 
 	$effect(() => {
 		const measurementStartTime = normalizeDateTimeLocal(materialInfo.measurementStartTime);
@@ -90,21 +103,29 @@
 
 		const computedDecayTime =
 			(measurementStartDate.getTime() - irradiationEndDate.getTime()) / 1000;
-		const inputDecayTime = Number(materialInfo.decayTime);
+		const inputDecayTime = untrack(() => Number(materialInfo.decayTime));
 
 		if (!Number.isFinite(computedDecayTime)) {
 			return;
 		}
 
-		if (computedDecayTime > 0) {
-			materialInfo.decayTime = computedDecayTime;
-			return;
-		}
+		// Only auto-compute decay time if it hasn't been manually set
+		// If user has manually entered a decay time that differs from computed, don't overwrite it
+		if (lastManualDecayTime === null) {
+			if (computedDecayTime > 0) {
+				materialInfo.decayTime = computedDecayTime;
+				return;
+			}
 
-		if (!(Number.isFinite(inputDecayTime) && inputDecayTime > 0)) {
-			materialInfo.decayTime = computedDecayTime;
+			if (!(Number.isFinite(inputDecayTime) && inputDecayTime > 0)) {
+				materialInfo.decayTime = computedDecayTime;
+			}
 		}
 	});
+
+	export function trackDecayTimeChange() {
+		lastManualDecayTime = materialInfo.decayTime;
+	}
 
 	function parseDateTimeInput(value: string): Date | null {
 		const trimmed = value?.trim();
@@ -187,6 +208,37 @@
 				uncertaintyPositionalCorrectionFactor: count?.uncertaintyPositionalCorrectionFactor ?? 1
 			};
 		});
+	}
+
+	function applyParsedMaestroData(data: MaestroParsedData) {
+		materialInfo.liveTime = data.liveTime;
+		materialInfo.realTime = data.realTime;
+		materialInfo.measurementStartTime = data.startTime
+			? `${data.startTime.getFullYear()}-${String(data.startTime.getMonth() + 1).padStart(2, '0')}-${String(data.startTime.getDate()).padStart(2, '0')}T${String(data.startTime.getHours()).padStart(2, '0')}:${String(data.startTime.getMinutes()).padStart(2, '0')}`
+			: '';
+		roiData = data.roiData;
+
+		selected = new Set<string>();
+		const nextSelections = getOneToOneRoiIndices(data.roiData);
+		roiSelections = nextSelections;
+
+		materialInfo.counts = Array.from({ length: isotopeCount }, () => ({
+			grossCounts: 0,
+			netCounts: 0,
+			uncertainty: 0,
+			grossCountsPositionalCorrectionFactor: 1,
+			netCountsPositionalCorrectionFactor: 1,
+			uncertaintyPositionalCorrectionFactor: 1
+		}));
+
+		if (canEditToggles) {
+			const matchedLabels = nextSelections
+				.map((roiIndex, isoIndex) => (roiIndex >= 0 ? getIsotopeKey(isoIndex) : null))
+				.filter((label): label is string => Boolean(label));
+			selected = new Set(matchedLabels);
+		}
+
+		applyAllRoiSelections(nextSelections);
 	}
 
 	function handleRoiSelectionChange(isoIndex: number, event: Event) {
@@ -309,33 +361,12 @@
 	}
 
 	function handleParsedMaestro(data: MaestroParsedData) {
-		materialInfo.liveTime = data.liveTime;
-		materialInfo.realTime = data.realTime;
-		materialInfo.measurementStartTime = data.startTime
-			? `${data.startTime.getFullYear()}-${String(data.startTime.getMonth() + 1).padStart(2, '0')}-${String(data.startTime.getDate()).padStart(2, '0')}T${String(data.startTime.getHours()).padStart(2, '0')}:${String(data.startTime.getMinutes()).padStart(2, '0')}`
-			: '';
-		roiData = data.roiData;
-
-		selected = new Set<string>();
-		roiSelections = getOneToOneRoiIndices(data.roiData);
-
-		materialInfo.counts = materialInfo.counts.map(() => ({
-			grossCounts: 0,
-			netCounts: 0,
-			uncertainty: 0,
-			grossCountsPositionalCorrectionFactor: 1,
-			netCountsPositionalCorrectionFactor: 1,
-			uncertaintyPositionalCorrectionFactor: 1
-		}));
-
-		if (canEditToggles) {
-			const matchedLabels = roiSelections
-				.map((roiIndex, isoIndex) => (roiIndex >= 0 ? getIsotopeKey(isoIndex) : null))
-				.filter((label): label is string => Boolean(label));
-			selected = new Set(matchedLabels);
+		pendingMaestroData = data;
+		if (isotopeCount > 0 && materialInfo.counts.length === isotopeCount) {
+			const parsedData = pendingMaestroData;
+			pendingMaestroData = null;
+			applyParsedMaestroData(parsedData);
 		}
-
-		applyAllRoiSelections(roiSelections);
 	}
 
 	export function validateMaterialInfo(): boolean {
@@ -356,6 +387,10 @@
 
 		if (materialInfo.mass <= 0) {
 			errors.push('Mass must be greater than 0');
+		}
+
+		if (!Number.isFinite(materialInfo.reactorPower)) {
+			errors.push('Reactor Power must be a valid number');
 		}
 
 		if (materialInfo.irradiationTime <= 0) {
@@ -447,6 +482,20 @@
 	{/if}
 </label>
 <label class="label">
+	<span>Reactor Power (kW)</span>
+	<input
+		class="input w-50"
+		type="number"
+		bind:value={materialInfo.reactorPower}
+		placeholder="e.g., 1.2"
+		step="any"
+		required
+	/>
+	{#if showErrors && !Number.isFinite(materialInfo.reactorPower)}
+		<span class="field-error">Reactor Power must be a valid number</span>
+	{/if}
+</label>
+<label class="label">
 	<span>Irradiation time (in seconds, s)</span>
 	<input
 		class="input w-50"
@@ -482,6 +531,7 @@
 		class="input w-50"
 		type="number"
 		bind:value={materialInfo.decayTime}
+		oninput={() => trackDecayTimeChange()}
 		placeholder="e.g., 7200"
 		min="0"
 		required
@@ -532,82 +582,18 @@
 		<span class="field-error">Fluence must be greater than 0</span>
 	{/if}
 </label>
-<br />
-{#each { length: isotopeCount } as _, index}
-	{#if shouldShowIsotope(index)}
-		<h3 class="text-xl font-bold">
-			{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Counts
-		</h3>
-		<label class="label">
-			<span>Gross Counts</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].grossCounts}
-				placeholder="e.g., 5000"
-				min="0"
-				required
-			/>
-		</label>
-		<label class="label">
-			<span>Net Counts</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].netCounts}
-				placeholder="e.g., 4500"
-				min="0"
-				required
-			/>
-		</label>
-		<label class="label">
-			<span>Uncertainty (in counts)</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].uncertainty}
-				placeholder="e.g., 67.08"
-				min="0"
-				required
-			/>
-		</label>
-		<label class="label">
-			<span>Gross Counts Positional Correction Factor</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].grossCountsPositionalCorrectionFactor}
-				placeholder="e.g., 1"
-				step="any"
-				required
-			/>
-		</label>
-		<label class="label">
-			<span>Net Counts Positional Correction Factor</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].netCountsPositionalCorrectionFactor}
-				placeholder="e.g., 1"
-				step="any"
-				required
-			/>
-		</label>
-		<label class="label">
-			<span>Uncertainty Positional Correction Factor</span>
-			<input
-				class="input w-50"
-				type="number"
-				bind:value={materialInfo.counts[index].uncertaintyPositionalCorrectionFactor}
-				placeholder="e.g., 1"
-				step="any"
-				required
-			/>
-		</label>
-	{/if}
-	<br />
-{/each}
-<br />
+
+<label class="label">
+	<span>Irradiation Type</span>
+	<select
+		class="select input w-50 bg-surface-50-950 text-surface-950-50"
+		bind:value={materialInfo.irradiationType}
+		required
+	>
+		<option value="total">Total</option>
+		<option value="gated">Gated</option>
+	</select>
+</label>
 
 <label class="label">
 	<span>Dead Time Correction Type</span>
@@ -630,6 +616,100 @@
 		feature.
 	</p>
 {/if}
+<br />
+{#each { length: isotopeCount } as _, index}
+	{#if shouldShowIsotope(index)}
+		{#if materialInfo.counts[index]}
+			<h3 class="text-xl font-bold">
+				{isotopeInfo && isotopeInfo[index] ? isotopeInfo[index].elementName : `Isotope ${index + 1}`} Counts
+			</h3>
+			<label class="label">
+				<span>Gross Counts</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].grossCounts}
+					placeholder="e.g., 5000"
+					min="0"
+					required
+				/>
+			</label>
+			<label class="label">
+				<span>Net Counts</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].netCounts}
+					placeholder="e.g., 4500"
+					min="0"
+					required
+				/>
+			</label>
+			<label class="label">
+				<span>Uncertainty (in counts)</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].uncertainty}
+					placeholder="e.g., 67.08"
+					min="0"
+					required
+				/>
+			</label>
+			<label class="label">
+				<span>Gross Counts Positional Correction Factor</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].grossCountsPositionalCorrectionFactor}
+					placeholder="e.g., 1"
+					step="any"
+					required
+				/>
+			</label>
+			<label class="label">
+				<span>Net Counts Positional Correction Factor</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].netCountsPositionalCorrectionFactor}
+					placeholder="e.g., 1"
+					step="any"
+					required
+				/>
+			</label>
+			<label class="label">
+				<span>Uncertainty Positional Correction Factor</span>
+				<input
+					class="input w-50"
+					type="number"
+					bind:value={materialInfo.counts[index].uncertaintyPositionalCorrectionFactor}
+					placeholder="e.g., 1"
+					step="any"
+					required
+				/>
+			</label>
+			{#if roiData && roiData.length > 0}
+				<label class="label">
+					<span>ROI Match</span>
+					<select
+						class="select input w-50 bg-surface-50-950 text-surface-950-50"
+						value={roiSelections[index]}
+						onchange={(e) => handleRoiSelectionChange(index, e)}
+					>
+						<option value={-1}>None</option>
+						{#each roiData as roi, roiIndex}
+							<option value={roiIndex}>
+								ROI {roi.roi}: {roi.centroid} keV ({roi.grossCounts} gross, {roi.netCounts} net)
+							</option>
+						{/each}
+					</select>
+				</label>
+			{/if}
+		{/if}
+	{/if}
+	<br />
+{/each}
 
 <style>
 	.field-error {
@@ -637,5 +717,13 @@
 		font-size: 0.875rem;
 		margin-top: 0.25rem;
 		display: block;
+	}
+
+	:global(html) {
+		scroll-behavior: auto;
+	}
+
+	:global(input:focus, textarea:focus, select:focus) {
+		scroll-margin-top: 5rem;
 	}
 </style>

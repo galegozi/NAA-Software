@@ -5,7 +5,9 @@
 	import { getIsotopeCatalogAccessMessage } from '$lib/utils/authEnvironment.js';
 
 	let {
-		selectedIsotopes = $bindable<IsotopeInfo[]>([])
+		selectedIsotopes = $bindable<IsotopeInfo[]>([]),
+		singleEntryPerIsotope = false,
+		allowedElementNames = [] as string[]
 	} = $props();
 
 	let isLoading = $state(false);
@@ -20,6 +22,48 @@
 		item: IsotopeCatalogItem;
 		energy: number;
 	};
+
+	function normalizeEnergy(value: unknown): number | null {
+		const parsed = Number(value);
+		if (!Number.isFinite(parsed) || parsed < 0) {
+			return null;
+		}
+
+		return parsed;
+	}
+
+	function getDistinctEnergies(item: IsotopeCatalogItem): number[] {
+		const energies = Array.isArray(item.energies) ? item.energies : [];
+		const distinct: number[] = [];
+
+		for (const rawEnergy of energies) {
+			const energy = normalizeEnergy(rawEnergy);
+			if (energy === null || distinct.includes(energy)) {
+				continue;
+			}
+
+			distinct.push(energy);
+		}
+
+		return distinct;
+	}
+
+	function getSelectionKey(item: IsotopeCatalogItem, energy: number): string {
+		const halfLife = item.halfLife.number || item.halfLifeSeconds;
+		return `${item.id}|${item.elementName}|${getIsotopeName(item)}|${energy}|${halfLife}|${item.halfLife.unit}`;
+	}
+
+	function getIsotopeIdSelectionKey(item: IsotopeCatalogItem): string {
+		return `${item.id}`;
+	}
+
+	function getIsotopeSelectionKey(isotope: IsotopeInfo): string {
+		return `${isotope.id ?? ''}|${isotope.elementName}|${isotope.isotopeName}|${isotope.energy}|${isotope.halfLife}|${isotope.unit}`;
+	}
+
+	function getSelectedIsotopeIdKey(isotope: IsotopeInfo): string {
+		return `${isotope.id ?? ''}`;
+	}
 
 	function normalizeItems(payload: unknown): IsotopeCatalogItem[] {
 		if (Array.isArray(payload)) {
@@ -77,6 +121,7 @@
 
 	function toIsotopeInfo(item: IsotopeCatalogItem, energy: number): IsotopeInfo {
 		return {
+			id: item.id,
 			elementName: item.elementName,
 			isotopeName: getIsotopeName(item),
 			energy,
@@ -86,8 +131,11 @@
 		};
 	}
 
-	function isCatalogItemSelected(item: IsotopeCatalogItem): boolean {
-		return selectedIsotopes.some((isotope) => isotope.isotopeName === getIsotopeName(item));
+	function isExactIsotopeSelected(item: IsotopeCatalogItem, energy: number): boolean {
+		if (singleEntryPerIsotope) {
+			return selectedIsotopeIdKeys.has(getIsotopeIdSelectionKey(item));
+		}
+		return selectedIsotopeKeys.has(getSelectionKey(item, energy));
 	}
 
 	async function loadItems(search: string) {
@@ -151,7 +199,18 @@
 		const rows: EnergyResultRow[] = [];
 
 		for (const item of cachedItems) {
-			if (item.energies.length === 0) {
+			const distinctEnergies = getDistinctEnergies(item);
+
+			if (singleEntryPerIsotope) {
+				rows.push({
+					id: `${item.id}-single`,
+					item,
+					energy: distinctEnergies.length > 0 ? distinctEnergies[0] : 0
+				});
+				continue;
+			}
+
+			if (distinctEnergies.length === 0) {
 				rows.push({
 					id: `${item.id}-no-energy`,
 					item,
@@ -160,7 +219,7 @@
 				continue;
 			}
 
-			for (const energy of item.energies) {
+			for (const energy of distinctEnergies) {
 				rows.push({
 					id: `${item.id}-${energy}`,
 					item,
@@ -173,9 +232,27 @@
 	});
 
 	let filteredRows = $derived(
-		energyRows.filter((row) => matchesSearch(row.item, row.energy, searchTerm))
+		energyRows.filter((row) => {
+			if (!matchesSearch(row.item, row.energy, searchTerm)) return false;
+			if (allowedElementNames.length > 0) {
+				return allowedElementNames.includes(row.item.elementName);
+			}
+			return true;
+		})
 	);
-	let visibleRows = $derived(filteredRows.slice(0, 25));
+	let sortedRows = $derived(
+		[...filteredRows].sort((a, b) => {
+			const isotopeNameA = getIsotopeName(a.item);
+			const isotopeNameB = getIsotopeName(b.item);
+			if (isotopeNameA !== isotopeNameB) {
+				return isotopeNameA.localeCompare(isotopeNameB);
+			}
+			return a.energy - b.energy;
+		})
+	);
+	let visibleRows = $derived(sortedRows.slice(0, 24));
+	let selectedIsotopeKeys = $derived(new Set(selectedIsotopes.map(getIsotopeSelectionKey)));
+	let selectedIsotopeIdKeys = $derived(new Set(selectedIsotopes.map(getSelectedIsotopeIdKey)));
 
 	$effect(() => {
 		const nextSearch = searchTerm.trim();
@@ -205,12 +282,11 @@
 	});
 
 	function addSelectedIsotope(item: IsotopeCatalogItem, energy: number) {
-		if (isCatalogItemSelected(item)) {
+		if (isExactIsotopeSelected(item, energy)) {
 			return;
 		}
 
 		selectedIsotopes = [...selectedIsotopes, toIsotopeInfo(item, energy)];
-		searchTerm = '';
 	}
 
 	function removeSelectedIsotope(index: number) {
@@ -233,28 +309,28 @@
 				/>
 			</label>
 
-			<div class="max-h-80 space-y-2 overflow-y-auto rounded border border-gray-300 p-2">
+			<div class="isotope-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2">
 				{#if isLoading && cachedItems.length === 0}
 					<p class="p-2">Loading isotope catalog...</p>
 				{:else if errorMessage && cachedItems.length === 0}
 					<p class="p-2">Unable to load isotope catalog: {errorMessage}</p>
 				{:else if visibleRows.length > 0}
 					{#each visibleRows as row (row.id)}
-						{@const isAlreadySelected = isCatalogItemSelected(row.item)}
-						<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
-							<div class="flex items-start justify-between gap-4">
-								<div class="space-y-1">
-									<div class="font-bold">{row.item.elementName} ({getIsotopeName(row.item)})</div>
-									<div class="text-sm">Energy: {row.energy} keV</div>
-									<div class="text-sm">Half-life: {row.item.halfLife.number || row.item.halfLifeSeconds} {row.item.halfLife.unit}</div>
-								</div>
-								<button
-									class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
-									type="button"
-									onclick={() => addSelectedIsotope(row.item, row.energy)}
-									disabled={isAlreadySelected}
-								>
-									{isAlreadySelected ? 'Added' : 'Add'}
+					{@const isAlreadySelected = selectedIsotopeKeys.has(getSelectionKey(row.item, row.energy))}
+					<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
+						<div class="flex items-start justify-between gap-4">
+							<div class="space-y-1">
+								<div class="font-bold">{row.item.elementName} ({getIsotopeName(row.item)})</div>
+								<div class="text-sm">Energy: {row.energy} keV</div>
+								<div class="text-sm">Half-life: {row.item.halfLife.number || row.item.halfLifeSeconds} {row.item.halfLife.unit}</div>
+							</div>
+							<button
+								class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
+								type="button"
+								onclick={() => addSelectedIsotope(row.item, row.energy)}
+								disabled={isAlreadySelected}
+							>
+								{isAlreadySelected ? 'Added' : 'Add'}
 								</button>
 							</div>
 						</div>
@@ -266,7 +342,7 @@
 				{/if}
 			</div>
 
-			{#if filteredRows.length > visibleRows.length}
+			{#if sortedRows.length > visibleRows.length}
 				<p>Showing the first {visibleRows.length} matches. Keep typing to narrow the list.</p>
 			{/if}
 
@@ -285,18 +361,40 @@
 			{#if selectedIsotopes.length === 0}
 				<p>Select one or more isotopes to continue.</p>
 			{:else}
-				{#each selectedIsotopes as isotope, index (`${isotope.isotopeName}-${index}`)}
-					<div class="rounded border border-gray-300 p-4">
-						<div class="flex items-start justify-between gap-4">
-							<div>
-								<div class="font-bold">{isotope.elementName} ({isotope.isotopeName})</div>
-								<div>Energy: {isotope.energy} keV</div>
-								<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
+				<div class="isotope-grid">
+					{#each selectedIsotopes as isotope, index (`${isotope.isotopeName}-${index}`)}
+						<div class="rounded border border-gray-300 p-4">
+							<div class="flex items-start justify-between gap-4">
+								<div>
+									<div class="font-bold">{isotope.elementName} ({isotope.isotopeName})</div>
+									<div>Energy: {isotope.energy} keV</div>
+									<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
+								</div>
+								<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
 							</div>
-							<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
 						</div>
-					</div>
-				{/each}
+					{/each}
+				</div>
 			{/if}
 		</div>
 </div>
+
+<style>
+	.isotope-grid {
+		display: grid;
+		gap: 0.5rem;
+		grid-template-columns: 1fr;
+	}
+
+	@media (min-width: 768px) {
+		.isotope-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (min-width: 1280px) {
+		.isotope-grid {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+</style>

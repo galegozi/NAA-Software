@@ -7,6 +7,7 @@
 	import ComputedDisplay from '$lib/components/ComputedDisplay.svelte';
 	import ProgressIndicator from '$lib/components/ProgressIndicator.svelte';
 	import IsotopeViewer from '$lib/components/IsotopeViewer.svelte';
+	import ReferenceMaterialViewer from '$lib/components/ReferenceMaterialViewer.svelte';
 
 	import { getAll as isoGA } from '../lib/NAAMath/isotopeMath.ts';
 	import { getAll as matGA } from '../lib/NAAMath/MaterialMath.ts';
@@ -15,7 +16,10 @@
 	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
 
 	import type {
+		IsotopeCatalogItem,
 		IsotopeInfo as IsotopeInfoType,
+		ReferenceMaterialCatalogCounting,
+		ReferenceMaterialCatalogItem,
 		ReferenceMaterial,
 		UnknownMaterial
 	} from '$lib/types.js';
@@ -27,7 +31,6 @@
 		truncateToSigFigs
 	} from '$lib/utils/naaUtils.js';
 	import {
-		getSignInErrorMessage,
 		isEnvironmentWithoutSignIn
 	} from '$lib/utils/authEnvironment.js';
 	import {
@@ -60,6 +63,19 @@
 		};
 		referenceIsotopeSelections: string[][];
 		isotopeReferenceMap: number[];
+		referenceCatalogItemIds?: (string | null)[];
+	};
+
+	type IsotopeMeasurementLink = {
+		id: string;
+		measuredIsotope: {
+			isotopeId?: string;
+			id?: string;
+		};
+		targetIsotope: {
+			isotopeId?: string;
+			id?: string;
+		};
 	};
 
 	// Using findRoiIndices from naaUtils
@@ -242,6 +258,11 @@
 			i < existingSelections.length ? existingSelections[i] : new Set<string>()
 		);
 
+		const existingCatalogItemIds = [...referenceCatalogItemIds];
+		referenceCatalogItemIds = Array.from({ length: referenceCount }, (_, i) =>
+			i < existingCatalogItemIds.length ? existingCatalogItemIds[i] : null
+		);
+
 		updateIsotopeReferenceMap(isotopeCount, referenceCount);
 	}
 
@@ -292,7 +313,8 @@
 			referenceIsotopeSelections: referenceIsotopeSelections.map((selection) =>
 				Array.from(selection ?? [])
 			),
-			isotopeReferenceMap
+			isotopeReferenceMap,
+			referenceCatalogItemIds
 		};
 	}
 
@@ -344,6 +366,9 @@
 			isotopeReferenceMap = Array.isArray(savedState.isotopeReferenceMap)
 				? savedState.isotopeReferenceMap
 				: [0];
+			referenceCatalogItemIds = Array.isArray(savedState.referenceCatalogItemIds)
+				? savedState.referenceCatalogItemIds.map((id) => id ?? null)
+				: [null];
 
 			isoRef = Array.from({ length: isotopeInfo.length }, () => undefined);
 			matRefs = {
@@ -366,35 +391,8 @@
 		localAuthNotice = '';
 
 		const currentUrl = new URL(window.location.href);
-		const unavailableMessage = getSignInErrorMessage(currentUrl.hostname);
 		const loginUrl = new URL('/.auth/login/aad', currentUrl.origin);
 		loginUrl.searchParams.set('post_login_redirect_uri', currentUrl.pathname + currentUrl.search + currentUrl.hash);
-
-		try {
-			const authAvailabilityResponse = await fetch('/.auth/me', {
-				method: 'GET',
-				cache: 'no-store',
-				headers: {
-					accept: 'application/json'
-				}
-			});
-
-			if (authAvailabilityResponse.status === 404) {
-				clearPersistedWizardState();
-				localAuthNotice = unavailableMessage;
-				return;
-			}
-
-			if (!authAvailabilityResponse.ok) {
-				clearPersistedWizardState();
-				localAuthNotice = unavailableMessage;
-				return;
-			}
-		} catch {
-			clearPersistedWizardState();
-			localAuthNotice = unavailableMessage;
-			return;
-		}
 
 		persistWizardState();
 		window.location.assign(loginUrl.toString());
@@ -446,6 +444,14 @@
 		unknown: [undefined] as (MaterialInfo | undefined)[]
 	});
 	let referenceIsotopeSelections = $state<Set<string>[]>([new Set<string>()]);
+	let referenceCatalogItemIds = $state<(string | null)[]>([null]);
+	let referenceCatalogMessage = $state('');
+	let referenceCatalogError = $state('');
+	let referenceCatalogWarning = $state('');
+	let isotopeMeasurementLinks = $state<IsotopeMeasurementLink[]>([]);
+	let isotopeCatalogById = $state<Record<string, IsotopeCatalogItem>>({});
+	let hasRequestedIsotopeCatalog = $state(false);
+	let hasRequestedIsotopeMeasurementLinks = $state(false);
 	let materials = $state({
 		reference: [createReferenceMaterial(1)],
 		unknown: [createUnknownMaterial(1)]
@@ -465,9 +471,78 @@
 		materials.reference.map((ref) => materials.unknown.map((unk) => MMGA(ref, unk)))
 	);
 
+	const ENERGY_MATCH_TOLERANCE_KEV = 0.5;
+
+	function getFiniteEnergy(value: number | null | undefined): number | null {
+		return typeof value === 'number' && Number.isFinite(value) ? value : null;
+	}
+
+	function energiesMatch(targetEnergy: number | null, catalogEnergy: number | null): boolean {
+		if (targetEnergy === null || catalogEnergy === null) {
+			return false;
+		}
+
+		return Math.abs(targetEnergy - catalogEnergy) <= ENERGY_MATCH_TOLERANCE_KEV;
+	}
+
 	function getIsotopeSelectionKey(index: number): string {
 		return `isotope:${index}`;
 	}
+
+	function extractMeasurementLinkId(
+		link: IsotopeMeasurementLink,
+		side: 'measured' | 'target'
+	): string {
+		const entry = side === 'measured' ? link.measuredIsotope : link.targetIsotope;
+		return (entry.isotopeId ?? entry.id ?? '').trim();
+	}
+
+	function getCatalogMatchCandidateIds(targetId: string): string[] {
+		const candidateIds = [targetId];
+
+		for (const link of isotopeMeasurementLinks) {
+			const measuredId = extractMeasurementLinkId(link, 'measured');
+			const linkedTargetId = extractMeasurementLinkId(link, 'target');
+
+			if (
+				linkedTargetId === targetId &&
+				measuredId.length > 0 &&
+				!candidateIds.includes(measuredId)
+			) {
+				candidateIds.push(measuredId);
+			}
+		}
+
+		return candidateIds;
+	}
+
+	function getCatalogIsotopeDisplayName(isotopeId: string): string {
+		const catalogItem = isotopeCatalogById[isotopeId];
+		if (!catalogItem) {
+			return isotopeId;
+		}
+
+		return `${catalogItem.shortName}-${catalogItem.massNumber}${catalogItem.suffix}`;
+	}
+
+	let selectableReferenceCatalogIsotopeIds = $derived.by(() => {
+		const isotopeIds: string[] = [];
+
+		for (const isotope of isotopeInfo) {
+			const targetId = isotope.id?.trim();
+			if (!targetId) {
+				continue;
+			}
+
+			for (const candidateId of getCatalogMatchCandidateIds(targetId)) {
+				if (!isotopeIds.includes(candidateId)) {
+					isotopeIds.push(candidateId);
+				}
+			}
+		}
+
+		return isotopeIds;
+	});
 
 	function getLinkedReferenceIndex(index: number): number {
 		const linkedReference = isotopeInfo[index]?.linkedReference;
@@ -481,13 +556,34 @@
 		const currentMap = isotopeReferenceMap ?? [];
 		const nextMap = Array.from({ length: isotopeCount }, (_, index) => {
 			const selectionKey = getIsotopeSelectionKey(index);
+			const coveringRefs = referenceIsotopeSelections
+				.map((selection, refIndex) =>
+					selection instanceof Set && selection.has(selectionKey) ? refIndex : -1
+				)
+				.filter((refIndex) => refIndex >= 0 && refIndex < referenceCount);
 
-			const selectedRefIndex = referenceIsotopeSelections.findIndex(
-				(selection) => selection instanceof Set && selection.has(selectionKey)
-			);
+			const linkedReference = isotopeInfo[index]?.linkedReference;
+			if (
+				typeof linkedReference === 'number' &&
+				coveringRefs.includes(linkedReference) &&
+				linkedReference >= 0 &&
+				linkedReference < referenceCount
+			) {
+				return linkedReference;
+			}
 
-			if (selectedRefIndex >= 0 && selectedRefIndex < referenceCount) {
-				return selectedRefIndex;
+			const currentReference = currentMap[index];
+			if (
+				typeof currentReference === 'number' &&
+				coveringRefs.includes(currentReference) &&
+				currentReference >= 0 &&
+				currentReference < referenceCount
+			) {
+				return currentReference;
+			}
+
+			if (coveringRefs.length > 0) {
+				return coveringRefs[0];
 			}
 
 			const fallback = isotopeInfo[index]?.linkedReference ?? 0;
@@ -598,6 +694,22 @@
 		}
 	});
 
+	$effect(() => {
+		if (!browser || !userIsAuthenticated) {
+			return;
+		}
+
+		if (!hasRequestedIsotopeCatalog) {
+			hasRequestedIsotopeCatalog = true;
+			void loadIsotopeCatalog();
+		}
+
+		if (!hasRequestedIsotopeMeasurementLinks) {
+			hasRequestedIsotopeMeasurementLinks = true;
+			void loadIsotopeMeasurementLinks();
+		}
+	});
+
 	function getUsedIsotopeLabels(referenceIndex: number): Set<string> {
 		const used = new Set<string>();
 		for (let i = 0; i < referenceIsotopeSelections.length; i++) {
@@ -611,6 +723,315 @@
 			}
 		}
 		return used;
+	}
+
+	function findCatalogIsotopeMatch(
+		targetIsotope: IsotopeInfoType,
+		catalogItem: ReferenceMaterialCatalogItem,
+		usedIndices: Set<number>
+	): { sourceIndex: number; matchedIsotopeId: string | null } {
+		const isotopes = Array.isArray(catalogItem.isotopes) ? catalogItem.isotopes : [];
+		const targetId = targetIsotope.id?.trim();
+		const targetEnergy = getFiniteEnergy(targetIsotope.energy);
+
+		if (!targetId) {
+			return { sourceIndex: -1, matchedIsotopeId: null };
+		}
+
+		const candidateIds = getCatalogMatchCandidateIds(targetId);
+		const idMatches: Array<{ index: number; isotopeId: string }> = [];
+
+		for (const candidateId of candidateIds) {
+			for (let index = 0; index < isotopes.length; index++) {
+				if (!usedIndices.has(index) && isotopes[index]?.isotopeId === candidateId) {
+					idMatches.push({ index, isotopeId: candidateId });
+				}
+			}
+		}
+
+		if (idMatches.length === 0) {
+			return { sourceIndex: -1, matchedIsotopeId: null };
+		}
+
+		if (targetEnergy === null) {
+			return { sourceIndex: idMatches[0].index, matchedIsotopeId: idMatches[0].isotopeId };
+		}
+
+		for (const match of idMatches) {
+			const catalogEnergy = getFiniteEnergy(isotopes[match.index]?.energy);
+			if (energiesMatch(targetEnergy, catalogEnergy)) {
+				return { sourceIndex: match.index, matchedIsotopeId: match.isotopeId };
+			}
+		}
+
+		// Backward-compatible fallback for legacy catalog entries that don't carry energy.
+		if (
+			idMatches.length === 1 &&
+			getFiniteEnergy(isotopes[idMatches[0].index]?.energy) === null
+		) {
+			return { sourceIndex: idMatches[0].index, matchedIsotopeId: idMatches[0].isotopeId };
+		}
+
+		return { sourceIndex: -1, matchedIsotopeId: null };
+	}
+
+	async function loadIsotopeCatalog() {
+		const apiUrl = import.meta.env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
+
+		try {
+			const response = await fetch(`${apiUrl}?limit=1000`, {
+				headers: {
+					accept: 'application/json'
+				}
+			});
+
+			const body = await response.json().catch(() => null);
+			if (!response.ok) {
+				return;
+			}
+
+			const items = Array.isArray(body?.items) ? body.items : [];
+			isotopeCatalogById = Object.fromEntries(
+				(items as IsotopeCatalogItem[])
+					.filter((item) => typeof item?.id === 'string' && item.id.trim().length > 0)
+					.map((item) => [item.id, item])
+			);
+		} catch {
+			// Best effort only. Direct isotope matching still works without the catalog.
+		}
+	}
+
+	async function loadIsotopeMeasurementLinks() {
+		try {
+			const response = await fetch('/api/isotope-measurements', {
+				headers: {
+					accept: 'application/json'
+				}
+			});
+
+			const body = await response.json().catch(() => null);
+			if (!response.ok) {
+				return;
+			}
+
+			isotopeMeasurementLinks = Array.isArray(body?.items) ? body.items : [];
+		} catch {
+			// Best effort only. Direct isotope matching still works without proxy links.
+		}
+	}
+
+	function getCatalogSelectionId(
+		itemId: string,
+		counting: ReferenceMaterialCatalogCounting | null | undefined
+	): string {
+		const countingId = counting?.countingId?.trim();
+		if (countingId) {
+			return `${itemId}::${countingId}`;
+		}
+
+		const material = counting?.referenceMaterial;
+		const countingLabel = counting?.countingLabel?.trim() ?? 'counting';
+		const createdAt = counting?.createdAt?.trim() ?? '';
+		const measurementStart = material?.measurementStartTime?.trim?.() ?? '';
+		const irradiationEnd = material?.irradiationEnd?.trim?.() ?? '';
+		const irradiationType = material?.irradiationType?.trim?.() ?? '';
+
+		return `${itemId}::${countingLabel}::${createdAt}::${measurementStart}::${irradiationEnd}::${irradiationType}`;
+	}
+
+	function applyReferenceMaterialCatalogItem(
+		item: ReferenceMaterialCatalogItem,
+		selectedCounting?: ReferenceMaterialCatalogCounting
+	) {
+		referenceCatalogMessage = '';
+		referenceCatalogError = '';
+		referenceCatalogWarning = '';
+
+		const sourceCounting = selectedCounting ?? item.latestCounting ?? undefined;
+		const selectionId = getCatalogSelectionId(item.id, sourceCounting);
+
+		if (referenceCatalogItemIds.includes(selectionId)) {
+			referenceCatalogError = 'This reference irradiation is already selected.';
+			return;
+		}
+
+		const sourceMaterial = sourceCounting?.referenceMaterial;
+		if (!sourceMaterial) {
+			referenceCatalogError = 'Selected catalog entry does not contain a saved counting.';
+			return;
+		}
+
+		const nextReference = createReferenceMaterial(isotopeCount);
+		nextReference.NETL_code = sourceMaterial.NETL_code;
+		nextReference.sampleName = sourceMaterial.sampleName;
+		nextReference.mass = sourceMaterial.mass;
+		nextReference.reactorPower = sourceMaterial.reactorPower ?? 0;
+		nextReference.irradiationTime = sourceMaterial.irradiationTime;
+		nextReference.irradiationEnd = sourceMaterial.irradiationEnd;
+		nextReference.measurementStartTime = sourceMaterial.measurementStartTime;
+		nextReference.decayTime = sourceMaterial.decayTime;
+		nextReference.liveTime = sourceMaterial.liveTime;
+		nextReference.realTime = sourceMaterial.realTime;
+		nextReference.fluence = sourceMaterial.fluence;
+		nextReference.irradiationType = sourceMaterial.irradiationType;
+		nextReference.dtType = sourceMaterial.dtType;
+
+		const sourceCounts = Array.isArray(sourceMaterial.counts) ? sourceMaterial.counts : [];
+		const sourceConcentrations = Array.isArray(sourceMaterial.knownConcentration)
+			? sourceMaterial.knownConcentration
+			: [];
+		const sourceUncertainties = Array.isArray(sourceMaterial.knownUncertainty)
+			? sourceMaterial.knownUncertainty
+			: [];
+		const sourceUnits = Array.isArray(sourceMaterial.concentrationUnits)
+			? sourceMaterial.concentrationUnits
+			: [];
+
+		const usedIndices = new Set<number>();
+		const matchedSelection = new Set<string>();
+		const proxyWarnings: string[] = [];
+
+		for (let index = 0; index < isotopeCount; index++) {
+			const match = findCatalogIsotopeMatch(isotopeInfo[index], item, usedIndices);
+			const sourceIndex = match.sourceIndex;
+			if (sourceIndex < 0) {
+				continue;
+			}
+
+			usedIndices.add(sourceIndex);
+			matchedSelection.add(getIsotopeSelectionKey(index));
+
+			const targetId = isotopeInfo[index]?.id?.trim();
+			if (targetId && match.matchedIsotopeId && match.matchedIsotopeId !== targetId) {
+				const warning = `${getIsotopeDisplayName(isotopeInfo[index], index)} is selected for analysis, but ${getCatalogIsotopeDisplayName(match.matchedIsotopeId)} is measured in this reference irradiation.`;
+				if (!proxyWarnings.includes(warning)) {
+					proxyWarnings.push(warning);
+				}
+			}
+
+			nextReference.counts[index] = {
+				grossCounts: sourceCounts[sourceIndex]?.grossCounts ?? 0,
+				netCounts: sourceCounts[sourceIndex]?.netCounts ?? 0,
+				uncertainty: sourceCounts[sourceIndex]?.uncertainty ?? 0,
+				grossCountsPositionalCorrectionFactor:
+					sourceCounts[sourceIndex]?.grossCountsPositionalCorrectionFactor ?? 1,
+				netCountsPositionalCorrectionFactor:
+					sourceCounts[sourceIndex]?.netCountsPositionalCorrectionFactor ?? 1,
+				uncertaintyPositionalCorrectionFactor:
+					sourceCounts[sourceIndex]?.uncertaintyPositionalCorrectionFactor ?? 1
+			};
+
+			nextReference.knownConcentration[index] = sourceConcentrations[sourceIndex] ?? 0;
+			nextReference.knownUncertainty[index] = sourceUncertainties[sourceIndex] ?? 0;
+			nextReference.concentrationUnits[index] = sourceUnits[sourceIndex];
+		}
+
+		if (matchedSelection.size === 0) {
+			referenceCatalogError =
+				'This reference irradiation does not cover any currently selected isotopes.';
+			return;
+		}
+
+		const hasOnlyPlaceholder =
+			referenceCatalogItemIds.length === 1 && referenceCatalogItemIds[0] === null;
+
+		let nextReferences: ReferenceMaterial[];
+		let nextSelections: Set<string>[];
+		let nextCatalogItemIds: (string | null)[];
+
+		if (hasOnlyPlaceholder) {
+			nextReferences = [nextReference];
+			nextSelections = [matchedSelection];
+			nextCatalogItemIds = [selectionId];
+		} else {
+			nextReferences = [...materials.reference, nextReference];
+			nextSelections = [...referenceIsotopeSelections, matchedSelection];
+			nextCatalogItemIds = [...referenceCatalogItemIds, selectionId];
+		}
+
+		materials = {
+			...materials,
+			reference: nextReferences
+		};
+		referenceIsotopeSelections = nextSelections;
+		referenceCatalogItemIds = nextCatalogItemIds;
+		referenceCount = nextReferences.length;
+		updateIsotopeReferenceMap(isotopeCount, nextReferences.length);
+
+		referenceCatalogMessage =
+			`Added ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName})${sourceMaterial.irradiationType ? ` [${sourceMaterial.irradiationType}]` : ''}. Covers ${matchedSelection.size} isotope row(s).`;
+		referenceCatalogWarning = proxyWarnings.join(' ');
+	}
+
+	function removeReferenceMaterialCatalogItem(referenceIndex: number) {
+		if (referenceIndex < 0 || referenceIndex >= materials.reference.length) {
+			return;
+		}
+
+		referenceCatalogMessage = '';
+		referenceCatalogError = '';
+		referenceCatalogWarning = '';
+
+		const nextReferences = materials.reference.filter((_, idx) => idx !== referenceIndex);
+		const nextSelections = referenceIsotopeSelections.filter((_, idx) => idx !== referenceIndex);
+		const nextCatalogItemIds = referenceCatalogItemIds.filter((_, idx) => idx !== referenceIndex);
+
+		if (nextReferences.length === 0) {
+			materials = {
+				...materials,
+				reference: [createReferenceMaterial(isotopeCount)]
+			};
+			referenceIsotopeSelections = [new Set<string>()];
+			referenceCatalogItemIds = [null];
+			referenceCount = 1;
+			updateIsotopeReferenceMap(isotopeCount, 1);
+			return;
+		}
+
+		materials = {
+			...materials,
+			reference: nextReferences
+		};
+		referenceIsotopeSelections = nextSelections;
+		referenceCatalogItemIds = nextCatalogItemIds;
+		referenceCount = nextReferences.length;
+		updateIsotopeReferenceMap(isotopeCount, nextReferences.length);
+	}
+
+	function getCoveringReferenceIndicesForIsotope(isotopeIndex: number): number[] {
+		const selectionKey = getIsotopeSelectionKey(isotopeIndex);
+		return referenceIsotopeSelections
+			.map((selection, referenceIndex) =>
+				selection instanceof Set && selection.has(selectionKey) ? referenceIndex : -1
+			)
+			.filter((referenceIndex) => referenceIndex >= 0 && referenceIndex < referenceCount);
+	}
+
+	function setReferenceForIsotope(isotopeIndex: number, referenceIndex: number) {
+		const coveringReferences = getCoveringReferenceIndicesForIsotope(isotopeIndex);
+		if (!coveringReferences.includes(referenceIndex)) {
+			return;
+		}
+
+		isotopeInfo = isotopeInfo.map((iso, index) =>
+			index === isotopeIndex
+				? {
+					...iso,
+					linkedReference: referenceIndex
+				}
+				: iso
+		);
+	}
+
+	function getIsotopeDisplayName(isotope: IsotopeInfoType, index: number): string {
+		const energy = getFiniteEnergy(isotope.energy);
+		const energyLabel = energy !== null ? ` @ ${energy.toLocaleString()} keV` : '';
+
+		if (isotope.elementName && isotope.isotopeName) {
+			return `${isotope.elementName}-${isotope.isotopeName}${energyLabel}`;
+		}
+
+		return `Isotope ${index + 1}${energyLabel}`;
 	}
 
 	function validateCurrentStep(): boolean {
@@ -673,18 +1094,40 @@
 
 		// Validate reference material steps
 		if (refIdx >= 0 && refIdx < referenceCount) {
-			const currentRef = matRefs.reference[refIdx];
-			if (currentRef && typeof currentRef.validateRefMatInfo === 'function') {
-				const isValid = currentRef.validateRefMatInfo();
-				if (!isValid) {
-					if (typeof currentRef.showValidationErrors === 'function') {
-						currentRef.showValidationErrors();
-					}
-					const errors = currentRef.getValidationErrors?.() || [
-						'Please fill in all required fields'
-					];
-					validationErrors = errors;
+			if (userIsAuthenticated) {
+				const selectedReferenceIds = referenceCatalogItemIds.filter(
+					(id): id is string => typeof id === 'string'
+				);
+				if (selectedReferenceIds.length === 0) {
+					validationErrors = ['Please select at least one reference irradiation before continuing.'];
 					return false;
+				}
+
+				const missingReferenceIrradiations = isotopeInfo
+					.map((iso, index) => ({ iso, index }))
+					.filter(({ index }) => getCoveringReferenceIndicesForIsotope(index).length === 0)
+					.map(({ iso, index }) => getIsotopeDisplayName(iso, index));
+
+				if (missingReferenceIrradiations.length > 0) {
+					validationErrors = [
+						`Missing reference irradiations for selected isotopes: ${missingReferenceIrradiations.join(', ')}`
+					];
+					return false;
+				}
+			} else {
+				const currentRef = matRefs.reference[refIdx];
+				if (currentRef && typeof currentRef.validateRefMatInfo === 'function') {
+					const isValid = currentRef.validateRefMatInfo();
+					if (!isValid) {
+						if (typeof currentRef.showValidationErrors === 'function') {
+							currentRef.showValidationErrors();
+						}
+						const errors = currentRef.getValidationErrors?.() || [
+							'Please fill in all required fields'
+						];
+						validationErrors = errors;
+						return false;
+					}
 				}
 			}
 		}
@@ -722,8 +1165,21 @@
 
 	function getReferenceLabel(index: number): string {
 		const ref = materials.reference[index];
-		const labelBase = ref?.NETL_code || ref?.sampleName;
-		return labelBase ? `${labelBase}` : `Reference ${index + 1}`;
+		const labelBase = ref?.NETL_code || ref?.sampleName || `Reference ${index + 1}`;
+		const details = [
+			ref?.irradiationType ? ref.irradiationType : '',
+			ref?.measurementStartTime ? new Date(ref.measurementStartTime).toLocaleString() : '',
+			ref?.irradiationEnd ? new Date(ref.irradiationEnd).toLocaleString() : ''
+		].filter(Boolean);
+
+		return details.length > 0 ? `${labelBase} — ${details.join(' · ')}` : labelBase;
+	}
+
+	function handleReferenceMaterialSelect(
+		item: ReferenceMaterialCatalogItem,
+		counting: ReferenceMaterialCatalogCounting
+	) {
+		applyReferenceMaterialCatalogItem(item, counting);
 	}
 
 	const next = () => {
@@ -890,24 +1346,29 @@
 					</ul>
 				</li>
 				<li>Automatic loading of isotope information from the database.</li>
+				<li>Automatic loading of reference materials from the database.</li>
 			</ul>
 			<br />
 			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
 			<br />
 			<p>
-				In this version (v{APP_VERSION}), the main focus is to add loading of isotopes from a
+				In this version (v{APP_VERSION}), the main focus is to add loading of reference materials from a
 				database.
 			</p>
+			<br />
+			<h2 class="text-2xl font-bold">
+				Next planned releases
+			</h2>
+			<ol class="ml-6 list-outside list-decimal">
+				<li>Version 7.1: Minor updates and bug fixes, including significant figure handling and the normal/compton selector for ROI files.</li>
+				<li>Version 8.0: Interference</li>
+			</ol>
 			<br />
 			<h2 class="text-2xl font-bold">
 				Future additions, not planned yet (note: can be implemented in any order):
 			</h2>
 			<ul class="list-inside list-disc">
-				<li>Authentication</li>
-				<li>Modifications to the database</li>
-				<li>Automatic loading of irradiation data.</li>
-				<li>Exporting reports</li>
-				<li>Interference Adjustment</li>
+				<li>Edit/Delete operations to the database through the UI.</li>
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
@@ -980,27 +1441,120 @@
 			<button type="button" onclick={next}> {nextButtonText} </button>
 		{:else if refIdx >= 0 && refIdx < referenceCount}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<p>
-				This is where you enter information about the reference material. This is used when
-				comparing to the unknown material to determine concentrations.
-			</p>
-			<br /><br />
-			<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
-			<RefMatInfo
-				{isotopeCount}
-				{isotopeInfo}
-				usedIsotopeLabels={getUsedIsotopeLabels(refIdx)}
-				getRoiIndex={getRoiIndexFn}
-				bind:selected={referenceIsotopeSelections[refIdx]}
-				bind:refMatInfo={materials.reference[refIdx]}
-				bind:this={matRefs.reference[refIdx]}
-			/>
+			{#if userIsAuthenticated}
+				<p>
+					Select reference irradiations from the catalog below. You can combine multiple
+					irradiations to cover all isotopes, then choose which irradiation to use per isotope.
+				</p>
+				<br />
+				<ReferenceMaterialViewer
+					isotopeIds={selectableReferenceCatalogIsotopeIds}
+					selectedItemIds={referenceCatalogItemIds.filter((id): id is string => typeof id === 'string')}
+					currentSelectionId={null}
+					onSelectItem={handleReferenceMaterialSelect}
+				/>
 
-			<ComputedDisplay title="Reference Material Information" data={matComp.reference[refIdx]} />
-			<ComputedDisplay
-				title="Reference and Isotope Information"
-				data={matIsoComp.map((item) => item.reference[refIdx])}
-			/>
+				{#if referenceCatalogItemIds.filter((id): id is string => typeof id === 'string').length > 0}
+					<div class="mt-4 space-y-2 rounded border border-gray-300 p-3">
+						<h3 class="text-lg font-bold">Selected reference irradiations</h3>
+						{#each referenceCatalogItemIds as catalogId, selectedIndex (selectedIndex)}
+							{#if catalogId}
+								{@const refMat = materials.reference[selectedIndex]}
+								{@const irrEnd = refMat?.irradiationEnd ? new Date(refMat.irradiationEnd).toLocaleString() : '—'}
+								{@const irrStart = (refMat?.irradiationEnd && refMat?.irradiationTime) ? new Date(new Date(refMat.irradiationEnd).getTime() - refMat.irradiationTime * 1000).toLocaleString() : '—'}
+								<div class="flex items-center justify-between gap-3 rounded border border-gray-200 p-2">
+									<div>
+										<strong>{getReferenceLabel(selectedIndex)}</strong>
+										<span class="ml-2 text-sm text-gray-500">{irrStart} → {irrEnd}</span>
+									</div>
+									<button
+										type="button"
+										class="rounded border border-gray-300 px-2 py-1 text-sm"
+										onclick={() => removeReferenceMaterialCatalogItem(selectedIndex)}
+									>
+										Remove
+									</button>
+								</div>
+							{/if}
+						{/each}
+					</div>
+
+					{@const isotopesMappingNeeded = isotopeInfo.filter((_, i) => getCoveringReferenceIndicesForIsotope(i).length !== 1)}
+					{#if isotopesMappingNeeded.length > 0}
+						<div class="mt-4 space-y-2 rounded border border-gray-300 p-3">
+							<h3 class="text-lg font-bold">Isotope assignment</h3>
+							{#each isotopeInfo as isotope, isotopeIndex (isotopeIndex)}
+								{@const availableReferences = getCoveringReferenceIndicesForIsotope(isotopeIndex)}
+								{#if availableReferences.length !== 1}
+									<div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(240px,360px)] md:items-center">
+										<div class="text-sm">
+											<strong>{getIsotopeDisplayName(isotope, isotopeIndex)}</strong>
+										</div>
+										{#if availableReferences.length > 1}
+											<select
+												class="input"
+												value={String(getLinkedReferenceIndex(isotopeIndex))}
+												onchange={(event) => {
+													const target = event.currentTarget as HTMLSelectElement;
+													setReferenceForIsotope(isotopeIndex, Number(target.value));
+												}}
+											>
+												{#each availableReferences as availableReferenceIndex (availableReferenceIndex)}
+													<option value={String(availableReferenceIndex)}>
+														{getReferenceLabel(availableReferenceIndex)}
+													</option>
+												{/each}
+											</select>
+										{:else}
+											<p class="text-sm text-red-700">No selected irradiation covers this isotope.</p>
+										{/if}
+									</div>
+								{/if}
+							{/each}
+						</div>
+					{/if}
+				{/if}
+
+				{#if referenceCatalogError}
+					<p class="mt-3 text-sm text-red-700">{referenceCatalogError}</p>
+				{/if}
+				{#if referenceCatalogMessage}
+					<p class="mt-3 text-sm text-emerald-700">{referenceCatalogMessage}</p>
+				{/if}
+				{#if referenceCatalogWarning}
+					<p class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+						{referenceCatalogWarning}
+					</p>
+				{/if}
+			{:else}
+				<p>
+					This is where you enter information about the reference material. This is used when
+					comparing to the unknown material to determine concentrations.
+				</p>
+				<br /><br />
+				<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
+				<RefMatInfo
+					{isotopeCount}
+					{isotopeInfo}
+					usedIsotopeLabels={getUsedIsotopeLabels(refIdx)}
+					getRoiIndex={getRoiIndexFn}
+					bind:selected={referenceIsotopeSelections[refIdx]}
+					bind:refMatInfo={materials.reference[refIdx]}
+					bind:this={matRefs.reference[refIdx]}
+				/>
+
+				<details class="mt-4 rounded border border-gray-300 p-3">
+					<summary class="cursor-pointer font-semibold">Expand for debug information</summary>
+					<div class="mt-3 space-y-4">
+						<ComputedDisplay title="Reference Material Information" data={matComp.reference[refIdx]} />
+						<ComputedDisplay
+							title="Reference and Isotope Information"
+							data={matIsoComp.map((item) => item.reference[refIdx])}
+						/>
+						<pre class="overflow-x-auto whitespace-pre-wrap text-sm">{JSON.stringify(materials, null, 2)}</pre>
+					</div>
+				</details>
+			{/if}
 
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
@@ -1029,15 +1583,19 @@
 				bind:materialInfo={materials.unknown[unknownIdx]}
 			/>
 
-			<br />
-			<ComputedDisplay
-				title="Unknown Material Information for Unknown {unknownIdx + 1}"
-				data={matComp.unknown[unknownIdx]}
-			/>
-			<ComputedDisplay
-				title="Unknown and Isotope Information for Unknown {unknownIdx + 1}"
-				data={matIsoComp.map((item) => item.unknown[unknownIdx])}
-			/>
+			<details class="mt-4 rounded border border-gray-300 p-3">
+				<summary class="cursor-pointer font-semibold">Expand for debug information</summary>
+				<div class="mt-3 space-y-4">
+					<ComputedDisplay
+						title="Unknown Material Information for Unknown {unknownIdx + 1}"
+						data={matComp.unknown[unknownIdx]}
+					/>
+					<ComputedDisplay
+						title="Unknown and Isotope Information for Unknown {unknownIdx + 1}"
+						data={matIsoComp.map((item) => item.unknown[unknownIdx])}
+					/>
+				</div>
+			</details>
 
 			<button type="button" onclick={prev}>{backButtonText}</button>
 			&nbsp;&nbsp;
@@ -1110,21 +1668,26 @@
 			</button>
 			<br /><br />
 
-			<ComputedDisplay title="Isotope Information" data={isotopeInfo} />
-			<br />
-			<ComputedDisplay title="Material Information" data={materials} />
-			<br /><br />
-
-			<h3 class="text-xl font-bold">Computed Values:</h3>
-			<ComputedDisplay level={4} title="Isotope Computed Values" data={isoComp} />
-			<ComputedDisplay level={4} title="Material Computed Values" data={matComp} />
-			<ComputedDisplay level={4} title="Material and Isotope Computed Values" data={matIsoComp} />
-			<ComputedDisplay level={4} title="Multi Material Computed Values" data={multiMatComp} />
-			<ComputedDisplay
-				level={4}
-				title="Computed Values that use everything"
-				data={everythingComp}
-			/>
+			<details class="mt-4 rounded border border-gray-300 p-3">
+				<summary class="cursor-pointer font-semibold">Expand for debug information</summary>
+				<div class="mt-3 space-y-4">
+					<ComputedDisplay title="Isotope Information" data={isotopeInfo} />
+					<ComputedDisplay title="Material Information" data={materials} />
+					<ComputedDisplay level={4} title="Isotope Computed Values" data={isoComp} />
+					<ComputedDisplay level={4} title="Material Computed Values" data={matComp} />
+					<ComputedDisplay
+						level={4}
+						title="Material and Isotope Computed Values"
+						data={matIsoComp}
+					/>
+					<ComputedDisplay level={4} title="Multi Material Computed Values" data={multiMatComp} />
+					<ComputedDisplay
+						level={4}
+						title="Computed Values that use everything"
+						data={everythingComp}
+					/>
+				</div>
+			</details>
 			<br />
 			<button type="button" onclick={prev}>{backButtonText}</button>
 		{/if}
