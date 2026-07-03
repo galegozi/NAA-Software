@@ -1333,6 +1333,8 @@
 				<input class="input w-50" type="text" bind:value={title} />
 			</label>
 			<br />
+			<p>This version is functionally equivalent to 7.0, and is a developer preview. Please use with caution.</p>
+			<br/>
 			<p>Here is what is included in this software:</p>
 			<ul class="ml-6 list-outside list-disc">
 				<li>
