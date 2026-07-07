@@ -1333,7 +1333,7 @@
 				<input class="input w-50" type="text" bind:value={title} />
 			</label>
 			<br />
-			<p>This version is functionally equivalent to 7.0, and is a developer preview. Please use with caution.</p>
+			<p>This version is a developer preview. Please use with caution.</p>
 			<br/>
 			<p>Here is what is included in this software:</p>
 			<ul class="ml-6 list-outside list-disc">
@@ -1349,13 +1349,13 @@
 				</li>
 				<li>Automatic loading of isotope information from the database.</li>
 				<li>Automatic loading of reference materials from the database.</li>
+				<li>Automatic loading of more items whenever the user scrolls down to the bottom of a list.</li>
 			</ul>
 			<br />
 			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
 			<br />
 			<p>
-				In this version (v{APP_VERSION}), the main focus is to add loading of reference materials from a
-				database.
+				In this version (v{APP_VERSION}), the main focus is to work on small bug fixes and improvements after the big 7.0 release.
 			</p>
 			<br />
 			<h2 class="text-2xl font-bold">
