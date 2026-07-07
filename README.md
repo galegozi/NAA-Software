@@ -58,6 +58,8 @@ This project now includes an integrated Azure Functions backend under `api/` for
 The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
 The reference material viewer calls `/api/reference-materials` by default. You can override that by setting `PUBLIC_REFERENCE_MATERIAL_API_URL`.
 
+Both GET endpoints accept `q` (search), `limit` (clamped to 100), and `offset` query parameters, and respond with `{ items, count, search, hasMore }`. `hasMore` signals that another batch is available at `offset + items.length`; the catalog viewers use it to fetch the next batch when the user scrolls to the bottom of the list.
+
 ### API access control
 The integrated Azure Functions endpoint stays at `authLevel: 'anonymous'`, because Azure Static Web Apps is the layer that authenticates and authorizes requests before forwarding them to the function.
 

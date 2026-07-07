@@ -83,6 +83,13 @@
 	let lastFetchSequence = 0;
 	let cachedItems: ReferenceMaterialCatalogItem[] = $state([]);
 
+	const CATALOG_BATCH_SIZE = 24;
+	let visibleCount = $state(CATALOG_BATCH_SIZE);
+	let hasMoreServerItems = $state(false);
+	let serverOffset = 0;
+	let catalogPane: HTMLDivElement | null = null;
+	let lastBatchResetSearch = '';
+
 	function normalizeItems(payload: unknown): ReferenceMaterialCatalogItem[] {
 		if (Array.isArray(payload)) {
 			return payload as ReferenceMaterialCatalogItem[];
@@ -98,6 +105,19 @@
 		}
 
 		return [];
+	}
+
+	function readHasMore(payload: unknown, fallback: boolean): boolean {
+		if (
+			typeof payload === 'object' &&
+			payload !== null &&
+			'hasMore' in payload &&
+			typeof (payload as { hasMore: unknown }).hasMore === 'boolean'
+		) {
+			return (payload as { hasMore: boolean }).hasMore;
+		}
+
+		return fallback;
 	}
 
 	function getSearchText(item: ReferenceMaterialCatalogItem): string {
@@ -170,11 +190,15 @@
 		return getSearchText(item).includes(normalizedQuery);
 	}
 
-	async function loadItems(search: string) {
+	async function loadItems(search: string, offset = 0) {
 		const apiUrl = env.PUBLIC_REFERENCE_MATERIAL_API_URL?.trim() || '/api/reference-materials';
 		const requestUrl = new URL(apiUrl, window.location.origin);
 		const trimmedSearch = search.trim();
-		requestUrl.searchParams.set('limit', '1000');
+		const batchLimit = 100;
+		requestUrl.searchParams.set('limit', String(batchLimit));
+		if (offset > 0) {
+			requestUrl.searchParams.set('offset', String(offset));
+		}
 		if (trimmedSearch) {
 			requestUrl.searchParams.set('q', trimmedSearch);
 		}
@@ -199,7 +223,8 @@
 				throw new Error(`Request failed with status ${response.status}`);
 			}
 
-			const nextItems = normalizeItems(await response.json());
+			const payload: unknown = await response.json();
+			const nextItems = normalizeItems(payload);
 			if (fetchSequence !== lastFetchSequence) {
 				return;
 			}
@@ -210,6 +235,8 @@
 				),
 				...nextItems
 			];
+			serverOffset = offset + nextItems.length;
+			hasMoreServerItems = readHasMore(payload, nextItems.length === batchLimit);
 		} catch (error) {
 			if (fetchSequence !== lastFetchSequence) {
 				return;
@@ -249,9 +276,8 @@
 			return a.referenceKey.localeCompare(b.referenceKey);
 		})
 	);
-	let visibleItems = $derived(sortedItems.slice(0, 24));
-	let visibleCountings = $derived(
-		visibleItems.flatMap((item) => {
+	let sortedCountings = $derived(
+		sortedItems.flatMap((item) => {
 			const countings = Array.isArray(item.countings) && item.countings.length > 0
 				? item.countings
 				: item.latestCounting
@@ -265,6 +291,7 @@
 			}));
 		})
 	);
+	let visibleCountings = $derived(sortedCountings.slice(0, visibleCount));
 
 	$effect(() => {
 		if (cachedItems.length > 0) {
@@ -272,6 +299,53 @@
 		}
 
 		void loadItems('');
+	});
+
+	$effect(() => {
+		if (searchTerm !== lastBatchResetSearch) {
+			lastBatchResetSearch = searchTerm;
+			visibleCount = CATALOG_BATCH_SIZE;
+			if (catalogPane) {
+				catalogPane.scrollTop = 0;
+			}
+		}
+	});
+
+	function showNextBatch() {
+		if (visibleCount < sortedCountings.length) {
+			visibleCount += CATALOG_BATCH_SIZE;
+			return;
+		}
+
+		if (hasMoreServerItems && !isLoading) {
+			visibleCount += CATALOG_BATCH_SIZE;
+			void loadItems('', serverOffset);
+		}
+	}
+
+	function handleCatalogScroll() {
+		if (!catalogPane) {
+			return;
+		}
+
+		const distanceFromBottom =
+			catalogPane.scrollHeight - catalogPane.scrollTop - catalogPane.clientHeight;
+		if (distanceFromBottom <= 48) {
+			showNextBatch();
+		}
+	}
+
+	// If the pane cannot scroll yet (short or heavily filtered list) the scroll
+	// event never fires, so keep loading batches until it can or nothing is left.
+	$effect(() => {
+		void sortedCountings.length;
+		void visibleCount;
+		void hasMoreServerItems;
+		if (isLoading) {
+			return;
+		}
+
+		handleCatalogScroll();
 	});
 </script>
 
@@ -289,7 +363,11 @@
 				/>
 			</label>
 
-			<div class="catalog-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2">
+			<div
+				bind:this={catalogPane}
+				onscroll={handleCatalogScroll}
+				class="catalog-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2"
+			>
 				{#if isLoading && cachedItems.length === 0}
 					<p class="p-2">Loading reference material catalog...</p>
 				{:else if errorMessage && cachedItems.length === 0}
@@ -344,8 +422,8 @@
 				{/if}
 			</div>
 
-			{#if sortedItems.length > visibleItems.length}
-				<p>Showing the first {visibleCountings.length} counting entries. Keep typing to narrow the list.</p>
+			{#if sortedCountings.length > visibleCountings.length || hasMoreServerItems}
+				<p>Showing {visibleCountings.length} counting entries. Scroll the list to load more.</p>
 			{/if}
 		</div>
 	</div>

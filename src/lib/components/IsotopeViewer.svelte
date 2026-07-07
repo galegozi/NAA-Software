@@ -17,6 +17,13 @@
 	let lastFetchSequence = 0;
 	let cachedItems: IsotopeCatalogItem[] = $state([]);
 
+	const CATALOG_BATCH_SIZE = 24;
+	let visibleCount = $state(CATALOG_BATCH_SIZE);
+	let hasMoreServerItems = $state(false);
+	let serverOffset = 0;
+	let catalogPane: HTMLDivElement | null = null;
+	let lastBatchResetSearch = '';
+
 	type EnergyResultRow = {
 		id: string;
 		item: IsotopeCatalogItem;
@@ -82,6 +89,19 @@
 		return [];
 	}
 
+	function readHasMore(payload: unknown, fallback: boolean): boolean {
+		if (
+			typeof payload === 'object' &&
+			payload !== null &&
+			'hasMore' in payload &&
+			typeof (payload as { hasMore: unknown }).hasMore === 'boolean'
+		) {
+			return (payload as { hasMore: boolean }).hasMore;
+		}
+
+		return fallback;
+	}
+
 	function getIsotopeName(item: IsotopeCatalogItem): string {
 		return `${item.shortName}-${item.massNumber}${item.suffix}`;
 	}
@@ -138,12 +158,16 @@
 		return selectedIsotopeKeys.has(getSelectionKey(item, energy));
 	}
 
-	async function loadItems(search: string) {
+	async function loadItems(search: string, offset = 0) {
 		const apiUrl = env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
 		const requestUrl = new URL(apiUrl, window.location.origin);
 		const trimmedSearch = search.trim();
-		requestUrl.searchParams.set('limit', trimmedSearch ? '25' : '100');
-		if (search.trim()) {
+		const batchLimit = trimmedSearch ? 25 : 100;
+		requestUrl.searchParams.set('limit', String(batchLimit));
+		if (offset > 0) {
+			requestUrl.searchParams.set('offset', String(offset));
+		}
+		if (trimmedSearch) {
 			requestUrl.searchParams.set('q', trimmedSearch);
 		}
 
@@ -167,7 +191,8 @@
 				throw new Error(`Request failed with status ${response.status}`);
 			}
 
-			const nextItems = normalizeItems(await response.json());
+			const payload: unknown = await response.json();
+			const nextItems = normalizeItems(payload);
 			if (fetchSequence !== lastFetchSequence) {
 				return;
 			}
@@ -179,6 +204,8 @@
 				...nextItems
 			];
 			lastFetchedSearch = trimmedSearch;
+			serverOffset = offset + nextItems.length;
+			hasMoreServerItems = readHasMore(payload, nextItems.length === batchLimit);
 		} catch (error) {
 			if (fetchSequence !== lastFetchSequence) {
 				return;
@@ -250,7 +277,7 @@
 			return a.energy - b.energy;
 		})
 	);
-	let visibleRows = $derived(sortedRows.slice(0, 24));
+	let visibleRows = $derived(sortedRows.slice(0, visibleCount));
 	let selectedIsotopeKeys = $derived(new Set(selectedIsotopes.map(getIsotopeSelectionKey)));
 	let selectedIsotopeIdKeys = $derived(new Set(selectedIsotopes.map(getSelectedIsotopeIdKey)));
 
@@ -281,6 +308,53 @@
 		};
 	});
 
+	$effect(() => {
+		if (searchTerm !== lastBatchResetSearch) {
+			lastBatchResetSearch = searchTerm;
+			visibleCount = CATALOG_BATCH_SIZE;
+			if (catalogPane) {
+				catalogPane.scrollTop = 0;
+			}
+		}
+	});
+
+	function showNextBatch() {
+		if (visibleCount < sortedRows.length) {
+			visibleCount += CATALOG_BATCH_SIZE;
+			return;
+		}
+
+		if (hasMoreServerItems && !isLoading) {
+			visibleCount += CATALOG_BATCH_SIZE;
+			void loadItems(lastFetchedSearch, serverOffset);
+		}
+	}
+
+	function handleCatalogScroll() {
+		if (!catalogPane) {
+			return;
+		}
+
+		const distanceFromBottom =
+			catalogPane.scrollHeight - catalogPane.scrollTop - catalogPane.clientHeight;
+		if (distanceFromBottom <= 48) {
+			showNextBatch();
+		}
+	}
+
+	// If the pane cannot scroll yet (short or heavily filtered list) the scroll
+	// event never fires, so keep loading batches until it can or nothing is left.
+	$effect(() => {
+		void sortedRows.length;
+		void visibleCount;
+		void hasMoreServerItems;
+		if (isLoading) {
+			return;
+		}
+
+		handleCatalogScroll();
+	});
+
 	function addSelectedIsotope(item: IsotopeCatalogItem, energy: number) {
 		if (isExactIsotopeSelected(item, energy)) {
 			return;
@@ -309,7 +383,11 @@
 				/>
 			</label>
 
-			<div class="isotope-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2">
+			<div
+				bind:this={catalogPane}
+				onscroll={handleCatalogScroll}
+				class="isotope-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2"
+			>
 				{#if isLoading && cachedItems.length === 0}
 					<p class="p-2">Loading isotope catalog...</p>
 				{:else if errorMessage && cachedItems.length === 0}
@@ -342,8 +420,8 @@
 				{/if}
 			</div>
 
-			{#if sortedRows.length > visibleRows.length}
-				<p>Showing the first {visibleRows.length} matches. Keep typing to narrow the list.</p>
+			{#if sortedRows.length > visibleRows.length || hasMoreServerItems}
+				<p>Showing {visibleRows.length} matches. Scroll the list to load more.</p>
 			{/if}
 
 			{#if isLoading && cachedItems.length > 0}

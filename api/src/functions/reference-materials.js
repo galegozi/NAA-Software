@@ -107,24 +107,39 @@ function clampLimit(rawValue) {
 	return Math.min(Math.max(parsed, 1), 100);
 }
 
-function buildSearchQuery(rawSearch, rawLimit) {
+function clampOffset(rawValue) {
+	const parsed = Number.parseInt(rawValue ?? '0', 10);
+	if (!Number.isFinite(parsed)) {
+		return 0;
+	}
+
+	return Math.max(parsed, 0);
+}
+
+function buildSearchQuery(rawSearch, rawLimit, rawOffset) {
 	const limit = clampLimit(rawLimit);
+	const offset = clampOffset(rawOffset);
 	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
+	const pagingParameters = [
+		{ name: '@offset', value: offset },
+		{ name: '@limit', value: limit }
+	];
 
 	if (!normalizedSearch) {
 		return {
 			query: `
-				SELECT TOP ${limit} * FROM c
+				SELECT * FROM c
 				WHERE c.docType = @docType
 				ORDER BY c._ts DESC
+				OFFSET @offset LIMIT @limit
 			`,
-			parameters: [{ name: '@docType', value: 'reference-material' }]
+			parameters: [{ name: '@docType', value: 'reference-material' }, ...pagingParameters]
 		};
 	}
 
 	return {
 		query: `
-			SELECT TOP ${limit} * FROM c
+			SELECT * FROM c
 			WHERE c.docType = @docType
 				AND (
 					(IS_DEFINED(c.referenceKey) AND IS_STRING(c.referenceKey) AND CONTAINS(LOWER(c.referenceKey), @search))
@@ -185,10 +200,12 @@ function buildSearchQuery(rawSearch, rawLimit) {
 					)
 				)
 			ORDER BY c._ts DESC
+			OFFSET @offset LIMIT @limit
 		`,
 		parameters: [
 			{ name: '@docType', value: 'reference-material' },
-			{ name: '@search', value: normalizedSearch }
+			{ name: '@search', value: normalizedSearch },
+			...pagingParameters
 		]
 	};
 }
@@ -251,11 +268,18 @@ function matchesMockSearch(item, normalizedSearch) {
 	return haystack.includes(normalizedSearch);
 }
 
-function getMockSearchResults(rawSearch, rawLimit) {
+function getMockSearchResults(rawSearch, rawLimit, rawOffset) {
 	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
 	const limit = clampLimit(rawLimit);
+	const offset = clampOffset(rawOffset);
+	const matches = MOCK_REFERENCE_MATERIALS.filter((item) =>
+		matchesMockSearch(item, normalizedSearch)
+	);
 
-	return MOCK_REFERENCE_MATERIALS.filter((item) => matchesMockSearch(item, normalizedSearch)).slice(0, limit);
+	return {
+		items: matches.slice(offset, offset + limit),
+		hasMore: offset + limit < matches.length
+	};
 }
 
 async function fetchItemsByIds(container, ids) {
@@ -371,7 +395,8 @@ async function getReferenceMaterialsHandler(request, context) {
 		const url = new URL(request.url);
 		const search = url.searchParams.get('q') ?? '';
 		const limit = url.searchParams.get('limit');
-		const mockItems = getMockSearchResults(search, limit);
+		const offset = url.searchParams.get('offset');
+		const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
 
 		context.log('Returning mock reference material catalog results.', {
 			search,
@@ -386,6 +411,7 @@ async function getReferenceMaterialsHandler(request, context) {
 				items: mockItems.map(mapReferenceMaterialItem),
 				count: mockItems.length,
 				search,
+				hasMore,
 				mocked: true
 			}
 		};
@@ -395,7 +421,8 @@ async function getReferenceMaterialsHandler(request, context) {
 		const url = new URL(request.url);
 		const search = url.searchParams.get('q') ?? '';
 		const limit = url.searchParams.get('limit');
-		const queryText = buildSearchQuery(search, limit);
+		const offset = url.searchParams.get('offset');
+		const queryText = buildSearchQuery(search, limit, offset);
 		const container = getReferenceMaterialsContainer();
 		const query = container.items.query(queryText);
 		const { resources } = await query.fetchAll();
@@ -414,7 +441,8 @@ async function getReferenceMaterialsHandler(request, context) {
 			jsonBody: {
 				items: enrichedItems,
 				count: resources.length,
-				search
+				search,
+				hasMore: resources.length === clampLimit(limit)
 			}
 		};
 	} catch (error) {
@@ -422,7 +450,8 @@ async function getReferenceMaterialsHandler(request, context) {
 			const url = new URL(request.url);
 			const search = url.searchParams.get('q') ?? '';
 			const limit = url.searchParams.get('limit');
-			const mockItems = getMockSearchResults(search, limit);
+			const offset = url.searchParams.get('offset');
+			const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
 
 			context.warn(
 				'Cosmos query failed in local development. Falling back to mock reference material catalog.',
@@ -439,6 +468,7 @@ async function getReferenceMaterialsHandler(request, context) {
 					items: mockItems.map(mapReferenceMaterialItem),
 					count: mockItems.length,
 					search,
+					hasMore,
 					mocked: true,
 					fallback: 'local-cosmos-error'
 				}

@@ -78,13 +78,28 @@ function clampLimit(rawValue) {
 	return Math.min(Math.max(parsed, 1), 100);
 }
 
-function buildSearchQuery(rawSearch, rawLimit) {
+function clampOffset(rawValue) {
+	const parsed = Number.parseInt(rawValue ?? '0', 10);
+	if (!Number.isFinite(parsed)) {
+		return 0;
+	}
+
+	return Math.max(parsed, 0);
+}
+
+function buildSearchQuery(rawSearch, rawLimit, rawOffset) {
 	const limit = clampLimit(rawLimit);
+	const offset = clampOffset(rawOffset);
 	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
+	const pagingParameters = [
+		{ name: '@offset', value: offset },
+		{ name: '@limit', value: limit }
+	];
 
 	if (!normalizedSearch) {
 		return {
-			query: `SELECT TOP ${limit} * FROM c`
+			query: 'SELECT * FROM c ORDER BY c.id OFFSET @offset LIMIT @limit',
+			parameters: pagingParameters
 		};
 	}
 
@@ -113,8 +128,8 @@ function buildSearchQuery(rawSearch, rawLimit) {
 	}
 
 	return {
-		query: `SELECT TOP ${limit} * FROM c WHERE ${conditions.join(' OR ')}`,
-		parameters
+		query: `SELECT * FROM c WHERE ${conditions.join(' OR ')} ORDER BY c.id OFFSET @offset LIMIT @limit`,
+		parameters: [...parameters, ...pagingParameters]
 	};
 }
 
@@ -155,11 +170,16 @@ function matchesMockSearch(item, normalizedSearch) {
 	return false;
 }
 
-function getMockSearchResults(rawSearch, rawLimit) {
+function getMockSearchResults(rawSearch, rawLimit, rawOffset) {
 	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
 	const limit = clampLimit(rawLimit);
+	const offset = clampOffset(rawOffset);
+	const matches = MOCK_ISOTOPES.filter((item) => matchesMockSearch(item, normalizedSearch));
 
-	return MOCK_ISOTOPES.filter((item) => matchesMockSearch(item, normalizedSearch)).slice(0, limit);
+	return {
+		items: matches.slice(offset, offset + limit),
+		hasMore: offset + limit < matches.length
+	};
 }
 
 async function isotopesHandler(request, context) {
@@ -171,7 +191,8 @@ async function isotopesHandler(request, context) {
 		const url = new URL(request.url);
 		const search = url.searchParams.get('q') ?? '';
 		const limit = url.searchParams.get('limit');
-		const mockItems = getMockSearchResults(search, limit);
+		const offset = url.searchParams.get('offset');
+		const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
 
 		context.log('Returning mock isotope catalog results.', {
 			search,
@@ -186,6 +207,7 @@ async function isotopesHandler(request, context) {
 				items: mockItems.map(mapIsotopeItem),
 				count: mockItems.length,
 				search,
+				hasMore,
 				mocked: true
 			}
 		};
@@ -195,7 +217,8 @@ async function isotopesHandler(request, context) {
 		const url = new URL(request.url);
 		const search = url.searchParams.get('q') ?? '';
 		const limit = url.searchParams.get('limit');
-		const queryText = buildSearchQuery(search, limit);
+		const offset = url.searchParams.get('offset');
+		const queryText = buildSearchQuery(search, limit, offset);
 		const container = getCosmosContainer();
 		const query = container.items.query(queryText);
 		const { resources } = await query.fetchAll();
@@ -205,7 +228,8 @@ async function isotopesHandler(request, context) {
 			jsonBody: {
 				items: resources.map(mapIsotopeItem),
 				count: resources.length,
-				search
+				search,
+				hasMore: resources.length === clampLimit(limit)
 			}
 		};
 	} catch (error) {
@@ -213,7 +237,8 @@ async function isotopesHandler(request, context) {
 			const url = new URL(request.url);
 			const search = url.searchParams.get('q') ?? '';
 			const limit = url.searchParams.get('limit');
-			const mockItems = getMockSearchResults(search, limit);
+			const offset = url.searchParams.get('offset');
+			const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
 
 			context.warn('Cosmos query failed in local development. Falling back to mock isotope catalog.', {
 				search,
@@ -227,6 +252,7 @@ async function isotopesHandler(request, context) {
 					items: mockItems.map(mapIsotopeItem),
 					count: mockItems.length,
 					search,
+					hasMore,
 					mocked: true,
 					fallback: 'local-cosmos-error'
 				}
