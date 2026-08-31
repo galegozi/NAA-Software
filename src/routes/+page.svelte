@@ -357,6 +357,8 @@
 	let referenceCatalogMessage = $state('');
 	let referenceCatalogError = $state('');
 	let referenceCatalogWarning = $state('');
+	let customReferenceNotice = $state('');
+	let referenceListEl = $state<HTMLDivElement>();
 	let isotopeMeasurementLinks = $state<IsotopeMeasurementLink[]>([]);
 	let isotopeCatalogById = $state<Record<string, IsotopeCatalogItem>>({});
 	let hasRequestedIsotopeCatalog = $state(false);
@@ -749,6 +751,7 @@
 		referenceCatalogMessage = '';
 		referenceCatalogError = '';
 		referenceCatalogWarning = '';
+		customReferenceNotice = '';
 
 		const sourceCounting = selectedCounting ?? item.latestCounting ?? undefined;
 		const selectionId = getCatalogSelectionId(item.id, sourceCounting);
@@ -900,7 +903,7 @@
 		updateIsotopeReferenceMap(isotopeInfo.length, materials.reference.length);
 	}
 
-	function addCustomReference() {
+	async function addCustomReference() {
 		referenceCatalogMessage = '';
 		referenceCatalogError = '';
 		referenceCatalogWarning = '';
@@ -914,6 +917,10 @@
 		matRefs.reference = [...matRefs.reference, undefined];
 		expandedReferences.add(materials.reference.length - 1);
 		updateIsotopeReferenceMap(isotopeCount, materials.reference.length);
+
+		customReferenceNotice = `Added Reference ${materials.reference.length}. Fill in its details in "Library entries" below.`;
+		await tick();
+		referenceListEl?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	}
 
 	function removeReference(referenceIndex: number) {
@@ -924,6 +931,7 @@
 		referenceCatalogMessage = '';
 		referenceCatalogError = '';
 		referenceCatalogWarning = '';
+		customReferenceNotice = '';
 
 		materials = {
 			...materials,
@@ -1374,14 +1382,7 @@
 			<button type="button" onclick={next}>Get Started</button>
 		{:else if stepType === StepType.SELECT_ISOTOPES}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<p>
-				{#if catalogAvailable}
-					Add every isotope you want to analyze. Load them from the catalog, add your own, or
-					combine both. Every entry can be edited.
-				{:else}
-					Add every isotope you want to analyze. Every entry can be edited.
-				{/if}
-			</p>
+			<p>Add the isotopes you want to analyze.</p>
 			{#if showSignInPrompt}
 				<p class="mt-2 text-sm">
 					Not seeing the catalog? <button type="button" class="underline" onclick={handleSignIn}
@@ -1430,33 +1431,48 @@
 			<button type="button" onclick={addCustomIsotope}>Add custom isotope</button>
 		{:else if stepType === StepType.BUILD_LIBRARY}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<p>
-				{#if catalogAvailable}
-					Build the reference library for this analysis. Add custom reference materials for one-time
-					use, load saved irradiations from the catalog, or combine both. Then choose which
-					reference to use for each isotope.
-				{:else}
-					Build the reference library for this analysis. Add the reference materials you need for
-					one-time use, then choose which reference to use for each isotope.
-				{/if}
-			</p>
+			<p>Add reference materials, then assign one to each isotope.</p>
 			<br />
-			<button type="button" onclick={addCustomReference}>Add custom reference material</button>
-			<br /><br />
+
+			<section class="rounded-lg border-2 border-blue-500 bg-blue-50 p-5">
+				<h3 class="text-2xl font-bold">Add your own reference material</h3>
+				<p class="mt-2">
+					Enter a reference material for this analysis only. Nothing you enter here is saved to the
+					database.
+				</p>
+				<button
+					type="button"
+					class="variant-filled-primary mt-4 btn text-xl"
+					onclick={addCustomReference}
+				>
+					+ Add custom reference material
+				</button>
+				{#if customReferenceNotice}
+					<p
+						class="mt-4 rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-emerald-800"
+						role="status"
+					>
+						{customReferenceNotice}
+					</p>
+				{/if}
+			</section>
 
 			{#if catalogAvailable}
-				<ReferenceMaterialViewer
-					isotopeIds={selectableReferenceCatalogIsotopeIds}
-					selectedItemIds={referenceCatalogItemIds.filter(
-						(id): id is string => typeof id === 'string'
-					)}
-					currentSelectionId={null}
-					onSelectItem={handleReferenceMaterialSelect}
-				/>
-				<br />
+				<h3 class="mt-8 text-2xl font-bold">Or load from the shared catalog</h3>
+				<p class="mt-2">Search saved irradiations and add them to this analysis.</p>
+				<div class="mt-3">
+					<ReferenceMaterialViewer
+						isotopeIds={selectableReferenceCatalogIsotopeIds}
+						selectedItemIds={referenceCatalogItemIds.filter(
+							(id): id is string => typeof id === 'string'
+						)}
+						currentSelectionId={null}
+						onSelectItem={handleReferenceMaterialSelect}
+					/>
+				</div>
 			{/if}
 
-			<h3 class="text-xl font-bold">Library entries ({materials.reference.length})</h3>
+			<h3 class="mt-8 text-xl font-bold">Library entries ({materials.reference.length})</h3>
 			{#if materials.reference.length === 0}
 				<p>
 					No reference materials yet. Add a custom one above{catalogAvailable
@@ -1464,7 +1480,7 @@
 						: ''}.
 				</p>
 			{/if}
-			<div class="mt-2 space-y-2">
+			<div class="mt-2 space-y-2" bind:this={referenceListEl}>
 				{#each materials.reference as reference, index (index)}
 					<CollapsibleCard
 						title={reference.NETL_code || reference.sampleName || `Reference ${index + 1}`}
@@ -1553,10 +1569,7 @@
 			{/if}
 		{:else if stepType === StepType.UNKNOWN_MATERIALS}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<p>
-				Add every unknown material you are trying to understand. Each entry can be edited or
-				removed.
-			</p>
+			<p>Add the unknown materials you want to analyze.</p>
 			<br />
 
 			<h3 class="text-xl font-bold">Unknown materials ({materials.unknown.length})</h3>
@@ -1596,7 +1609,7 @@
 			<button type="button" onclick={addUnknown}>Add unknown material</button>
 		{:else if stepType === StepType.REVIEW}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<p>Please review all information you entered and see computed values below.</p>
+			<p>Review your inputs and the computed results below.</p>
 			<br /><br />
 			<!--Display table & header with unit-->
 			<h3 class="text-xl font-bold">Predicted Concentrations</h3>
