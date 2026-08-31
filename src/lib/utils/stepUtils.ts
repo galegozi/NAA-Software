@@ -1,453 +1,108 @@
 /**
- * Enhanced step utilities with user-facing step numbers and display helpers
+ * Step utilities for the unified analyze wizard.
+ *
+ * The wizard is a single fixed flow for every environment:
+ *   0 Welcome -> 1 Select Isotopes -> 2 Build Library -> 3 Unknown Materials -> 4 Review
  */
 
 export const APP_VERSION = '7.1 Developer Preview ALPHA';
-
-export const STEP_CONSTANTS = {
-	UNAUTHED: {
-		WELCOME: 0,
-		ISOTOPE_COUNT: 1,
-		ISOTOPE_INFO_START: 2,
-		REFERENCE_MATERIAL_OFFSET: 2,
-		REFERENCE_COUNT_OFFSET: 2,
-		REFERENCE_INFO_OFFSET: 3,
-		UNKNOWN_COUNT_OFFSET: 4,
-		UNKNOWN_INFO_OFFSET: 5
-	},
-	AUTHED: {
-		WELCOME: 0,
-		ISOTOPE_DROPDOWN: 1
-	}
-} as const;
 
 /**
  * Step type enumeration
  */
 export enum StepType {
 	WELCOME = 'WELCOME',
-	ISOTOPE_SELECT = 'ISOTOPE_SELECT',
-	ISOTOPE_COUNT = 'ISOTOPE_COUNT',
-	ISOTOPE_INFO = 'ISOTOPE_INFO',
-	REFERENCE_COUNT = 'REFERENCE_COUNT',
-	REFERENCE_INFO = 'REFERENCE_INFO',
-	REFERENCE_MATCH = 'REFERENCE_MATCH',
-	UNKNOWN_COUNT = 'UNKNOWN_COUNT',
-	UNKNOWN_INFO = 'UNKNOWN_INFO',
+	SELECT_ISOTOPES = 'SELECT_ISOTOPES',
+	BUILD_LIBRARY = 'BUILD_LIBRARY',
+	UNKNOWN_MATERIALS = 'UNKNOWN_MATERIALS',
 	REVIEW = 'REVIEW'
 }
 
-function normalizeCounts(referenceCountOrUnknownCount: number, unknownCount?: number) {
-	const hasExplicitUnknown = typeof unknownCount === 'number';
-	return {
-		referenceCount: hasExplicitUnknown ? referenceCountOrUnknownCount : 1,
-		unknownCount: hasExplicitUnknown ? unknownCount : referenceCountOrUnknownCount
-	};
-}
-
-function getWelcomeStep(): number {
-	return STEP_CONSTANTS.UNAUTHED.WELCOME;
-}
-
-function getInitialIsotopeStep(authenticated: boolean): number {
-	return authenticated
-		? STEP_CONSTANTS.AUTHED.ISOTOPE_DROPDOWN
-		: STEP_CONSTANTS.UNAUTHED.ISOTOPE_COUNT;
-}
-
-function getIsotopeInfoStartStep(): number {
-	return STEP_CONSTANTS.UNAUTHED.ISOTOPE_INFO_START;
-}
-
-function getNavigationStepLabel(
-	step: number,
-	isotopeCount: number,
-	referenceCountOrUnknownCount: number,
-	unknownCount?: number,
-	authenticated = false
-): string {
-	const { referenceCount, unknownCount: resolvedUnknownCount } =
-		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
-	const stepType = getStepType(
-		step,
-		isotopeCount,
-		referenceCount,
-		resolvedUnknownCount,
-		authenticated
-	);
-
-	switch (stepType) {
-		case StepType.WELCOME:
-			return 'Welcome';
-		case StepType.ISOTOPE_SELECT:
-			return 'Select Isotopes';
-		case StepType.ISOTOPE_COUNT:
-			return 'Number of Elements';
-		case StepType.ISOTOPE_INFO: {
-			const isoIndex = getIsotopeIndex(step);
-			return isotopeCount === 1
-				? 'Element Information'
-				: `Element ${isoIndex + 1} Information`;
-		}
-		case StepType.REFERENCE_COUNT:
-			return 'Number of Reference Materials';
-		case StepType.REFERENCE_INFO: {
-			if (authenticated) {
-				return 'Select Reference Materials';
-			}
-
-			const refIndex = step - getReferenceInfoStartStep(isotopeCount, authenticated);
-
-			return referenceCount === 1
-				? 'Reference Material Information'
-				: `Reference Material ${refIndex + 1} Information`;
-		}
-		case StepType.UNKNOWN_COUNT:
-			return 'Number of Unknown Materials';
-		case StepType.UNKNOWN_INFO: {
-			const unknownIndex = getUnknownIndex(
-				step,
-				isotopeCount,
-				referenceCount,
-				resolvedUnknownCount,
-				authenticated
-			);
-			return resolvedUnknownCount === 1
-				? 'Unknown Material Information'
-				: `Unknown ${unknownIndex + 1} Information`;
-		}
-		case StepType.REVIEW:
-			return 'Review All Information';
-		default:
-			return 'Step';
-	}
-}
-
 /**
- * Calculate the step number for reference material input
+ * Fixed step numbers (0-indexed; step 0 is the welcome screen).
  */
-// export function getReferenceMaterialStep(isotopeCount: number, authenticated: boolean): number {
-// 	return STEP_CONSTANTS[authenticated ? 'AUTHED' : 'UNAUTHED'].REFERENCE_MATERIAL_OFFSET + isotopeCount;
-// }
+export const STEP = {
+	WELCOME: 0,
+	SELECT_ISOTOPES: 1,
+	BUILD_LIBRARY: 2,
+	UNKNOWN_MATERIALS: 3,
+	REVIEW: 4
+} as const;
 
-/**
- * Calculate the step number for reference material count input.
- * Returns -1 for authenticated users (step is skipped; reference count defaults to 1).
- */
-export function getReferenceCountStep(isotopeCount: number, authenticated = false): number {
-	if (authenticated) return -1;
-	return STEP_CONSTANTS.UNAUTHED.REFERENCE_COUNT_OFFSET + isotopeCount;
-}
+/** Last step of the wizard. */
+export const REVIEW_STEP = STEP.REVIEW;
 
-/**
- * Calculate the start step for reference material info.
- * For authenticated users this is directly after the isotope select step (no count step).
- */
-export function getReferenceInfoStartStep(isotopeCount: number, authenticated = false): number {
-	if (authenticated) return getInitialIsotopeStep(true) + 1;
-	return getReferenceCountStep(isotopeCount, authenticated) + 1;
-}
+/** Denominator for progress ("Step X of TOTAL_STEPS"). */
+export const TOTAL_STEPS = STEP.REVIEW;
 
-/**
- * Calculate the step number for isotope-reference matching
- */
-export function getReferenceMatchStep(
-	isotopeCount: number,
-	referenceCount = 1,
-	authenticated = false
-): number {
-	return getReferenceInfoStartStep(isotopeCount, authenticated) + referenceCount;
-}
+const STEP_ORDER: StepType[] = [
+	StepType.WELCOME,
+	StepType.SELECT_ISOTOPES,
+	StepType.BUILD_LIBRARY,
+	StepType.UNKNOWN_MATERIALS,
+	StepType.REVIEW
+];
 
-/**
- * Calculate the step number for unknown count input
- */
-export function getUnknownCountStep(
-	isotopeCount: number,
-	referenceCount = 1,
-	authenticated = false
-): number {
-	if (authenticated) {
-		// Authenticated flow uses a single "Select Reference Materials" step.
-		return getReferenceInfoStartStep(isotopeCount, true) + 1;
-	}
+const STEP_SHORT_LABEL: Record<StepType, string> = {
+	[StepType.WELCOME]: 'Welcome',
+	[StepType.SELECT_ISOTOPES]: 'Select Isotopes',
+	[StepType.BUILD_LIBRARY]: 'Build Library',
+	[StepType.UNKNOWN_MATERIALS]: 'Unknown Materials',
+	[StepType.REVIEW]: 'Review'
+};
 
-	return getReferenceInfoStartStep(isotopeCount, authenticated) + referenceCount;
-}
-
-/**
- * Calculate the start step for unknown info
- */
-export function getUnknownInfoStartStep(
-	isotopeCount: number,
-	referenceCount = 1,
-	authenticated = false
-): number {
-	return getUnknownCountStep(isotopeCount, referenceCount, authenticated) + 1;
-}
-
-export function getReviewStep(
-	isotopeCount: number,
-	referenceCountOrUnknownCount: number,
-	unknownCount?: number,
-	authenticated = false
-): number {
-	const { referenceCount, unknownCount: resolvedUnknownCount } =
-		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
-	const effectiveReferenceCount = authenticated ? 1 : referenceCount;
-	return (
-		getUnknownInfoStartStep(isotopeCount, effectiveReferenceCount, authenticated) +
-		resolvedUnknownCount
-	);
-}
-
-/**
- * Calculate isotope index from current step
- */
-export function getIsotopeIndex(step: number): number {
-	return step - getIsotopeInfoStartStep();
-}
-
-/**
- * Calculate unknown index from current step and isotope count
- */
-export function getUnknownIndex(
-	step: number,
-	isotopeCount: number,
-	referenceCountOrUnknownCount?: number,
-	unknownCount?: number,
-	authenticated = false
-): number {
-	const { referenceCount } = normalizeCounts(
-		referenceCountOrUnknownCount ?? 1,
-		unknownCount
-	);
-	return step - getUnknownInfoStartStep(isotopeCount, referenceCount, authenticated);
+function clamp(value: number, low: number, high: number): number {
+	return Math.min(Math.max(value, low), high);
 }
 
 /**
  * Get the current step type
  */
-export function getStepType(
-	step: number,
-	isotopeCount: number,
-	referenceCountOrUnknownCount: number,
-	unknownCount?: number,
-	authenticated = false
-): StepType {
-	if (step === getWelcomeStep()) return StepType.WELCOME;
-	if (step === getInitialIsotopeStep(authenticated)) {
-		return authenticated ? StepType.ISOTOPE_SELECT : StepType.ISOTOPE_COUNT;
-	}
-
-	const { referenceCount, unknownCount: resolvedUnknownCount } =
-		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
-	const referenceCountStep = getReferenceCountStep(isotopeCount, authenticated);
-	const referenceInfoStartStep = getReferenceInfoStartStep(isotopeCount, authenticated);
-	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount, authenticated);
-	const reviewStep = getReviewStep(
-		isotopeCount,
-		referenceCount,
-		resolvedUnknownCount,
-		authenticated
-	);
-
-	if (!authenticated && step >= getIsotopeInfoStartStep() && step < referenceCountStep) {
-		return StepType.ISOTOPE_INFO;
-	}
-
-	if (step === referenceCountStep) return StepType.REFERENCE_COUNT;
-	if (step >= referenceInfoStartStep && step < unknownCountStep) {
-		return StepType.REFERENCE_INFO;
-	}
-	if (step === unknownCountStep) return StepType.UNKNOWN_COUNT;
-
-	if (step > unknownCountStep && step < reviewStep) {
-		return StepType.UNKNOWN_INFO;
-	}
-
-	return StepType.REVIEW;
-}
-
-/**
- * Get user-facing step number (1-indexed, excludes welcome screen)
- */
-export function getUserFacingStepNumber(
-	step: number,
-	isotopeCount: number,
-	referenceCountOrUnknownCount: number,
-	unknownCount?: number,
-	authenticated = false
-): number {
-	if (step === getWelcomeStep()) return 0;
-	if (step === getInitialIsotopeStep(authenticated)) return 1;
-
-	const { referenceCount, unknownCount: resolvedUnknownCount } =
-		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
-	const referenceCountStep = getReferenceCountStep(isotopeCount, authenticated);
-	const unknownCountStep = getUnknownCountStep(isotopeCount, referenceCount, authenticated);
-	const reviewStep = getReviewStep(
-		isotopeCount,
-		referenceCount,
-		resolvedUnknownCount,
-		authenticated
-	);
-
-	if (!authenticated && step >= getIsotopeInfoStartStep() && step < reviewStep) return step;
-	if (authenticated && step > getInitialIsotopeStep(true) && step <= reviewStep) return step;
-	if (step === reviewStep) return step;
-	if (step === referenceCountStep) return step;
-	if (step === unknownCountStep) return step;
-	return step;
+export function getStepType(step: number): StepType {
+	return STEP_ORDER[clamp(Math.trunc(step), 0, REVIEW_STEP)] ?? StepType.REVIEW;
 }
 
 /**
  * Get step title for display
  */
-export function getStepTitle(
-	step: number,
-	isotopeCount: number,
-	referenceCountOrUnknownCount: number,
-	unknownCount?: number,
-	authenticated = false
-): string {
-	const stepType = getStepType(
-		step,
-		isotopeCount,
-		referenceCountOrUnknownCount,
-		unknownCount,
-		authenticated
-	);
-	const stepNum = getUserFacingStepNumber(
-		step,
-		isotopeCount,
-		referenceCountOrUnknownCount,
-		unknownCount,
-		authenticated
-	);
-	const { referenceCount } = normalizeCounts(referenceCountOrUnknownCount, unknownCount);
-
-	switch (stepType) {
-		case StepType.WELCOME:
-			return 'Welcome';
-		case StepType.ISOTOPE_SELECT:
-			return `Step ${stepNum}: Select Isotopes`;
-		case StepType.ISOTOPE_COUNT:
-			return `Step ${stepNum}: Number of Elements`;
-		case StepType.ISOTOPE_INFO: {
-			const isoIndex = getIsotopeIndex(step);
-			return `Step ${stepNum}: Element Information for Isotope ${isoIndex + 1}`;
-		}
-		case StepType.REFERENCE_COUNT:
-			return `Step ${stepNum}: Number of Reference Materials`;
-		case StepType.REFERENCE_INFO: {
-			if (authenticated) {
-				return `Step ${stepNum}: Select Reference Materials`;
-			}
-
-			const refIndex = step - getReferenceInfoStartStep(isotopeCount, authenticated);
-
-			return `Step ${stepNum}: Reference Material Information for Reference ${refIndex + 1}`;
-		}
-		case StepType.UNKNOWN_COUNT:
-			return `Step ${stepNum}: Number of Unknown Materials`;
-		case StepType.UNKNOWN_INFO: {
-			const unknownIdx = getUnknownIndex(
-				step,
-				isotopeCount,
-				referenceCount,
-				undefined,
-				authenticated
-			);
-			return `Step ${stepNum}: Unknown Material Information for Unknown ${unknownIdx + 1}`;
-		}
-		case StepType.REVIEW:
-			return `Step ${stepNum}: Review`;
-		default:
-			return `Step ${stepNum}`;
+export function getStepTitle(step: number): string {
+	if (step <= STEP.WELCOME) {
+		return 'Welcome';
 	}
+	const clampedStep = clamp(Math.trunc(step), 0, REVIEW_STEP);
+	return `Step ${clampedStep}: ${STEP_SHORT_LABEL[getStepType(clampedStep)]}`;
 }
 
 /**
  * Determine the back button text based on current step
  */
-export function getBackButtonText(
-	step: number,
-	isotopeCount: number,
-	referenceCountOrUnknownCount: number,
-	unknownCount?: number,
-	authenticated = false
-): string {
-	if (step <= getWelcomeStep()) {
+export function getBackButtonText(step: number): string {
+	if (step <= STEP.WELCOME) {
 		return 'Back';
 	}
-
-	return `Back: ${getNavigationStepLabel(
-		step - 1,
-		isotopeCount,
-		referenceCountOrUnknownCount,
-		unknownCount,
-		authenticated
-	)}`;
+	return `Back: ${STEP_SHORT_LABEL[getStepType(step - 1)]}`;
 }
 
 /**
  * Determine the next button text based on current step
  */
-export function getNextButtonText(
-	step: number,
-	isotopeCount: number,
-	referenceCountOrUnknownCount: number,
-	unknownCount?: number,
-	authenticated = false
-): string {
-	if (step < getWelcomeStep()) {
-		return `Next: ${getNavigationStepLabel(
-			getWelcomeStep(),
-			isotopeCount,
-			referenceCountOrUnknownCount,
-			unknownCount,
-			authenticated
-		)}`;
-	}
-
-	const { referenceCount, unknownCount: resolvedUnknownCount } =
-		normalizeCounts(referenceCountOrUnknownCount, unknownCount);
-	const reviewStep = getReviewStep(
-		isotopeCount,
-		referenceCount,
-		resolvedUnknownCount,
-		authenticated
-	);
-
-	if (step >= reviewStep) {
+export function getNextButtonText(step: number): string {
+	if (step >= REVIEW_STEP) {
 		return 'Review All Information';
 	}
-
-	return `Next: ${getNavigationStepLabel(
-		step + 1,
-		isotopeCount,
-		referenceCountOrUnknownCount,
-		unknownCount,
-		authenticated
-	)}`;
+	return `Next: ${STEP_SHORT_LABEL[getStepType(step + 1)]}`;
 }
 
 /**
  * Calculate progress percentage
  */
-export function getProgressPercentage(
-	step: number,
-	isotopeCount: number,
-	referenceCountOrUnknownCount: number,
-	unknownCount?: number,
-	authenticated = false
-): number {
-	const totalSteps = getReviewStep(
-		isotopeCount,
-		referenceCountOrUnknownCount,
-		unknownCount,
-		authenticated
-	);
-	return Math.round((step / totalSteps) * 100);
+export function getProgressPercentage(step: number): number {
+	return Math.round((clamp(Math.trunc(step), 0, REVIEW_STEP) / REVIEW_STEP) * 100);
+}
+
+/**
+ * The final review step number.
+ */
+export function getReviewStep(): number {
+	return REVIEW_STEP;
 }

@@ -4,6 +4,7 @@
 
 	import type { MaestroParsedData, MaestroRoiEntry } from '$lib/NAAMath/types.js';
 	import MaestroUpload from './maestroUpload.svelte';
+	import { getBaseMaterialErrors } from '$lib/utils/materialValidation.js';
 
 	let {
 		isotopeCount,
@@ -375,45 +376,7 @@
 	}
 
 	export function getValidationErrors(): string[] {
-		const errors: string[] = [];
-
-		if (!materialInfo.NETL_code?.trim()) {
-			errors.push('NETL Code is required');
-		}
-
-		if (!materialInfo.sampleName?.trim()) {
-			errors.push('Sample Name is required');
-		}
-
-		if (materialInfo.mass <= 0) {
-			errors.push('Mass must be greater than 0');
-		}
-
-		if (!Number.isFinite(materialInfo.reactorPower)) {
-			errors.push('Reactor Power must be a valid number');
-		}
-
-		if (materialInfo.irradiationTime <= 0) {
-			errors.push('Irradiation time must be greater than 0');
-		}
-
-		if (materialInfo.decayTime < 0) {
-			errors.push('Decay Time cannot be negative');
-		}
-
-		if (materialInfo.liveTime <= 0) {
-			errors.push('Live Time must be greater than 0');
-		}
-
-		if (materialInfo.realTime <= 0) {
-			errors.push('Real Time must be greater than 0');
-		}
-
-		if (materialInfo.fluence <= 0) {
-			errors.push('Fluence must be greater than 0');
-		}
-
-		return errors;
+		return getBaseMaterialErrors(materialInfo);
 	}
 
 	let showErrors = $state(false);

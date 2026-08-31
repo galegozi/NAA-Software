@@ -7,7 +7,8 @@
 	let {
 		selectedIsotopes = $bindable<IsotopeInfo[]>([]),
 		singleEntryPerIsotope = false,
-		allowedElementNames = [] as string[]
+		allowedElementNames = [] as string[],
+		showSelectionList = true
 	} = $props();
 
 	let isLoading = $state(false);
@@ -434,27 +435,29 @@
 		</div>
 	</div>
 
-		<div class="space-y-3">
-			<h3 class="text-xl font-bold">Selected isotopes</h3>
-			{#if selectedIsotopes.length === 0}
-				<p>Select one or more isotopes to continue.</p>
-			{:else}
-				<div class="isotope-grid">
-					{#each selectedIsotopes as isotope, index (`${isotope.isotopeName}-${index}`)}
-						<div class="rounded border border-gray-300 p-4">
-							<div class="flex items-start justify-between gap-4">
-								<div>
-									<div class="font-bold">{isotope.elementName} ({isotope.isotopeName})</div>
-									<div>Energy: {isotope.energy} keV</div>
-									<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
+		{#if showSelectionList}
+			<div class="space-y-3">
+				<h3 class="text-xl font-bold">Selected isotopes</h3>
+				{#if selectedIsotopes.length === 0}
+					<p>Select one or more isotopes to continue.</p>
+				{:else}
+					<div class="isotope-grid">
+						{#each selectedIsotopes as isotope, index (`${isotope.isotopeName}-${index}`)}
+							<div class="rounded border border-gray-300 p-4">
+								<div class="flex items-start justify-between gap-4">
+									<div>
+										<div class="font-bold">{isotope.elementName} ({isotope.isotopeName})</div>
+										<div>Energy: {isotope.energy} keV</div>
+										<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
+									</div>
+									<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
 								</div>
-								<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
 							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		{/if}
 </div>
 
 <style>

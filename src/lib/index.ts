@@ -25,21 +25,14 @@ export {
 
 export {
 	APP_VERSION,
-	STEP_CONSTANTS,
+	STEP,
+	REVIEW_STEP,
+	TOTAL_STEPS,
 	StepType,
-	getReferenceCountStep,
-	getReferenceInfoStartStep,
-	getReferenceMatchStep,
-	getUnknownCountStep,
-	getUnknownInfoStartStep,
 	getReviewStep,
-	getIsotopeIndex,
-	getUnknownIndex,
 	getStepType,
-	getUserFacingStepNumber,
 	getStepTitle,
 	getNextButtonText,
 	getBackButtonText,
 	getProgressPercentage
 } from './utils/stepUtils.js';
-

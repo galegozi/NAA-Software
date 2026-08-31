@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { tick, untrack } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import IsotopeInfo from '$lib/components/isotopeInfo.svelte';
 	import MaterialInfo from '$lib/components/materialInfo.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
-	import PageCounter from '$lib/components/pageCounter.svelte';
+	import CollapsibleCard from '$lib/components/CollapsibleCard.svelte';
 	import ComputedDisplay from '$lib/components/ComputedDisplay.svelte';
 	import ProgressIndicator from '$lib/components/ProgressIndicator.svelte';
 	import IsotopeViewer from '$lib/components/IsotopeViewer.svelte';
@@ -31,39 +33,37 @@
 		truncateToSigFigs
 	} from '$lib/utils/naaUtils.js';
 	import {
-		isEnvironmentWithoutSignIn
-	} from '$lib/utils/authEnvironment.js';
+		getBaseMaterialErrors,
+		getIsotopeErrors,
+		getReferenceMaterialErrors
+	} from '$lib/utils/materialValidation.js';
+	import { isEnvironmentWithoutSignIn } from '$lib/utils/authEnvironment.js';
 	import {
 		APP_VERSION,
-		getIsotopeIndex,
-		getReferenceInfoStartStep,
-		getUnknownCountStep,
-		getUnknownInfoStartStep,
-		getNextButtonText,
-		getBackButtonText,
-		getStepTitle,
+		REVIEW_STEP,
 		StepType,
-		getStepType,
+		getBackButtonText,
+		getNextButtonText,
 		getProgressPercentage,
-		getReviewStep
+		getStepTitle,
+		getStepType
 	} from '$lib/utils/stepUtils.js';
 
 	const AUTH_STATE_STORAGE_KEY = 'naa-auth-redirect-state';
+	const PERSISTED_STATE_VERSION = 2;
 
 	type PersistedWizardState = {
+		version: number;
 		step: number;
 		title: string;
-		isotopeCount: number;
 		isotopeInfo: IsotopeInfoType[];
-		referenceCount: number;
-		unknownCount: number;
 		materials: {
 			reference: ReferenceMaterial[];
 			unknown: UnknownMaterial[];
 		};
 		referenceIsotopeSelections: string[][];
 		isotopeReferenceMap: number[];
-		referenceCatalogItemIds?: (string | null)[];
+		referenceCatalogItemIds: (string | null)[];
 	};
 
 	type IsotopeMeasurementLink = {
@@ -78,10 +78,8 @@
 		};
 	};
 
-	// Using findRoiIndices from naaUtils
-
-	async function isUserAuthenticated(): Promise<boolean> {
-		// can the user get /api/isotopes?
+	async function detectCatalogAvailability(): Promise<boolean> {
+		// Can this environment reach the read-only isotope catalog API?
 		const apiUrl = import.meta.env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
 		return fetch(apiUrl, {
 			headers: {
@@ -202,113 +200,53 @@
 		}
 	}
 
-	function updateIsotopeData(newCount: number) {
-		isotopeCount = newCount;
+	/**
+	 * Rebuild the per-isotope arrays on every material after the isotope list changes
+	 * length at its tail (catalog add, "Add custom isotope"). Middle removals go through
+	 * `removeIsotope`, which splices each array itself.
+	 */
+	function reconcileIsotopeDependentState() {
+		const isotopeLength = isotopeInfo.length;
+		const needsResize =
+			materials.reference.some((ref) => (ref.counts?.length ?? 0) !== isotopeLength) ||
+			materials.unknown.some((unk) => (unk.counts?.length ?? 0) !== isotopeLength);
 
-		// Preserve existing isotope data, only add/remove as needed
-		const existingIsotopeInfo = [...isotopeInfo];
-		isotopeInfo = Array.from({ length: isotopeCount }, (_, i) => {
-			if (i < existingIsotopeInfo.length) {
-				const existingIso = existingIsotopeInfo[i];
-				return {
-					...existingIso,
-					linkedReference: existingIso.linkedReference ?? 0
-				};
-			}
-			return createIsotopeInfo();
-		});
+		if (!needsResize) {
+			return;
+		}
 
-		// Preserve component references for existing isotopes
-		const existingIsoRef = [...isoRef];
-		isoRef = Array.from({ length: isotopeCount }, (_, i) =>
-			i < existingIsoRef.length ? existingIsoRef[i] : undefined
-		);
+		materials = {
+			reference: materials.reference.map((ref) => resizeReferenceMaterial(ref, isotopeLength)),
+			unknown: materials.unknown.map((unk) => resizeUnknownMaterial(unk, isotopeLength))
+		};
 
-		// Update reference materials, preserving existing values
-		const existingReferences = [...materials.reference];
-		materials.reference = Array.from({ length: referenceCount }, (_, i) => {
-			const currentReference = existingReferences[i] || createReferenceMaterial(isotopeCount);
-			return resizeReferenceMaterial(currentReference, isotopeCount);
-		});
-
-		// Update unknown materials counts, preserving existing count data
-		materials.unknown = materials.unknown.map((unk) => resizeUnknownMaterial(unk, isotopeCount));
-
-		updateIsotopeReferenceMap(isotopeCount, referenceCount);
+		updateIsotopeReferenceMap(isotopeLength, materials.reference.length);
 	}
 
-	function updateReferenceData(newCount: number) {
-		referenceCount = newCount;
-
-		// Preserve existing references, only add/remove as needed
-		const existingReferences = [...materials.reference];
-		const existingRefs = [...matRefs.reference];
-		materials.reference = Array.from({ length: referenceCount }, (_, i) =>
-			i < existingReferences.length
-				? resizeReferenceMaterial(existingReferences[i], isotopeCount)
-				: createReferenceMaterial(isotopeCount)
-		);
-
-		matRefs.reference = Array.from({ length: referenceCount }, (_, i) =>
-			i < existingRefs.length ? existingRefs[i] : undefined
-		);
-
-		const existingSelections = [...referenceIsotopeSelections];
-		referenceIsotopeSelections = Array.from({ length: referenceCount }, (_, i) =>
-			i < existingSelections.length ? existingSelections[i] : new Set<string>()
-		);
-
-		const existingCatalogItemIds = [...referenceCatalogItemIds];
-		referenceCatalogItemIds = Array.from({ length: referenceCount }, (_, i) =>
-			i < existingCatalogItemIds.length ? existingCatalogItemIds[i] : null
-		);
-
-		updateIsotopeReferenceMap(isotopeCount, referenceCount);
+	function toggleExpanded(set: SvelteSet<number>, value: number) {
+		if (set.has(value)) {
+			set.delete(value);
+		} else {
+			set.add(value);
+		}
 	}
 
-	function updateUnknownData(newCount: number) {
-		unknownCount = newCount;
-
-		// Preserve existing unknown materials, only add/remove as needed
-		const existingUnknowns = [...materials.unknown];
-		const existingRefs = [...matRefs.unknown];
-
-		materials.unknown = Array.from({ length: unknownCount }, (_, i) =>
-			i < existingUnknowns.length ? existingUnknowns[i] : createUnknownMaterial(isotopeCount)
-		);
-
-		matRefs.unknown = Array.from({ length: unknownCount }, (_, i) =>
-			i < existingRefs.length ? existingRefs[i] : undefined
-		);
-	}
-
-	function syncIsotopeDependentState(newCount: number) {
-		isotopeCount = newCount;
-
-		const existingIsoRef = [...isoRef];
-		isoRef = Array.from({ length: newCount }, (_, i) =>
-			i < existingIsoRef.length ? existingIsoRef[i] : undefined
-		);
-
-		const existingReferences = [...materials.reference];
-		materials.reference = Array.from({ length: referenceCount }, (_, i) => {
-			const currentReference = existingReferences[i] || createReferenceMaterial(newCount);
-			return resizeReferenceMaterial(currentReference, newCount);
-		});
-
-		materials.unknown = materials.unknown.map((unk) => resizeUnknownMaterial(unk, newCount));
-
-		updateIsotopeReferenceMap(newCount, referenceCount);
+	function remapExpandedAfterRemoval(set: SvelteSet<number>, removedIndex: number) {
+		const kept = [...set]
+			.filter((value) => value !== removedIndex)
+			.map((value) => (value > removedIndex ? value - 1 : value));
+		set.clear();
+		for (const value of kept) {
+			set.add(value);
+		}
 	}
 
 	function getPersistedWizardState(): PersistedWizardState {
 		return {
+			version: PERSISTED_STATE_VERSION,
 			step,
 			title,
-			isotopeCount,
 			isotopeInfo,
-			referenceCount,
-			unknownCount,
 			materials,
 			referenceIsotopeSelections: referenceIsotopeSelections.map((selection) =>
 				Array.from(selection ?? [])
@@ -329,14 +267,6 @@
 		);
 	}
 
-	function clearPersistedWizardState() {
-		if (!browser) {
-			return;
-		}
-
-		window.sessionStorage.removeItem(AUTH_STATE_STORAGE_KEY);
-	}
-
 	function restoreWizardState() {
 		if (!browser) {
 			return;
@@ -349,33 +279,37 @@
 
 		try {
 			const savedState = JSON.parse(rawState) as PersistedWizardState;
-			step = savedState.step ?? 0;
+			if (savedState.version !== PERSISTED_STATE_VERSION) {
+				return;
+			}
+
+			step = Math.min(Math.max(savedState.step ?? 0, 0), REVIEW_STEP);
 			title = savedState.title ?? 'NAA Analysis';
-			isotopeInfo = Array.isArray(savedState.isotopeInfo)
-				? savedState.isotopeInfo
-				: [createIsotopeInfo()];
-			referenceCount = savedState.referenceCount ?? 1;
-			unknownCount = savedState.unknownCount ?? 1;
-			materials = savedState.materials ?? {
-				reference: [createReferenceMaterial(isotopeInfo.length || 1)],
-				unknown: [createUnknownMaterial(isotopeInfo.length || 1)]
+			isotopeInfo = Array.isArray(savedState.isotopeInfo) ? savedState.isotopeInfo : [];
+
+			const restoredMaterials = savedState.materials ?? { reference: [], unknown: [] };
+			materials = {
+				reference: Array.isArray(restoredMaterials.reference) ? restoredMaterials.reference : [],
+				unknown: Array.isArray(restoredMaterials.unknown) ? restoredMaterials.unknown : []
 			};
-			referenceIsotopeSelections = Array.isArray(savedState.referenceIsotopeSelections)
-				? savedState.referenceIsotopeSelections.map((selection) => new Set(selection))
-				: [new Set<string>()];
+
+			referenceIsotopeSelections = materials.reference.map((_, index) => {
+				const saved = savedState.referenceIsotopeSelections?.[index];
+				return new Set<string>(Array.isArray(saved) ? saved : []);
+			});
+			referenceCatalogItemIds = materials.reference.map(
+				(_, index) => savedState.referenceCatalogItemIds?.[index] ?? null
+			);
 			isotopeReferenceMap = Array.isArray(savedState.isotopeReferenceMap)
 				? savedState.isotopeReferenceMap
-				: [0];
-			referenceCatalogItemIds = Array.isArray(savedState.referenceCatalogItemIds)
-				? savedState.referenceCatalogItemIds.map((id) => id ?? null)
-				: [null];
+				: [];
 
 			isoRef = Array.from({ length: isotopeInfo.length }, () => undefined);
 			matRefs = {
-				reference: Array.from({ length: referenceCount }, () => undefined),
-				unknown: Array.from({ length: unknownCount }, () => undefined)
+				reference: Array.from({ length: materials.reference.length }, () => undefined),
+				unknown: Array.from({ length: materials.unknown.length }, () => undefined)
 			};
-			syncIsotopeDependentState(isotopeInfo.length);
+			reconcileIsotopeDependentState();
 		} catch {
 			// Ignore invalid saved state and continue with the current in-memory defaults.
 		} finally {
@@ -392,7 +326,10 @@
 
 		const currentUrl = new URL(window.location.href);
 		const loginUrl = new URL('/.auth/login/aad', currentUrl.origin);
-		loginUrl.searchParams.set('post_login_redirect_uri', currentUrl.pathname + currentUrl.search + currentUrl.hash);
+		loginUrl.searchParams.set(
+			'post_login_redirect_uri',
+			currentUrl.pathname + currentUrl.search + currentUrl.hash
+		);
 
 		persistWizardState();
 		window.location.assign(loginUrl.toString());
@@ -402,49 +339,21 @@
 
 	let title = $state('NAA Analysis');
 
-	// isotope information
-	let isoIndex = $derived(getIsotopeIndex(step));
-	let isotopeCount = $state(1);
-	// holds the reference to each isotope info component
-	let isoRef: (IsotopeInfo | undefined)[] = $state([undefined]);
 	// array of isotope information
-	let isotopeInfo: IsotopeInfoType[] = $state([createIsotopeInfo()]);
-	// computed isotope information
-	let isoComp = $derived(isotopeInfo.map(isoGA));
+	let isotopeInfo: IsotopeInfoType[] = $state([]);
+	// holds the reference to each isotope info component (only set while a pane is open)
+	let isoRef: (IsotopeInfo | undefined)[] = $state([]);
 
-	// step 1: number of isotopes
-	// step 2 to 1 + isotopeCount: isotope information
-	// step 2 + isotopeCount: number of references
-	// step 3 + isotopeCount to 2 + isotopeCount + referenceCount: reference information
-	// step 3 + isotopeCount + referenceCount: number of unknowns
-	// step 4 + isotopeCount + referenceCount to 3 + isotopeCount + referenceCount + unknownCount:
-	// unknown material information
-	// step 4 + isotopeCount + referenceCount + unknownCount: review
-	let userIsAuthenticated = $state(false);
-	let localAuthNotice = $state('');
-	let currentHostname = $state(browser ? window.location.hostname : '');
-	let showSignInPrompt = $derived(
-		currentHostname !== '' && !isEnvironmentWithoutSignIn(currentHostname)
-	);
-	let referenceCount = $state(1);
-	let refIdx = $derived(
-		step >= getReferenceInfoStartStep(isotopeCount, userIsAuthenticated) &&
-		step < getUnknownCountStep(isotopeCount, referenceCount, userIsAuthenticated)
-			? step - getReferenceInfoStartStep(isotopeCount, userIsAuthenticated)
-			: -1
-	);
-	let unknownIdx = $derived(
-		step >= getUnknownInfoStartStep(isotopeCount, referenceCount, userIsAuthenticated)
-			? step - getUnknownInfoStartStep(isotopeCount, referenceCount, userIsAuthenticated)
-			: -1
-	);
-	let unknownCount = $state(1);
-	let matRefs = $state({
-		reference: [undefined] as (RefMatInfo | undefined)[],
-		unknown: [undefined] as (MaterialInfo | undefined)[]
+	let materials = $state<{ reference: ReferenceMaterial[]; unknown: UnknownMaterial[] }>({
+		reference: [],
+		unknown: []
 	});
-	let referenceIsotopeSelections = $state<Set<string>[]>([new Set<string>()]);
-	let referenceCatalogItemIds = $state<(string | null)[]>([null]);
+	let matRefs = $state({
+		reference: [] as (RefMatInfo | undefined)[],
+		unknown: [] as (MaterialInfo | undefined)[]
+	});
+	let referenceIsotopeSelections = $state<Set<string>[]>([]);
+	let referenceCatalogItemIds = $state<(string | null)[]>([]);
 	let referenceCatalogMessage = $state('');
 	let referenceCatalogError = $state('');
 	let referenceCatalogWarning = $state('');
@@ -452,11 +361,26 @@
 	let isotopeCatalogById = $state<Record<string, IsotopeCatalogItem>>({});
 	let hasRequestedIsotopeCatalog = $state(false);
 	let hasRequestedIsotopeMeasurementLinks = $state(false);
-	let materials = $state({
-		reference: [createReferenceMaterial(1)],
-		unknown: [createUnknownMaterial(1)]
-	});
-	let isotopeReferenceMap = $state<number[]>([0]);
+	let isotopeReferenceMap = $state<number[]>([]);
+
+	let catalogAvailable = $state(false);
+	let localAuthNotice = $state('');
+	let currentHostname = $state(browser ? window.location.hostname : '');
+
+	const expandedIsotopes = new SvelteSet<number>();
+	const expandedReferences = new SvelteSet<number>();
+	const expandedUnknowns = new SvelteSet<number>();
+
+	// isotope / material counts are derived from the working lists
+	let isotopeCount = $derived(isotopeInfo.length);
+	let referenceCount = $derived(materials.reference.length);
+	// computed isotope information
+	let isoComp = $derived(isotopeInfo.map(isoGA));
+
+	let showSignInPrompt = $derived(
+		currentHostname !== '' && !isEnvironmentWithoutSignIn(currentHostname) && !catalogAvailable
+	);
+
 	let matComp = $derived({
 		reference: materials.reference.map((ref) => matGA(ref)),
 		unknown: materials.unknown.map((unk) => matGA(unk))
@@ -552,14 +476,28 @@
 		return 0;
 	}
 
+	/**
+	 * Does reference `referenceIndex` provide data for isotope `isotopeIndex`?
+	 * A catalog reference covers exactly the isotope rows it was matched against.
+	 * A custom reference with no explicit isotope selection covers every isotope
+	 * (this mirrors `refMatInfo.svelte`'s "empty selection = all enabled").
+	 */
+	function referenceCoversIsotope(referenceIndex: number, isotopeIndex: number): boolean {
+		const selection = referenceIsotopeSelections[referenceIndex];
+		if (selection instanceof Set && selection.has(getIsotopeSelectionKey(isotopeIndex))) {
+			return true;
+		}
+		return (
+			referenceCatalogItemIds[referenceIndex] === null &&
+			(!(selection instanceof Set) || selection.size === 0)
+		);
+	}
+
 	$effect(() => {
 		const currentMap = isotopeReferenceMap ?? [];
 		const nextMap = Array.from({ length: isotopeCount }, (_, index) => {
-			const selectionKey = getIsotopeSelectionKey(index);
-			const coveringRefs = referenceIsotopeSelections
-				.map((selection, refIndex) =>
-					selection instanceof Set && selection.has(selectionKey) ? refIndex : -1
-				)
+			const coveringRefs = materials.reference
+				.map((_, refIndex) => (referenceCoversIsotope(refIndex, index) ? refIndex : -1))
 				.filter((refIndex) => refIndex >= 0 && refIndex < referenceCount);
 
 			const linkedReference = isotopeInfo[index]?.linkedReference;
@@ -610,31 +548,21 @@
 	});
 
 	let everythingComp = $derived(
-		isotopeInfo.map((iso, index) => {
-			const referenceIndex = getLinkedReferenceIndex(index);
-			const reference = materials.reference[referenceIndex] ?? materials.reference[0];
-			return materials.unknown.map((unk) => EGA(reference, unk, iso, index));
-		})
+		materials.reference.length === 0
+			? isotopeInfo.map(() => [] as ReturnType<typeof EGA>[])
+			: isotopeInfo.map((iso, index) => {
+					const referenceIndex = getLinkedReferenceIndex(index);
+					const reference = materials.reference[referenceIndex] ?? materials.reference[0];
+					return materials.unknown.map((unk) => EGA(reference, unk, iso, index));
+				})
 	);
 
-	let nextButtonText = $derived(
-		getNextButtonText(step, isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
-	);
-	let backButtonText = $derived(
-		getBackButtonText(step, isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
-	);
-	let stepTitle = $derived(
-		getStepTitle(step, isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
-	);
-	let stepType = $derived(
-		getStepType(step, isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
-	);
-	let progressPercentage = $derived(
-		getProgressPercentage(step, isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
-	);
-	let totalSteps = $derived(
-		getReviewStep(isotopeCount, referenceCount, unknownCount, userIsAuthenticated)
-	);
+	let nextButtonText = $derived(getNextButtonText(step));
+	let backButtonText = $derived(getBackButtonText(step));
+	let stepTitle = $derived(getStepTitle(step));
+	let stepType = $derived(getStepType(step));
+	let progressPercentage = $derived(getProgressPercentage(step));
+	const totalSteps = REVIEW_STEP;
 	let showProgress = $derived(step > 0);
 
 	// Memoized function to prevent recreation on every render
@@ -655,9 +583,9 @@
 
 		let cancelled = false;
 
-		void isUserAuthenticated().then((isAuthenticated) => {
+		void detectCatalogAvailability().then((available) => {
 			if (!cancelled) {
-				userIsAuthenticated = isAuthenticated;
+				catalogAvailable = available;
 			}
 		});
 
@@ -666,36 +594,14 @@
 		};
 	});
 
+	// Keep the per-isotope arrays on every material aligned with the isotope list.
 	$effect(() => {
-		if (!userIsAuthenticated) {
-			return;
-		}
-
-		const onlyHasBlankManualIsotope =
-			isotopeInfo.length === 1 &&
-			!isotopeInfo[0]?.elementName &&
-			!isotopeInfo[0]?.isotopeName &&
-			isotopeInfo[0]?.energy === 0 &&
-			isotopeInfo[0]?.halfLife === 0;
-
-		if (onlyHasBlankManualIsotope) {
-			isotopeInfo = [];
-			syncIsotopeDependentState(0);
-		}
+		void isotopeInfo.length;
+		untrack(reconcileIsotopeDependentState);
 	});
 
 	$effect(() => {
-		if (!userIsAuthenticated) {
-			return;
-		}
-
-		if (isotopeInfo.length !== isotopeCount) {
-			syncIsotopeDependentState(isotopeInfo.length);
-		}
-	});
-
-	$effect(() => {
-		if (!browser || !userIsAuthenticated) {
+		if (!browser || !catalogAvailable) {
 			return;
 		}
 
@@ -765,10 +671,7 @@
 		}
 
 		// Backward-compatible fallback for legacy catalog entries that don't carry energy.
-		if (
-			idMatches.length === 1 &&
-			getFiniteEnergy(isotopes[idMatches[0].index]?.energy) === null
-		) {
+		if (idMatches.length === 1 && getFiniteEnergy(isotopes[idMatches[0].index]?.energy) === null) {
 			return { sourceIndex: idMatches[0].index, matchedIsotopeId: idMatches[0].isotopeId };
 		}
 
@@ -932,38 +835,88 @@
 			return;
 		}
 
-		const hasOnlyPlaceholder =
-			referenceCatalogItemIds.length === 1 && referenceCatalogItemIds[0] === null;
-
-		let nextReferences: ReferenceMaterial[];
-		let nextSelections: Set<string>[];
-		let nextCatalogItemIds: (string | null)[];
-
-		if (hasOnlyPlaceholder) {
-			nextReferences = [nextReference];
-			nextSelections = [matchedSelection];
-			nextCatalogItemIds = [selectionId];
-		} else {
-			nextReferences = [...materials.reference, nextReference];
-			nextSelections = [...referenceIsotopeSelections, matchedSelection];
-			nextCatalogItemIds = [...referenceCatalogItemIds, selectionId];
-		}
-
 		materials = {
 			...materials,
-			reference: nextReferences
+			reference: [...materials.reference, nextReference]
 		};
-		referenceIsotopeSelections = nextSelections;
-		referenceCatalogItemIds = nextCatalogItemIds;
-		referenceCount = nextReferences.length;
-		updateIsotopeReferenceMap(isotopeCount, nextReferences.length);
+		referenceIsotopeSelections = [...referenceIsotopeSelections, matchedSelection];
+		referenceCatalogItemIds = [...referenceCatalogItemIds, selectionId];
+		matRefs.reference = [...matRefs.reference, undefined];
+		updateIsotopeReferenceMap(isotopeCount, materials.reference.length);
 
-		referenceCatalogMessage =
-			`Added ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName})${sourceMaterial.irradiationType ? ` [${sourceMaterial.irradiationType}]` : ''}. Covers ${matchedSelection.size} isotope row(s).`;
+		referenceCatalogMessage = `Added ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName})${sourceMaterial.irradiationType ? ` [${sourceMaterial.irradiationType}]` : ''}. Covers ${matchedSelection.size} isotope row(s).`;
 		referenceCatalogWarning = proxyWarnings.join(' ');
 	}
 
-	function removeReferenceMaterialCatalogItem(referenceIndex: number) {
+	function addCustomIsotope() {
+		isotopeInfo = [...isotopeInfo, createIsotopeInfo()];
+		isoRef = [...isoRef, undefined];
+		expandedIsotopes.add(isotopeInfo.length - 1);
+	}
+
+	function removeIsotope(isotopeIndex: number) {
+		if (isotopeIndex < 0 || isotopeIndex >= isotopeInfo.length) {
+			return;
+		}
+
+		const dropAt = <T,>(arr: T[]): T[] => arr.filter((_, index) => index !== isotopeIndex);
+
+		isotopeInfo = dropAt(isotopeInfo).map((iso) => ({ ...iso }));
+		isoRef = dropAt(isoRef);
+
+		materials = {
+			reference: materials.reference.map((ref) => ({
+				...ref,
+				counts: dropAt(ref.counts ?? []),
+				knownConcentration: dropAt(ref.knownConcentration ?? []),
+				knownUncertainty: dropAt(ref.knownUncertainty ?? []),
+				concentrationUnits: dropAt(ref.concentrationUnits ?? [])
+			})),
+			unknown: materials.unknown.map((unk) => ({
+				...unk,
+				counts: dropAt(unk.counts ?? [])
+			}))
+		};
+
+		referenceIsotopeSelections = referenceIsotopeSelections.map((selection) => {
+			const next = new Set<string>();
+			if (selection instanceof Set) {
+				for (const key of selection) {
+					const index = Number(key.slice('isotope:'.length));
+					if (Number.isNaN(index)) {
+						continue;
+					}
+					if (index < isotopeIndex) {
+						next.add(key);
+					} else if (index > isotopeIndex) {
+						next.add(getIsotopeSelectionKey(index - 1));
+					}
+				}
+			}
+			return next;
+		});
+
+		remapExpandedAfterRemoval(expandedIsotopes, isotopeIndex);
+		updateIsotopeReferenceMap(isotopeInfo.length, materials.reference.length);
+	}
+
+	function addCustomReference() {
+		referenceCatalogMessage = '';
+		referenceCatalogError = '';
+		referenceCatalogWarning = '';
+
+		materials = {
+			...materials,
+			reference: [...materials.reference, createReferenceMaterial(isotopeCount)]
+		};
+		referenceIsotopeSelections = [...referenceIsotopeSelections, new Set<string>()];
+		referenceCatalogItemIds = [...referenceCatalogItemIds, null];
+		matRefs.reference = [...matRefs.reference, undefined];
+		expandedReferences.add(materials.reference.length - 1);
+		updateIsotopeReferenceMap(isotopeCount, materials.reference.length);
+	}
+
+	function removeReference(referenceIndex: number) {
 		if (referenceIndex < 0 || referenceIndex >= materials.reference.length) {
 			return;
 		}
@@ -972,37 +925,48 @@
 		referenceCatalogError = '';
 		referenceCatalogWarning = '';
 
-		const nextReferences = materials.reference.filter((_, idx) => idx !== referenceIndex);
-		const nextSelections = referenceIsotopeSelections.filter((_, idx) => idx !== referenceIndex);
-		const nextCatalogItemIds = referenceCatalogItemIds.filter((_, idx) => idx !== referenceIndex);
+		materials = {
+			...materials,
+			reference: materials.reference.filter((_, index) => index !== referenceIndex)
+		};
+		referenceIsotopeSelections = referenceIsotopeSelections.filter(
+			(_, index) => index !== referenceIndex
+		);
+		referenceCatalogItemIds = referenceCatalogItemIds.filter(
+			(_, index) => index !== referenceIndex
+		);
+		matRefs.reference = matRefs.reference.filter((_, index) => index !== referenceIndex);
+		remapExpandedAfterRemoval(expandedReferences, referenceIndex);
 
-		if (nextReferences.length === 0) {
-			materials = {
-				...materials,
-				reference: [createReferenceMaterial(isotopeCount)]
-			};
-			referenceIsotopeSelections = [new Set<string>()];
-			referenceCatalogItemIds = [null];
-			referenceCount = 1;
-			updateIsotopeReferenceMap(isotopeCount, 1);
+		updateIsotopeReferenceMap(isotopeCount, materials.reference.length);
+	}
+
+	function addUnknown() {
+		materials = {
+			...materials,
+			unknown: [...materials.unknown, createUnknownMaterial(isotopeCount)]
+		};
+		matRefs.unknown = [...matRefs.unknown, undefined];
+		expandedUnknowns.add(materials.unknown.length - 1);
+	}
+
+	function removeUnknown(unknownIndex: number) {
+		if (unknownIndex < 0 || unknownIndex >= materials.unknown.length) {
 			return;
 		}
 
 		materials = {
 			...materials,
-			reference: nextReferences
+			unknown: materials.unknown.filter((_, index) => index !== unknownIndex)
 		};
-		referenceIsotopeSelections = nextSelections;
-		referenceCatalogItemIds = nextCatalogItemIds;
-		referenceCount = nextReferences.length;
-		updateIsotopeReferenceMap(isotopeCount, nextReferences.length);
+		matRefs.unknown = matRefs.unknown.filter((_, index) => index !== unknownIndex);
+		remapExpandedAfterRemoval(expandedUnknowns, unknownIndex);
 	}
 
 	function getCoveringReferenceIndicesForIsotope(isotopeIndex: number): number[] {
-		const selectionKey = getIsotopeSelectionKey(isotopeIndex);
-		return referenceIsotopeSelections
-			.map((selection, referenceIndex) =>
-				selection instanceof Set && selection.has(selectionKey) ? referenceIndex : -1
+		return materials.reference
+			.map((_, referenceIndex) =>
+				referenceCoversIsotope(referenceIndex, isotopeIndex) ? referenceIndex : -1
 			)
 			.filter((referenceIndex) => referenceIndex >= 0 && referenceIndex < referenceCount);
 	}
@@ -1016,14 +980,35 @@
 		isotopeInfo = isotopeInfo.map((iso, index) =>
 			index === isotopeIndex
 				? {
-					...iso,
-					linkedReference: referenceIndex
-				}
+						...iso,
+						linkedReference: referenceIndex
+					}
 				: iso
 		);
 	}
 
-	function getIsotopeDisplayName(isotope: IsotopeInfoType, index: number): string {
+	function enabledIsotopeIndicesForReference(referenceIndex: number): number[] {
+		const selection = referenceIsotopeSelections[referenceIndex];
+		const used = getUsedIsotopeLabels(referenceIndex);
+		const indices: number[] = [];
+		for (let i = 0; i < isotopeInfo.length; i++) {
+			const key = getIsotopeSelectionKey(i);
+			if (used.has(key)) {
+				continue;
+			}
+			if (selection instanceof Set && selection.size > 0 && !selection.has(key)) {
+				continue;
+			}
+			indices.push(i);
+		}
+		return indices;
+	}
+
+	function getIsotopeDisplayName(isotope: IsotopeInfoType | undefined, index: number): string {
+		if (!isotope) {
+			return `Isotope ${index + 1}`;
+		}
+
 		const energy = getFiniteEnergy(isotope.energy);
 		const energyLabel = energy !== null ? ` @ ${energy.toLocaleString()} keV` : '';
 
@@ -1034,129 +1019,104 @@
 		return `Isotope ${index + 1}${energyLabel}`;
 	}
 
+	function expandIsotope(index: number) {
+		expandedIsotopes.add(index);
+	}
+
+	function expandReference(index: number) {
+		expandedReferences.add(index);
+	}
+
+	function expandUnknown(index: number) {
+		expandedUnknowns.add(index);
+	}
+
 	function validateCurrentStep(): boolean {
 		validationErrors = [];
 
-		if (stepType === StepType.ISOTOPE_SELECT) {
-			if (isotopeCount < 1) {
-				validationErrors = ['Please select at least one isotope from the database'];
+		if (stepType === StepType.SELECT_ISOTOPES) {
+			if (isotopeInfo.length < 1) {
+				validationErrors = ['Add at least one isotope to analyze.'];
 				return false;
 			}
 
-			const hasInvalidSelection = isotopeInfo.some(
-				(isotope) =>
-					!isotope.elementName ||
-					!isotope.isotopeName ||
-					isotope.energy <= 0 ||
-					isotope.halfLife <= 0
-			);
-
-			if (hasInvalidSelection) {
-				validationErrors = ['One or more selected isotopes could not be loaded correctly'];
-				return false;
-			}
-		}
-
-		// Validate isotope count step
-		if (stepType === StepType.ISOTOPE_COUNT) {
-			if (!Number.isInteger(isotopeCount) || isotopeCount < 1) {
-				validationErrors = ['Please enter a positive integer for the number of isotopes'];
-				return false;
-			}
-		}
-
-		// Validate isotope info steps
-		if (stepType === StepType.ISOTOPE_INFO && isoIndex >= 0 && isoIndex < isotopeCount) {
-			if (isoRef[isoIndex] && typeof isoRef[isoIndex]?.validateIsotopeInfo === 'function') {
-				const isValid = isoRef[isoIndex]!.validateIsotopeInfo();
-				if (!isValid) {
-					if (typeof isoRef[isoIndex]?.showValidationErrors === 'function') {
-						isoRef[isoIndex]!.showValidationErrors();
-					}
-					const errors = isoRef[isoIndex]!.getValidationErrors?.() || [
-						'Please fill in all required fields'
-					];
-					validationErrors = errors;
-					return false;
+			const problems: string[] = [];
+			isotopeInfo.forEach((iso, index) => {
+				const errors = getIsotopeErrors(iso);
+				if (errors.length > 0) {
+					expandIsotope(index);
+					const label = getIsotopeDisplayName(iso, index);
+					problems.push(...errors.map((error) => `${label}: ${error}`));
 				}
+			});
+
+			if (problems.length > 0) {
+				validationErrors = problems;
+				return false;
 			}
 		}
 
-		// Validate reference count step
-		if (stepType === StepType.REFERENCE_COUNT) {
-			if (!Number.isInteger(referenceCount) || referenceCount < 1) {
+		if (stepType === StepType.BUILD_LIBRARY) {
+			if (materials.reference.length === 0) {
 				validationErrors = [
-					'Please enter a positive integer for the number of reference materials'
+					catalogAvailable
+						? 'Add at least one reference material — enter a custom one or load one from the catalog.'
+						: 'Add at least one custom reference material.'
+				];
+				return false;
+			}
+
+			const problems: string[] = [];
+			materials.reference.forEach((reference, index) => {
+				const errors = getReferenceMaterialErrors(
+					reference,
+					enabledIsotopeIndicesForReference(index),
+					(isotopeIndex) => getIsotopeDisplayName(isotopeInfo[isotopeIndex], isotopeIndex)
+				);
+				if (errors.length > 0) {
+					expandReference(index);
+					const label = getReferenceLabel(index);
+					problems.push(...errors.map((error) => `${label}: ${error}`));
+				}
+			});
+
+			if (problems.length > 0) {
+				validationErrors = problems;
+				return false;
+			}
+
+			const uncovered = isotopeInfo
+				.map((iso, index) => ({ iso, index }))
+				.filter(({ index }) => getCoveringReferenceIndicesForIsotope(index).length === 0)
+				.map(({ iso, index }) => getIsotopeDisplayName(iso, index));
+
+			if (uncovered.length > 0) {
+				validationErrors = [
+					`These isotopes are not covered by any reference material: ${uncovered.join(', ')}`
 				];
 				return false;
 			}
 		}
 
-		// Validate reference material steps
-		if (refIdx >= 0 && refIdx < referenceCount) {
-			if (userIsAuthenticated) {
-				const selectedReferenceIds = referenceCatalogItemIds.filter(
-					(id): id is string => typeof id === 'string'
-				);
-				if (selectedReferenceIds.length === 0) {
-					validationErrors = ['Please select at least one reference irradiation before continuing.'];
-					return false;
-				}
-
-				const missingReferenceIrradiations = isotopeInfo
-					.map((iso, index) => ({ iso, index }))
-					.filter(({ index }) => getCoveringReferenceIndicesForIsotope(index).length === 0)
-					.map(({ iso, index }) => getIsotopeDisplayName(iso, index));
-
-				if (missingReferenceIrradiations.length > 0) {
-					validationErrors = [
-						`Missing reference irradiations for selected isotopes: ${missingReferenceIrradiations.join(', ')}`
-					];
-					return false;
-				}
-			} else {
-				const currentRef = matRefs.reference[refIdx];
-				if (currentRef && typeof currentRef.validateRefMatInfo === 'function') {
-					const isValid = currentRef.validateRefMatInfo();
-					if (!isValid) {
-						if (typeof currentRef.showValidationErrors === 'function') {
-							currentRef.showValidationErrors();
-						}
-						const errors = currentRef.getValidationErrors?.() || [
-							'Please fill in all required fields'
-						];
-						validationErrors = errors;
-						return false;
-					}
-				}
-			}
-		}
-
-		// Validate unknown count step
-		if (stepType === StepType.UNKNOWN_COUNT) {
-			if (!Number.isInteger(unknownCount) || unknownCount < 1) {
-				validationErrors = ['Please enter a positive integer for the number of unknown materials'];
+		if (stepType === StepType.UNKNOWN_MATERIALS) {
+			if (materials.unknown.length < 1) {
+				validationErrors = ['Add at least one unknown material.'];
 				return false;
 			}
-		}
 
-		// Validate unknown material steps
-		if (stepType === StepType.UNKNOWN_INFO && unknownIdx >= 0 && unknownIdx < unknownCount) {
-			if (
-				matRefs.unknown[unknownIdx] &&
-				typeof matRefs.unknown[unknownIdx]?.validateMaterialInfo === 'function'
-			) {
-				const isValid = matRefs.unknown[unknownIdx]!.validateMaterialInfo();
-				if (!isValid) {
-					if (typeof matRefs.unknown[unknownIdx]?.showValidationErrors === 'function') {
-						matRefs.unknown[unknownIdx]!.showValidationErrors();
-					}
-					const errors = matRefs.unknown[unknownIdx]!.getValidationErrors?.() || [
-						'Please fill in all required fields'
-					];
-					validationErrors = errors;
-					return false;
+			const problems: string[] = [];
+			materials.unknown.forEach((unknown, index) => {
+				const errors = getBaseMaterialErrors(unknown);
+				if (errors.length > 0) {
+					expandUnknown(index);
+					const label = unknown.NETL_code || `Unknown ${index + 1}`;
+					problems.push(...errors.map((error) => `${label}: ${error}`));
 				}
+			});
+
+			if (problems.length > 0) {
+				validationErrors = problems;
+				return false;
 			}
 		}
 
@@ -1175,6 +1135,10 @@
 		return details.length > 0 ? `${labelBase} — ${details.join(' · ')}` : labelBase;
 	}
 
+	function getReferenceSourceLabel(index: number): string {
+		return referenceCatalogItemIds[index] ? 'From catalog' : 'Custom (session only)';
+	}
+
 	function handleReferenceMaterialSelect(
 		item: ReferenceMaterialCatalogItem,
 		counting: ReferenceMaterialCatalogCounting
@@ -1182,18 +1146,33 @@
 		applyReferenceMaterialCatalogItem(item, counting);
 	}
 
-	const next = () => {
+	function revealInlineValidationErrors() {
+		if (stepType === StepType.SELECT_ISOTOPES) {
+			isoRef.forEach((ref) => ref?.showValidationErrors?.());
+		} else if (stepType === StepType.BUILD_LIBRARY) {
+			matRefs.reference.forEach((ref) => ref?.showValidationErrors?.());
+		} else if (stepType === StepType.UNKNOWN_MATERIALS) {
+			matRefs.unknown.forEach((ref) => ref?.showValidationErrors?.());
+		}
+	}
+
+	const next = async () => {
 		// Prevent navigating beyond the final review step
 		if (step >= totalSteps) return;
 
 		// Clear previous errors
 		validationErrors = [];
 
-		// Validate before proceeding (skip validation only for welcome step)
+		// Validate before proceeding (skip validation only for the welcome step).
+		// Failures are surfaced in the validationErrors banner, by expanding the
+		// offending cards, and by inline field errors once those cards mount.
 		if (step > 0 && step < totalSteps) {
 			if (!validateCurrentStep()) {
-				// Show error message
-				alert('Please complete all required fields before proceeding.');
+				await tick();
+				revealInlineValidationErrors();
+				if (browser) {
+					window.scrollTo({ top: 0, behavior: 'smooth' });
+				}
 				return;
 			}
 		}
@@ -1319,6 +1298,16 @@
 		<ProgressIndicator currentStep={step} {totalSteps} percentage={progressPercentage} />
 	{/if}
 
+	{#if validationErrors.length > 0}
+		<div class="my-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+			<ul class="ml-4 list-outside list-disc">
+				{#each validationErrors as validationError, errorIndex (errorIndex)}
+					<li>{validationError}</li>
+				{/each}
+			</ul>
+		</div>
+	{/if}
+
 	<form
 		onsubmit={(e) => {
 			e.preventDefault();
@@ -1334,7 +1323,7 @@
 			</label>
 			<br />
 			<p>This version is a developer preview. Please use with caution.</p>
-			<br/>
+			<br />
 			<p>Here is what is included in this software:</p>
 			<ul class="ml-6 list-outside list-disc">
 				<li>
@@ -1347,22 +1336,31 @@
 						<li>A table displaying concentrations and uncertainties with a CSV download link</li>
 					</ul>
 				</li>
-				<li>Automatic loading of isotope information from the database.</li>
-				<li>Automatic loading of reference materials from the database.</li>
-				<li>Automatic loading of more items whenever the user scrolls down to the bottom of a list.</li>
+				<li>
+					Browse and load isotopes from the shared catalog when it is available, or enter your own.
+				</li>
+				<li>
+					Build a reference library by combining catalog entries with your own one-time custom
+					reference materials (custom data is never saved to the database).
+				</li>
+				<li>
+					Automatic loading of more items whenever you scroll to the bottom of a catalog list.
+				</li>
 			</ul>
 			<br />
 			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
 			<br />
 			<p>
-				In this version (v{APP_VERSION}), the main focus is to work on small bug fixes and improvements after the big 7.0 release.
+				In this version (v{APP_VERSION}), the main focus is to work on small bug fixes and
+				improvements after the big 7.0 release.
 			</p>
 			<br />
-			<h2 class="text-2xl font-bold">
-				Next planned releases
-			</h2>
+			<h2 class="text-2xl font-bold">Next planned releases</h2>
 			<ol class="ml-6 list-outside list-decimal">
-				<li>Version 7.1: Minor updates and bug fixes, including significant figure handling and the normal/compton selector for ROI files.</li>
+				<li>
+					Version 7.1: Minor updates and bug fixes, including significant figure handling and the
+					normal/compton selector for ROI files.
+				</li>
 				<li>Version 8.0: Interference</li>
 			</ol>
 			<br />
@@ -1374,234 +1372,228 @@
 			</ul>
 			<br />
 			<button type="button" onclick={next}>Get Started</button>
-		{:else if stepType === StepType.ISOTOPE_COUNT && !userIsAuthenticated}
+		{:else if stepType === StepType.SELECT_ISOTOPES}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			{#if showSignInPrompt}
-				<p>Hate typing in isotope information? Sign in here.</p>
-				<br />
-				<button
-					type="button"
-					class="btn variant-filled-primary"
-					onclick={handleSignIn}
-				>
-					Sign In
-				</button>
-				{#if localAuthNotice}
-					<p class="mt-3 text-sm text-amber-700">{localAuthNotice}</p>
+			<p>
+				{#if catalogAvailable}
+					Add every isotope you want to analyze. Load them from the catalog, add your own, or
+					combine both. Every entry can be edited.
+				{:else}
+					Add every isotope you want to analyze. Every entry can be edited.
 				{/if}
+			</p>
+			{#if showSignInPrompt}
+				<p class="mt-2 text-sm">
+					Not seeing the catalog? <button type="button" class="underline" onclick={handleSignIn}
+						>Sign in</button
+					>
+					to reach the shared catalog.
+					{#if localAuthNotice}<span class="text-amber-700">{localAuthNotice}</span>{/if}
+				</p>
+			{/if}
+			<br />
+
+			{#if catalogAvailable}
+				<IsotopeViewer bind:selectedIsotopes={isotopeInfo} showSelectionList={false} />
 				<br />
 			{/if}
-			<PageCounter pageType="elements" pageCount={isotopeCount} updateFxn={updateIsotopeData} />
-			<br />
-			<button type="button" onclick={prev}>{backButtonText}</button>
-			&nbsp;&nbsp;
-			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if stepType === StepType.ISOTOPE_INFO && !userIsAuthenticated}
-			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<p>
-				This is where you enter information about isotope {isoIndex + 1}. This is used in the
-				concentration calculations.
-			</p>
-			<br /><br />
-			<IsotopeInfo bind:this={isoRef[isoIndex]} bind:isotopeInfo={isotopeInfo[isoIndex]} />
-			<br />
-			<details>
-				<summary>Expand for debug information</summary>
-				<ComputedDisplay
-					title="Computed Isotope Information for Isotope {isoIndex + 1}"
-					data={isoComp[isoIndex]}
-				/>
-			</details>
 
-			<br />
-
-			<button type="button" onclick={prev}>{backButtonText}</button>
-			&nbsp;&nbsp;
-			<button type="button" onclick={next}> {nextButtonText} </button>
-			<br /><br />
-		{:else if stepType === StepType.ISOTOPE_SELECT}
-			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<p>
-				Search the isotope catalog and add the isotopes you want to analyze. The selected
-				entries replace the manual isotope count and isotope information steps.
-			</p>
-			<br />
-			<IsotopeViewer bind:selectedIsotopes={isotopeInfo} />
-			<br />
-			<button type="button" onclick={prev}>{backButtonText}</button>
-			&nbsp;&nbsp;
-			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if stepType === StepType.REFERENCE_COUNT}
-			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<PageCounter
-				pageType="reference materials"
-				pageCount={referenceCount}
-				updateFxn={updateReferenceData}
-			/>
-			<button type="button" onclick={prev}>{backButtonText}</button>
-			&nbsp;&nbsp;
-			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if refIdx >= 0 && refIdx < referenceCount}
-			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			{#if userIsAuthenticated}
+			<h3 class="text-xl font-bold">Isotopes to analyze ({isotopeInfo.length})</h3>
+			{#if isotopeInfo.length === 0}
 				<p>
-					Select reference irradiations from the catalog below. You can combine multiple
-					irradiations to cover all isotopes, then choose which irradiation to use per isotope.
+					No isotopes yet. {catalogAvailable
+						? 'Add one from the catalog above or create a custom isotope.'
+						: 'Create a custom isotope to get started.'}
 				</p>
-				<br />
+			{/if}
+			<div class="mt-2 space-y-2">
+				{#each isotopeInfo as isotope, index (index)}
+					<CollapsibleCard
+						title={getIsotopeDisplayName(isotope, index)}
+						subtitle={isotope.id ? 'From catalog' : 'Custom'}
+						open={expandedIsotopes.has(index)}
+						onToggle={() => toggleExpanded(expandedIsotopes, index)}
+						onRemove={() => removeIsotope(index)}
+					>
+						<IsotopeInfo bind:this={isoRef[index]} bind:isotopeInfo={isotopeInfo[index]} />
+						<details class="mt-3">
+							<summary class="cursor-pointer text-sm">Debug information</summary>
+							<ComputedDisplay
+								title="Computed Isotope Information for Isotope {index + 1}"
+								data={isoComp[index]}
+							/>
+						</details>
+					</CollapsibleCard>
+				{/each}
+			</div>
+			<br />
+			<button type="button" onclick={addCustomIsotope}>Add custom isotope</button>
+		{:else if stepType === StepType.BUILD_LIBRARY}
+			<h2 class="text-2xl font-bold">{stepTitle}</h2>
+			<p>
+				{#if catalogAvailable}
+					Build the reference library for this analysis. Add custom reference materials for one-time
+					use, load saved irradiations from the catalog, or combine both. Then choose which
+					reference to use for each isotope.
+				{:else}
+					Build the reference library for this analysis. Add the reference materials you need for
+					one-time use, then choose which reference to use for each isotope.
+				{/if}
+			</p>
+			<br />
+			<button type="button" onclick={addCustomReference}>Add custom reference material</button>
+			<br /><br />
+
+			{#if catalogAvailable}
 				<ReferenceMaterialViewer
 					isotopeIds={selectableReferenceCatalogIsotopeIds}
-					selectedItemIds={referenceCatalogItemIds.filter((id): id is string => typeof id === 'string')}
+					selectedItemIds={referenceCatalogItemIds.filter(
+						(id): id is string => typeof id === 'string'
+					)}
 					currentSelectionId={null}
 					onSelectItem={handleReferenceMaterialSelect}
 				/>
+				<br />
+			{/if}
 
-				{#if referenceCatalogItemIds.filter((id): id is string => typeof id === 'string').length > 0}
+			<h3 class="text-xl font-bold">Library entries ({materials.reference.length})</h3>
+			{#if materials.reference.length === 0}
+				<p>
+					No reference materials yet. Add a custom one above{catalogAvailable
+						? ' or load one from the catalog'
+						: ''}.
+				</p>
+			{/if}
+			<div class="mt-2 space-y-2">
+				{#each materials.reference as reference, index (index)}
+					<CollapsibleCard
+						title={reference.NETL_code || reference.sampleName || `Reference ${index + 1}`}
+						subtitle={getReferenceSourceLabel(index)}
+						open={expandedReferences.has(index)}
+						onToggle={() => toggleExpanded(expandedReferences, index)}
+						onRemove={() => removeReference(index)}
+					>
+						<RefMatInfo
+							{isotopeCount}
+							{isotopeInfo}
+							usedIsotopeLabels={getUsedIsotopeLabels(index)}
+							getRoiIndex={getRoiIndexFn}
+							bind:selected={referenceIsotopeSelections[index]}
+							bind:refMatInfo={materials.reference[index]}
+							bind:this={matRefs.reference[index]}
+						/>
+						<details class="mt-3">
+							<summary class="cursor-pointer text-sm">Debug information</summary>
+							<ComputedDisplay
+								title="Reference Material Information"
+								data={matComp.reference[index]}
+							/>
+							<ComputedDisplay
+								title="Reference and Isotope Information"
+								data={matIsoComp.map((item) => item.reference[index])}
+							/>
+						</details>
+					</CollapsibleCard>
+				{/each}
+			</div>
+
+			{#if materials.reference.length > 0}
+				{@const isotopesMappingNeeded = isotopeInfo.filter(
+					(_, i) => getCoveringReferenceIndicesForIsotope(i).length !== 1
+				)}
+				{#if isotopesMappingNeeded.length > 0}
 					<div class="mt-4 space-y-2 rounded border border-gray-300 p-3">
-						<h3 class="text-lg font-bold">Selected reference irradiations</h3>
-						{#each referenceCatalogItemIds as catalogId, selectedIndex (selectedIndex)}
-							{#if catalogId}
-								{@const refMat = materials.reference[selectedIndex]}
-								{@const irrEnd = refMat?.irradiationEnd ? new Date(refMat.irradiationEnd).toLocaleString() : '—'}
-								{@const irrStart = (refMat?.irradiationEnd && refMat?.irradiationTime) ? new Date(new Date(refMat.irradiationEnd).getTime() - refMat.irradiationTime * 1000).toLocaleString() : '—'}
-								<div class="flex items-center justify-between gap-3 rounded border border-gray-200 p-2">
-									<div>
-										<strong>{getReferenceLabel(selectedIndex)}</strong>
-										<span class="ml-2 text-sm text-gray-500">{irrStart} → {irrEnd}</span>
+						<h3 class="text-lg font-bold">Isotope assignment</h3>
+						{#each isotopeInfo as isotope, isotopeIndex (isotopeIndex)}
+							{@const availableReferences = getCoveringReferenceIndicesForIsotope(isotopeIndex)}
+							{#if availableReferences.length !== 1}
+								<div
+									class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(240px,360px)] md:items-center"
+								>
+									<div class="text-sm">
+										<strong>{getIsotopeDisplayName(isotope, isotopeIndex)}</strong>
 									</div>
-									<button
-										type="button"
-										class="rounded border border-gray-300 px-2 py-1 text-sm"
-										onclick={() => removeReferenceMaterialCatalogItem(selectedIndex)}
-									>
-										Remove
-									</button>
+									{#if availableReferences.length > 1}
+										<select
+											class="input"
+											value={String(getLinkedReferenceIndex(isotopeIndex))}
+											onchange={(event) => {
+												const target = event.currentTarget as HTMLSelectElement;
+												setReferenceForIsotope(isotopeIndex, Number(target.value));
+											}}
+										>
+											{#each availableReferences as availableReferenceIndex (availableReferenceIndex)}
+												<option value={String(availableReferenceIndex)}>
+													{getReferenceLabel(availableReferenceIndex)}
+												</option>
+											{/each}
+										</select>
+									{:else}
+										<p class="text-sm text-red-700">No reference material covers this isotope.</p>
+									{/if}
 								</div>
 							{/if}
 						{/each}
 					</div>
-
-					{@const isotopesMappingNeeded = isotopeInfo.filter((_, i) => getCoveringReferenceIndicesForIsotope(i).length !== 1)}
-					{#if isotopesMappingNeeded.length > 0}
-						<div class="mt-4 space-y-2 rounded border border-gray-300 p-3">
-							<h3 class="text-lg font-bold">Isotope assignment</h3>
-							{#each isotopeInfo as isotope, isotopeIndex (isotopeIndex)}
-								{@const availableReferences = getCoveringReferenceIndicesForIsotope(isotopeIndex)}
-								{#if availableReferences.length !== 1}
-									<div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(240px,360px)] md:items-center">
-										<div class="text-sm">
-											<strong>{getIsotopeDisplayName(isotope, isotopeIndex)}</strong>
-										</div>
-										{#if availableReferences.length > 1}
-											<select
-												class="input"
-												value={String(getLinkedReferenceIndex(isotopeIndex))}
-												onchange={(event) => {
-													const target = event.currentTarget as HTMLSelectElement;
-													setReferenceForIsotope(isotopeIndex, Number(target.value));
-												}}
-											>
-												{#each availableReferences as availableReferenceIndex (availableReferenceIndex)}
-													<option value={String(availableReferenceIndex)}>
-														{getReferenceLabel(availableReferenceIndex)}
-													</option>
-												{/each}
-											</select>
-										{:else}
-											<p class="text-sm text-red-700">No selected irradiation covers this isotope.</p>
-										{/if}
-									</div>
-								{/if}
-							{/each}
-						</div>
-					{/if}
 				{/if}
-
-				{#if referenceCatalogError}
-					<p class="mt-3 text-sm text-red-700">{referenceCatalogError}</p>
-				{/if}
-				{#if referenceCatalogMessage}
-					<p class="mt-3 text-sm text-emerald-700">{referenceCatalogMessage}</p>
-				{/if}
-				{#if referenceCatalogWarning}
-					<p class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-						{referenceCatalogWarning}
-					</p>
-				{/if}
-			{:else}
-				<p>
-					This is where you enter information about the reference material. This is used when
-					comparing to the unknown material to determine concentrations.
-				</p>
-				<br /><br />
-				<!-- <pre>{JSON.stringify(materials, null, 4)}</pre> -->
-				<RefMatInfo
-					{isotopeCount}
-					{isotopeInfo}
-					usedIsotopeLabels={getUsedIsotopeLabels(refIdx)}
-					getRoiIndex={getRoiIndexFn}
-					bind:selected={referenceIsotopeSelections[refIdx]}
-					bind:refMatInfo={materials.reference[refIdx]}
-					bind:this={matRefs.reference[refIdx]}
-				/>
-
-				<details class="mt-4 rounded border border-gray-300 p-3">
-					<summary class="cursor-pointer font-semibold">Expand for debug information</summary>
-					<div class="mt-3 space-y-4">
-						<ComputedDisplay title="Reference Material Information" data={matComp.reference[refIdx]} />
-						<ComputedDisplay
-							title="Reference and Isotope Information"
-							data={matIsoComp.map((item) => item.reference[refIdx])}
-						/>
-						<pre class="overflow-x-auto whitespace-pre-wrap text-sm">{JSON.stringify(materials, null, 2)}</pre>
-					</div>
-				</details>
 			{/if}
 
-			<button type="button" onclick={prev}>{backButtonText}</button>
-			&nbsp;&nbsp;
-			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if stepType === StepType.UNKNOWN_COUNT}
-			<h2 class="text-2xl font-bold">{stepTitle}</h2>
-			<PageCounter
-				pageType="unknown materials"
-				pageCount={unknownCount}
-				updateFxn={updateUnknownData}
-			/>
-			<button type="button" onclick={prev}>{backButtonText}</button>
-			&nbsp;&nbsp;
-			<button type="button" onclick={next}> {nextButtonText} </button>
-		{:else if stepType === StepType.UNKNOWN_INFO}
+			{#if referenceCatalogError}
+				<p class="mt-3 text-sm text-red-700">{referenceCatalogError}</p>
+			{/if}
+			{#if referenceCatalogMessage}
+				<p class="mt-3 text-sm text-emerald-700">{referenceCatalogMessage}</p>
+			{/if}
+			{#if referenceCatalogWarning}
+				<p
+					class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+				>
+					{referenceCatalogWarning}
+				</p>
+			{/if}
+		{:else if stepType === StepType.UNKNOWN_MATERIALS}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>
-				This is where you enter information about the unknown material you are trying to understand.
+				Add every unknown material you are trying to understand. Each entry can be edited or
+				removed.
 			</p>
-			<br /><br />
-			<MaterialInfo
-				{isotopeCount}
-				{isotopeInfo}
-				getRoiIndex={getRoiIndexFn}
-				bind:this={matRefs.unknown[unknownIdx]}
-				bind:materialInfo={materials.unknown[unknownIdx]}
-			/>
+			<br />
 
-			<details class="mt-4 rounded border border-gray-300 p-3">
-				<summary class="cursor-pointer font-semibold">Expand for debug information</summary>
-				<div class="mt-3 space-y-4">
-					<ComputedDisplay
-						title="Unknown Material Information for Unknown {unknownIdx + 1}"
-						data={matComp.unknown[unknownIdx]}
-					/>
-					<ComputedDisplay
-						title="Unknown and Isotope Information for Unknown {unknownIdx + 1}"
-						data={matIsoComp.map((item) => item.unknown[unknownIdx])}
-					/>
-				</div>
-			</details>
-
-			<button type="button" onclick={prev}>{backButtonText}</button>
-			&nbsp;&nbsp;
-			<button type="button" onclick={next}> {nextButtonText} </button>
+			<h3 class="text-xl font-bold">Unknown materials ({materials.unknown.length})</h3>
+			{#if materials.unknown.length === 0}
+				<p>No unknown materials yet. Add one to continue.</p>
+			{/if}
+			<div class="mt-2 space-y-2">
+				{#each materials.unknown as unknown, index (index)}
+					<CollapsibleCard
+						title={unknown.NETL_code || `Unknown ${index + 1}`}
+						open={expandedUnknowns.has(index)}
+						onToggle={() => toggleExpanded(expandedUnknowns, index)}
+						onRemove={() => removeUnknown(index)}
+					>
+						<MaterialInfo
+							{isotopeCount}
+							{isotopeInfo}
+							getRoiIndex={getRoiIndexFn}
+							bind:this={matRefs.unknown[index]}
+							bind:materialInfo={materials.unknown[index]}
+						/>
+						<details class="mt-3">
+							<summary class="cursor-pointer text-sm">Debug information</summary>
+							<ComputedDisplay
+								title="Unknown Material Information for Unknown {index + 1}"
+								data={matComp.unknown[index]}
+							/>
+							<ComputedDisplay
+								title="Unknown and Isotope Information for Unknown {index + 1}"
+								data={matIsoComp.map((item) => item.unknown[index])}
+							/>
+						</details>
+					</CollapsibleCard>
+				{/each}
+			</div>
+			<br />
+			<button type="button" onclick={addUnknown}>Add unknown material</button>
 		{:else if stepType === StepType.REVIEW}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Please review all information you entered and see computed values below.</p>
@@ -1691,7 +1683,15 @@
 				</div>
 			</details>
 			<br />
-			<button type="button" onclick={prev}>{backButtonText}</button>
+		{/if}
+
+		{#if stepType !== StepType.WELCOME}
+			<div class="mt-6 flex flex-wrap gap-4">
+				<button type="button" onclick={prev}>{backButtonText}</button>
+				{#if stepType !== StepType.REVIEW}
+					<button type="button" onclick={next}>{nextButtonText}</button>
+				{/if}
+			</div>
 		{/if}
 		<br />
 	</form>
