@@ -53,7 +53,10 @@
 		saveIsotopeToCatalog,
 		referenceMaterialSaveBlockers,
 		saveReferenceMaterialToCatalog,
-		saveReferenceDatasheet
+		saveReferenceDatasheet,
+		parseIsotopeName,
+		isotopeIdentityKey,
+		describeIsotope
 	} from '$lib/utils/catalogWrite.js';
 	import ReferenceDatasheetForm from '$lib/components/ReferenceDatasheetForm.svelte';
 	import {
@@ -393,7 +396,53 @@
 	let datasheetSavingByRef = $state<Record<number, boolean>>({});
 	const datasheetFormRefs: Record<number, ReferenceDatasheetForm | undefined> = {};
 
+	// For entries pulled from the catalog: "update" the existing record or save "new".
+	let isotopeUploadMode = $state<Record<number, 'update' | 'new'>>({});
+	let referenceUploadMode = $state<Record<number, 'update' | 'new'>>({});
+	let newReferenceName = $state<Record<number, string>>({});
+
 	let writerAccess = $derived(swaAuth.hasRole(WRITER_ROLE));
+
+	function isotopeCatalogOriginalKey(isotope: IsotopeInfoType): string | null {
+		const id = isotope.id?.trim();
+		if (!id) {
+			return null;
+		}
+		const item = isotopeCatalogById[id];
+		if (!item) {
+			return null;
+		}
+		return `${item.shortName.toLowerCase()}|${item.massNumber}|${(item.suffix ?? '').toLowerCase()}`;
+	}
+
+	/** True when the user renamed a catalog isotope so it no longer matches its source record. */
+	function isotopeIdentityChanged(isotope: IsotopeInfoType): boolean {
+		const originalKey = isotopeCatalogOriginalKey(isotope);
+		if (originalKey === null) {
+			return false;
+		}
+		const parsed = parseIsotopeName(isotope.isotopeName);
+		return parsed ? isotopeIdentityKey(parsed) !== originalKey : false;
+	}
+
+	/** Effective upload mode for isotope `index`, honouring forced-"new" when renamed. */
+	function isotopeModeFor(index: number): 'update' | 'new' {
+		const isotope = isotopeInfo[index];
+		if (!isotope?.id) {
+			return 'new';
+		}
+		if (isotopeIdentityChanged(isotope)) {
+			return 'new';
+		}
+		return isotopeUploadMode[index] ?? 'update';
+	}
+
+	function referenceModeFor(index: number): 'update' | 'new' {
+		if (typeof referenceCatalogItemIds[index] !== 'string') {
+			return 'new';
+		}
+		return referenceUploadMode[index] ?? 'update';
+	}
 
 	async function loadDatasheets(force = false) {
 		if (!browser || (datasheetsRequested && !force)) {
@@ -448,6 +497,8 @@
 			return;
 		}
 
+		const mode = isotopeModeFor(index);
+
 		isotopeWriteBusy = index;
 		try {
 			const result = await saveIsotopeToCatalog(isotope);
@@ -455,15 +506,15 @@
 			if (typeof newId === 'string' && newId) {
 				isotopeInfo = isotopeInfo.map((iso, i) => (i === index ? { ...iso, id: newId } : iso));
 			}
-			isotopeWriteFeedback = {
-				...isotopeWriteFeedback,
-				[index]: {
-					ok: true,
-					text: result.created
-						? 'Saved to the shared catalog.'
-						: 'Matched an existing catalog isotope; any new energy was appended.'
-				}
-			};
+			let text: string;
+			if (result.created) {
+				text = 'Saved as a new catalog isotope.';
+			} else if (mode === 'new') {
+				text = 'An isotope with this name already exists — your energy lines were merged into it.';
+			} else {
+				text = 'Updated the catalog entry — new energy lines were merged in.';
+			}
+			isotopeWriteFeedback = { ...isotopeWriteFeedback, [index]: { ok: true, text } };
 		} catch (error) {
 			if (error instanceof CatalogWriteError && (error.status === 401 || error.status === 403)) {
 				void swaAuth.refresh(true);
@@ -537,6 +588,20 @@
 		if (!datasheetId) {
 			blockers.push('Select or create a reference datasheet.');
 		}
+
+		const mode = referenceModeFor(index);
+		let identityOverride: { netlCode?: string } | undefined;
+		if (mode === 'new' && typeof referenceCatalogItemIds[index] === 'string') {
+			const newName = (newReferenceName[index] ?? '').trim();
+			if (!newName) {
+				blockers.push('Enter a name for the new reference material.');
+			} else if (newName === (reference.NETL_code ?? '').trim()) {
+				blockers.push('The new NETL code must differ from the current one.');
+			} else {
+				identityOverride = { netlCode: newName };
+			}
+		}
+
 		if (blockers.length > 0) {
 			referenceWriteFeedback = {
 				...referenceWriteFeedback,
@@ -552,15 +617,16 @@
 				coveredIsotopes: covered,
 				referenceDatasheetId: datasheetId,
 				countingLabel: countingLabelByRef[index] ?? 'Counting 1',
-				notes: notesByRef[index] ?? ''
+				notes: notesByRef[index] ?? '',
+				identityOverride
 			});
 			referenceWriteFeedback = {
 				...referenceWriteFeedback,
 				[index]: {
 					ok: true,
 					text: result.created
-						? 'Published to the shared catalog.'
-						: `Appended a counting to an existing catalog entry (${result.totalCountings} total).`
+						? 'Saved as a new reference material in the catalog.'
+						: `Added a counting to the existing catalog entry (${result.totalCountings} total).`
 				}
 			};
 		} catch (error) {
@@ -1716,15 +1782,60 @@
 					>
 						<IsotopeInfo bind:this={isoRef[index]} bind:isotopeInfo={isotopeInfo[index]} />
 
-						{#if !isotope.id && swaAuth.signInAvailable}
+						{#if swaAuth.signInAvailable}
 							{@const blockers = isotopeSaveBlockers(isotope)}
+							{@const parsed = parseIsotopeName(isotope.isotopeName)}
+							{@const isoMode = isotopeModeFor(index)}
+							{@const renamed = isotopeIdentityChanged(isotope)}
 							<div
 								class="mt-3 space-y-2 rounded border border-primary-500 preset-tonal-primary p-3"
 							>
-								<p class="font-bold">Share this isotope</p>
-								<p class="text-sm">
-									Add it to the reactor's shared catalog so future analyses can reuse it.
+								<p class="font-bold">
+									{isotope.id ? 'Save your changes to the catalog' : 'Share this isotope'}
 								</p>
+
+								{#if parsed}
+									<p class="text-sm">
+										Saves as <strong>{describeIsotope(parsed, isotope.elementName)}</strong>.
+									</p>
+								{/if}
+
+								{#if isotope.id}
+									<fieldset class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+										<label class="inline-flex items-center gap-1">
+											<input
+												type="radio"
+												name="iso-mode-{index}"
+												checked={isoMode === 'update'}
+												disabled={renamed}
+												onchange={() =>
+													(isotopeUploadMode = { ...isotopeUploadMode, [index]: 'update' })}
+											/>
+											Update the existing catalog entry
+										</label>
+										<label class="inline-flex items-center gap-1">
+											<input
+												type="radio"
+												name="iso-mode-{index}"
+												checked={isoMode === 'new'}
+												onchange={() =>
+													(isotopeUploadMode = { ...isotopeUploadMode, [index]: 'new' })}
+											/>
+											Save as a new isotope
+										</label>
+									</fieldset>
+									{#if renamed}
+										<p class="text-sm text-warning-600-400">
+											You changed the isotope name, so this can only be saved as a new entry.
+										</p>
+									{:else if isoMode === 'update'}
+										<p class="text-sm">
+											Adds any new energy lines to the shared record. Its half-life and element name
+											are not changed by an upload.
+										</p>
+									{/if}
+								{/if}
+
 								{#if blockers.length > 0}
 									<ul class="ml-4 list-disc text-sm text-warning-600-400">
 										{#each blockers as blocker (blocker)}<li>{blocker}</li>{/each}
@@ -1751,6 +1862,10 @@
 										Saving…
 									{:else if !swaAuth.signedIn}
 										Sign in to save to catalog
+									{:else if isotope.id && isoMode === 'update'}
+										Update catalog entry
+									{:else if isotope.id}
+										Save as new isotope
 									{:else}
 										Save to shared catalog
 									{/if}
@@ -1839,7 +1954,9 @@
 							bind:refMatInfo={materials.reference[index]}
 							bind:this={matRefs.reference[index]}
 						/>
-						{#if referenceCatalogItemIds[index] === null && swaAuth.signInAvailable}
+						{#if swaAuth.signInAvailable}
+							{@const fromCatalog = typeof referenceCatalogItemIds[index] === 'string'}
+							{@const refMode = referenceModeFor(index)}
 							<div class="mt-3">
 								<button
 									type="button"
@@ -1848,7 +1965,9 @@
 								>
 									{publishPanelOpen.has(index)
 										? 'Hide publish options'
-										: 'Publish to shared catalog'}
+										: fromCatalog
+											? 'Save changes to the catalog'
+											: 'Publish to shared catalog'}
 								</button>
 							</div>
 							{#if publishPanelOpen.has(index)}
@@ -1862,6 +1981,47 @@
 										reference datasheet (known concentrations), and every covered isotope must
 										already be in the shared catalog.
 									</p>
+
+									{#if fromCatalog}
+										<fieldset class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+											<label class="inline-flex items-center gap-1">
+												<input
+													type="radio"
+													name="ref-mode-{index}"
+													checked={refMode === 'update'}
+													onchange={() =>
+														(referenceUploadMode = { ...referenceUploadMode, [index]: 'update' })}
+												/>
+												Update the existing catalog entry
+											</label>
+											<label class="inline-flex items-center gap-1">
+												<input
+													type="radio"
+													name="ref-mode-{index}"
+													checked={refMode === 'new'}
+													onchange={() =>
+														(referenceUploadMode = { ...referenceUploadMode, [index]: 'new' })}
+												/>
+												Save as a new reference material
+											</label>
+										</fieldset>
+										{#if refMode === 'update'}
+											<p class="text-sm">
+												Adds this counting to the existing entry. If you changed the irradiation
+												details, the catalog stores it as a new entry automatically.
+											</p>
+										{:else}
+											<label class="label">
+												<span>New NETL code / name</span>
+												<input
+													class="input"
+													type="text"
+													placeholder={reference.NETL_code || 'e.g. SRM-1633c (rev)'}
+													bind:value={newReferenceName[index]}
+												/>
+											</label>
+										{/if}
+									{/if}
 
 									{#if blockers.length > 0}
 										<ul class="ml-4 list-disc text-sm text-warning-600-400">
@@ -1950,6 +2110,10 @@
 											Publishing…
 										{:else if !swaAuth.signedIn}
 											Sign in to publish
+										{:else if fromCatalog && refMode === 'update'}
+											Update catalog entry
+										{:else if fromCatalog}
+											Save as new reference material
 										{:else}
 											Publish to shared catalog
 										{/if}

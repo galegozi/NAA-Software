@@ -20,12 +20,21 @@ export class CatalogWriteError extends Error {
 export type ParsedIsotopeName = {
 	shortName: string;
 	massNumber: number;
+	/** Isomer / variant marker, e.g. "m", "m2", "B". Part of the catalog identity. */
 	suffix: string;
 };
 
-/** "Au-198" / "Au198" / "Cd-115B" -> parts. Returns null when unparseable. */
+/**
+ * "Au-198" / "Au198" / "Cd-115B" / "Ag-110m" / "Hf-178m2" -> parts.
+ * The trailing marker (metastable "m", isomer "m2", variant letter) is kept as
+ * the suffix — the catalog keys isotope identity on (shortName, massNumber,
+ * suffix), so Ag-110m is a distinct nuclide from Ag-110. Returns null when
+ * unparseable.
+ */
 export function parseIsotopeName(name: string): ParsedIsotopeName | null {
-	const match = (name ?? '').trim().match(/^([A-Za-z]+)-?(\d+)([A-Za-z]*)$/);
+	const match = (name ?? '')
+		.trim()
+		.match(/^([A-Za-z]{1,3})[-\s]?(\d{1,3})\s*([A-Za-z][A-Za-z0-9]{0,4})?$/);
 	if (!match) {
 		return null;
 	}
@@ -33,7 +42,24 @@ export function parseIsotopeName(name: string): ParsedIsotopeName | null {
 	if (!Number.isInteger(massNumber) || massNumber <= 0) {
 		return null;
 	}
-	return { shortName: match[1], massNumber, suffix: match[3] ?? '' };
+	return { shortName: match[1], massNumber, suffix: (match[3] ?? '').trim() };
+}
+
+/** Stable identity key for comparing two parsed isotope names. */
+export function isotopeIdentityKey(parsed: ParsedIsotopeName): string {
+	return `${parsed.shortName.toLowerCase()}|${parsed.massNumber}|${parsed.suffix.toLowerCase()}`;
+}
+
+/** Human-readable summary of a parsed isotope name, for a confirm-before-save line. */
+export function describeIsotope(parsed: ParsedIsotopeName, elementName: string): string {
+	const canonical = `${parsed.shortName}-${parsed.massNumber}${parsed.suffix}`;
+	const parts = [`${elementName || parsed.shortName}, mass ${parsed.massNumber}`];
+	if (/^m\d*$/i.test(parsed.suffix)) {
+		parts.push(`metastable state “${parsed.suffix}”`);
+	} else if (parsed.suffix) {
+		parts.push(`variant “${parsed.suffix}”`);
+	}
+	return `${canonical} — ${parts.join(', ')}`;
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
@@ -69,7 +95,9 @@ export function isotopeSaveBlockers(isotope: IsotopeInfo): string[] {
 	const blockers: string[] = [];
 	const parsed = parseIsotopeName(isotope.isotopeName);
 	if (!parsed) {
-		blockers.push('Isotope name must look like "Au-198".');
+		blockers.push(
+			'Isotope name must look like "Au-198" — add a trailing "m" for a metastable state, e.g. "Ag-110m".'
+		);
 	} else if (!isotope.elementName.trim() && !lookupElementName(parsed.shortName)) {
 		blockers.push(`Add an element name — "${parsed.shortName}" is not a recognized symbol.`);
 	}
@@ -85,7 +113,10 @@ export function isotopeSaveBlockers(isotope: IsotopeInfo): string[] {
 export async function saveIsotopeToCatalog(isotope: IsotopeInfo): Promise<IsotopeWriteResult> {
 	const parsed = parseIsotopeName(isotope.isotopeName);
 	if (!parsed) {
-		throw new CatalogWriteError('Isotope name must look like "Au-198".', 400);
+		throw new CatalogWriteError(
+			'Isotope name must look like "Au-198" — add a trailing "m" for a metastable state, e.g. "Ag-110m".',
+			400
+		);
 	}
 	const elementName = isotope.elementName.trim() || lookupElementName(parsed.shortName);
 	if (!elementName) {
@@ -171,8 +202,17 @@ export async function saveReferenceMaterialToCatalog(args: {
 	referenceDatasheetId: string;
 	countingLabel: string;
 	notes: string;
+	/** When saving as a distinct new entry: overrides the identifying name(s). */
+	identityOverride?: { netlCode?: string; sampleName?: string };
 }): Promise<ReferenceMaterialWriteResult> {
-	const { reference, coveredIsotopes, referenceDatasheetId, countingLabel, notes } = args;
+	const {
+		reference,
+		coveredIsotopes,
+		referenceDatasheetId,
+		countingLabel,
+		notes,
+		identityOverride
+	} = args;
 
 	const isotopes = coveredIsotopes.map((iso) => ({
 		isotopeId: (iso.id ?? '').trim(),
@@ -182,7 +222,15 @@ export async function saveReferenceMaterialToCatalog(args: {
 		throw new CatalogWriteError('Every covered isotope must be a catalog isotope.', 400);
 	}
 
-	const referenceKey = [reference.NETL_code?.trim(), reference.sampleName?.trim()]
+	const referenceMaterial: ReferenceMaterial = { ...reference, referenceDatasheetId };
+	if (identityOverride?.netlCode?.trim()) {
+		referenceMaterial.NETL_code = identityOverride.netlCode.trim();
+	}
+	if (identityOverride?.sampleName?.trim()) {
+		referenceMaterial.sampleName = identityOverride.sampleName.trim();
+	}
+
+	const referenceKey = [referenceMaterial.NETL_code?.trim(), referenceMaterial.sampleName?.trim()]
 		.filter(Boolean)
 		.join('::');
 
@@ -194,7 +242,7 @@ export async function saveReferenceMaterialToCatalog(args: {
 		countings: [
 			{
 				countingLabel: countingLabel.trim() || 'Counting 1',
-				referenceMaterial: { ...reference, referenceDatasheetId }
+				referenceMaterial
 			}
 		]
 	});
