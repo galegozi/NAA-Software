@@ -39,6 +39,24 @@
 	} from '$lib/utils/materialValidation.js';
 	import { isEnvironmentWithoutSignIn } from '$lib/utils/authEnvironment.js';
 	import {
+		loadDraft,
+		saveDraft,
+		clearDraft,
+		type AnalysisDraft
+	} from '$lib/utils/analysisDraft.js';
+	import { swaAuth, redirectToSignIn } from '$lib/utils/swaAuth.svelte.js';
+	import { analysisMeta } from '$lib/utils/analysisMeta.svelte.js';
+	import {
+		WRITER_ROLE,
+		CatalogWriteError,
+		isotopeSaveBlockers,
+		saveIsotopeToCatalog,
+		referenceMaterialSaveBlockers,
+		saveReferenceMaterialToCatalog,
+		saveReferenceDatasheet
+	} from '$lib/utils/catalogWrite.js';
+	import ReferenceDatasheetForm from '$lib/components/ReferenceDatasheetForm.svelte';
+	import {
 		APP_VERSION,
 		REVIEW_STEP,
 		StepType,
@@ -48,23 +66,6 @@
 		getStepTitle,
 		getStepType
 	} from '$lib/utils/stepUtils.js';
-
-	const AUTH_STATE_STORAGE_KEY = 'naa-auth-redirect-state';
-	const PERSISTED_STATE_VERSION = 2;
-
-	type PersistedWizardState = {
-		version: number;
-		step: number;
-		title: string;
-		isotopeInfo: IsotopeInfoType[];
-		materials: {
-			reference: ReferenceMaterial[];
-			unknown: UnknownMaterial[];
-		};
-		referenceIsotopeSelections: string[][];
-		isotopeReferenceMap: number[];
-		referenceCatalogItemIds: (string | null)[];
-	};
 
 	type IsotopeMeasurementLink = {
 		id: string;
@@ -241,9 +242,9 @@
 		}
 	}
 
-	function getPersistedWizardState(): PersistedWizardState {
+	function currentDraft(): AnalysisDraft {
 		return {
-			version: PERSISTED_STATE_VERSION,
+			version: 3,
 			step,
 			title,
 			isotopeInfo,
@@ -252,87 +253,339 @@
 				Array.from(selection ?? [])
 			),
 			isotopeReferenceMap,
-			referenceCatalogItemIds
+			referenceCatalogItemIds,
+			expandedIsotopes: Array.from(expandedIsotopes),
+			expandedReferences: Array.from(expandedReferences),
+			expandedUnknowns: Array.from(expandedUnknowns)
 		};
 	}
 
-	function persistWizardState() {
+	let draftSaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+	/** Write the draft immediately (before a navigation away from the page). */
+	function flushDraft() {
 		if (!browser) {
 			return;
 		}
-
-		window.sessionStorage.setItem(
-			AUTH_STATE_STORAGE_KEY,
-			JSON.stringify(getPersistedWizardState())
-		);
+		if (draftSaveTimer !== undefined) {
+			clearTimeout(draftSaveTimer);
+			draftSaveTimer = undefined;
+		}
+		saveDraft(currentDraft());
 	}
 
-	function restoreWizardState() {
+	/** Debounced autosave, called from the state-tracking $effect. */
+	function scheduleDraftSave() {
+		if (!browser) {
+			return;
+		}
+		if (draftSaveTimer !== undefined) {
+			clearTimeout(draftSaveTimer);
+		}
+		draftSaveTimer = setTimeout(() => {
+			draftSaveTimer = undefined;
+			saveDraft(currentDraft());
+		}, 300);
+	}
+
+	function hydrateExpandedSet(set: SvelteSet<number>, values: number[]) {
+		set.clear();
+		for (const value of values) {
+			if (Number.isInteger(value)) {
+				set.add(value);
+			}
+		}
+	}
+
+	function restoreDraft() {
 		if (!browser) {
 			return;
 		}
 
-		const rawState = window.sessionStorage.getItem(AUTH_STATE_STORAGE_KEY);
-		if (!rawState) {
+		const saved = loadDraft();
+		if (!saved) {
 			return;
 		}
 
-		try {
-			const savedState = JSON.parse(rawState) as PersistedWizardState;
-			if (savedState.version !== PERSISTED_STATE_VERSION) {
-				return;
-			}
+		step = Math.min(Math.max(saved.step ?? 0, 0), REVIEW_STEP);
+		title = saved.title ?? 'NAA Analysis';
+		isotopeInfo = Array.isArray(saved.isotopeInfo) ? saved.isotopeInfo : [];
 
-			step = Math.min(Math.max(savedState.step ?? 0, 0), REVIEW_STEP);
-			title = savedState.title ?? 'NAA Analysis';
-			isotopeInfo = Array.isArray(savedState.isotopeInfo) ? savedState.isotopeInfo : [];
+		materials = {
+			reference: Array.isArray(saved.materials?.reference) ? saved.materials.reference : [],
+			unknown: Array.isArray(saved.materials?.unknown) ? saved.materials.unknown : []
+		};
 
-			const restoredMaterials = savedState.materials ?? { reference: [], unknown: [] };
-			materials = {
-				reference: Array.isArray(restoredMaterials.reference) ? restoredMaterials.reference : [],
-				unknown: Array.isArray(restoredMaterials.unknown) ? restoredMaterials.unknown : []
-			};
+		referenceIsotopeSelections = materials.reference.map((_, index) => {
+			const selection = saved.referenceIsotopeSelections?.[index];
+			return new Set<string>(Array.isArray(selection) ? selection : []);
+		});
+		referenceCatalogItemIds = materials.reference.map(
+			(_, index) => saved.referenceCatalogItemIds?.[index] ?? null
+		);
+		isotopeReferenceMap = Array.isArray(saved.isotopeReferenceMap) ? saved.isotopeReferenceMap : [];
 
-			referenceIsotopeSelections = materials.reference.map((_, index) => {
-				const saved = savedState.referenceIsotopeSelections?.[index];
-				return new Set<string>(Array.isArray(saved) ? saved : []);
-			});
-			referenceCatalogItemIds = materials.reference.map(
-				(_, index) => savedState.referenceCatalogItemIds?.[index] ?? null
-			);
-			isotopeReferenceMap = Array.isArray(savedState.isotopeReferenceMap)
-				? savedState.isotopeReferenceMap
-				: [];
+		hydrateExpandedSet(expandedIsotopes, saved.expandedIsotopes ?? []);
+		hydrateExpandedSet(expandedReferences, saved.expandedReferences ?? []);
+		hydrateExpandedSet(expandedUnknowns, saved.expandedUnknowns ?? []);
 
-			isoRef = Array.from({ length: isotopeInfo.length }, () => undefined);
-			matRefs = {
-				reference: Array.from({ length: materials.reference.length }, () => undefined),
-				unknown: Array.from({ length: materials.unknown.length }, () => undefined)
-			};
-			reconcileIsotopeDependentState();
-		} catch {
-			// Ignore invalid saved state and continue with the current in-memory defaults.
-		} finally {
-			window.sessionStorage.removeItem(AUTH_STATE_STORAGE_KEY);
+		isoRef = Array.from({ length: isotopeInfo.length }, () => undefined);
+		matRefs = {
+			reference: Array.from({ length: materials.reference.length }, () => undefined),
+			unknown: Array.from({ length: materials.unknown.length }, () => undefined)
+		};
+		reconcileIsotopeDependentState();
+	}
+
+	function startNewAnalysis() {
+		if (browser && !window.confirm('Clear all entered data and start a new analysis?')) {
+			return;
 		}
+		clearDraft();
+		step = 0;
+		title = 'NAA Analysis';
+		isotopeInfo = [];
+		isoRef = [];
+		materials = { reference: [], unknown: [] };
+		matRefs = { reference: [], unknown: [] };
+		referenceIsotopeSelections = [];
+		referenceCatalogItemIds = [];
+		isotopeReferenceMap = [];
+		validationErrors = [];
+		referenceCatalogMessage = '';
+		referenceCatalogError = '';
+		referenceCatalogWarning = '';
+		customReferenceNotice = '';
+		expandedIsotopes.clear();
+		expandedReferences.clear();
+		expandedUnknowns.clear();
 	}
 
 	async function handleSignIn() {
 		if (!browser) {
 			return;
 		}
-
 		localAuthNotice = '';
+		flushDraft();
+		redirectToSignIn();
+	}
 
-		const currentUrl = new URL(window.location.href);
-		const loginUrl = new URL('/.auth/login/aad', currentUrl.origin);
-		loginUrl.searchParams.set(
-			'post_login_redirect_uri',
-			currentUrl.pathname + currentUrl.search + currentUrl.hash
-		);
+	// ---- Publish to the shared catalog -----------------------------------
 
-		persistWizardState();
-		window.location.assign(loginUrl.toString());
+	type WriteFeedback = { ok: boolean; text: string };
+
+	let isotopeWriteBusy = $state<number | null>(null);
+	let isotopeWriteFeedback = $state<Record<number, WriteFeedback>>({});
+
+	let referenceWriteBusy = $state<number | null>(null);
+	let referenceWriteFeedback = $state<Record<number, WriteFeedback>>({});
+	const publishPanelOpen = new SvelteSet<number>();
+	const newDatasheetOpen = new SvelteSet<number>();
+
+	let datasheets = $state<{ id: string; sampleName: string }[]>([]);
+	let datasheetsLoading = $state(false);
+	let datasheetsError = $state('');
+	let datasheetsRequested = false;
+
+	let selectedDatasheetId = $state<Record<number, string>>({});
+	let countingLabelByRef = $state<Record<number, string>>({});
+	let notesByRef = $state<Record<number, string>>({});
+	let datasheetSavingByRef = $state<Record<number, boolean>>({});
+	const datasheetFormRefs: Record<number, ReferenceDatasheetForm | undefined> = {};
+
+	let writerAccess = $derived(swaAuth.hasRole(WRITER_ROLE));
+
+	async function loadDatasheets(force = false) {
+		if (!browser || (datasheetsRequested && !force)) {
+			return;
+		}
+		datasheetsRequested = true;
+		datasheetsLoading = true;
+		datasheetsError = '';
+		try {
+			const response = await fetch('/api/reference-datasheets', {
+				headers: { accept: 'application/json' }
+			});
+			const body = await response.json().catch(() => null);
+			if (!response.ok) {
+				if (response.status === 401 || response.status === 403) {
+					void swaAuth.refresh(true);
+				}
+				throw new Error(body?.error || `Request failed with status ${response.status}`);
+			}
+			datasheets = Array.isArray(body?.items)
+				? body.items.map((item: { id: string; sampleName: string }) => ({
+						id: item.id,
+						sampleName: item.sampleName
+					}))
+				: [];
+		} catch (error) {
+			datasheetsError = error instanceof Error ? error.message : 'Unable to load datasheets.';
+		} finally {
+			datasheetsLoading = false;
+		}
+	}
+
+	function coveredIsotopesForReference(referenceIndex: number): IsotopeInfoType[] {
+		return isotopeInfo.filter((_, i) => referenceCoversIsotope(referenceIndex, i));
+	}
+
+	async function publishIsotope(index: number) {
+		const isotope = isotopeInfo[index];
+		if (!isotope) {
+			return;
+		}
+
+		if (!swaAuth.signedIn) {
+			void handleSignIn();
+			return;
+		}
+		if (!writerAccess) {
+			isotopeWriteFeedback = {
+				...isotopeWriteFeedback,
+				[index]: { ok: false, text: `Your account lacks the '${WRITER_ROLE}' role.` }
+			};
+			return;
+		}
+
+		isotopeWriteBusy = index;
+		try {
+			const result = await saveIsotopeToCatalog(isotope);
+			const newId = result.item?.id;
+			if (typeof newId === 'string' && newId) {
+				isotopeInfo = isotopeInfo.map((iso, i) => (i === index ? { ...iso, id: newId } : iso));
+			}
+			isotopeWriteFeedback = {
+				...isotopeWriteFeedback,
+				[index]: {
+					ok: true,
+					text: result.created
+						? 'Saved to the shared catalog.'
+						: 'Matched an existing catalog isotope; any new energy was appended.'
+				}
+			};
+		} catch (error) {
+			if (error instanceof CatalogWriteError && (error.status === 401 || error.status === 403)) {
+				void swaAuth.refresh(true);
+			}
+			isotopeWriteFeedback = {
+				...isotopeWriteFeedback,
+				[index]: {
+					ok: false,
+					text: error instanceof Error ? error.message : 'Unable to save isotope.'
+				}
+			};
+		} finally {
+			isotopeWriteBusy = null;
+		}
+	}
+
+	async function createDatasheet(referenceIndex: number) {
+		const form = datasheetFormRefs[referenceIndex];
+		const payload = form?.getPayload();
+		if (!payload) {
+			return;
+		}
+		datasheetSavingByRef = { ...datasheetSavingByRef, [referenceIndex]: true };
+		try {
+			const saved = await saveReferenceDatasheet(payload);
+			datasheets = [{ id: saved.id, sampleName: saved.sampleName }, ...datasheets];
+			selectedDatasheetId = { ...selectedDatasheetId, [referenceIndex]: saved.id };
+			newDatasheetOpen.delete(referenceIndex);
+			form?.reset();
+			referenceWriteFeedback = {
+				...referenceWriteFeedback,
+				[referenceIndex]: { ok: true, text: `Datasheet "${saved.sampleName}" created.` }
+			};
+		} catch (error) {
+			if (error instanceof CatalogWriteError && (error.status === 401 || error.status === 403)) {
+				void swaAuth.refresh(true);
+			}
+			referenceWriteFeedback = {
+				...referenceWriteFeedback,
+				[referenceIndex]: {
+					ok: false,
+					text: error instanceof Error ? error.message : 'Unable to save datasheet.'
+				}
+			};
+		} finally {
+			datasheetSavingByRef = { ...datasheetSavingByRef, [referenceIndex]: false };
+		}
+	}
+
+	async function publishReference(index: number) {
+		const reference = materials.reference[index];
+		if (!reference) {
+			return;
+		}
+
+		if (!swaAuth.signedIn) {
+			void handleSignIn();
+			return;
+		}
+		if (!writerAccess) {
+			referenceWriteFeedback = {
+				...referenceWriteFeedback,
+				[index]: { ok: false, text: `Your account lacks the '${WRITER_ROLE}' role.` }
+			};
+			return;
+		}
+
+		const covered = coveredIsotopesForReference(index);
+		const blockers = referenceMaterialSaveBlockers(reference, covered);
+		const datasheetId = selectedDatasheetId[index] ?? '';
+		if (!datasheetId) {
+			blockers.push('Select or create a reference datasheet.');
+		}
+		if (blockers.length > 0) {
+			referenceWriteFeedback = {
+				...referenceWriteFeedback,
+				[index]: { ok: false, text: blockers.join(' ') }
+			};
+			return;
+		}
+
+		referenceWriteBusy = index;
+		try {
+			const result = await saveReferenceMaterialToCatalog({
+				reference,
+				coveredIsotopes: covered,
+				referenceDatasheetId: datasheetId,
+				countingLabel: countingLabelByRef[index] ?? 'Counting 1',
+				notes: notesByRef[index] ?? ''
+			});
+			referenceWriteFeedback = {
+				...referenceWriteFeedback,
+				[index]: {
+					ok: true,
+					text: result.created
+						? 'Published to the shared catalog.'
+						: `Appended a counting to an existing catalog entry (${result.totalCountings} total).`
+				}
+			};
+		} catch (error) {
+			if (error instanceof CatalogWriteError && (error.status === 401 || error.status === 403)) {
+				void swaAuth.refresh(true);
+			}
+			referenceWriteFeedback = {
+				...referenceWriteFeedback,
+				[index]: {
+					ok: false,
+					text: error instanceof Error ? error.message : 'Unable to publish reference material.'
+				}
+			};
+		} finally {
+			referenceWriteBusy = null;
+		}
+	}
+
+	function togglePublishPanel(referenceIndex: number) {
+		if (publishPanelOpen.has(referenceIndex)) {
+			publishPanelOpen.delete(referenceIndex);
+		} else {
+			publishPanelOpen.add(referenceIndex);
+			void loadDatasheets();
+		}
 	}
 
 	let step = $state(0);
@@ -575,13 +828,21 @@
 	// Validation state
 	let validationErrors: string[] = $state([]);
 
+	let draftHydrated = false;
+
 	$effect(() => {
 		if (!browser) {
 			return;
 		}
 
-		currentHostname = window.location.hostname;
-		restoreWizardState();
+		// One-time hydration — never let the reads inside restoreDraft() make this
+		// effect reactive (it would re-hydrate on every edit).
+		untrack(() => {
+			currentHostname = window.location.hostname;
+			restoreDraft();
+			draftHydrated = true;
+		});
+		void swaAuth.refresh();
 
 		let cancelled = false;
 
@@ -591,9 +852,33 @@
 			}
 		});
 
+		// Belt-and-braces: flush the debounced draft if the tab is hidden/closed.
+		const flushOnHide = () => flushDraft();
+		window.addEventListener('pagehide', flushOnHide);
+		window.addEventListener('visibilitychange', flushOnHide);
+
 		return () => {
 			cancelled = true;
+			window.removeEventListener('pagehide', flushOnHide);
+			window.removeEventListener('visibilitychange', flushOnHide);
 		};
+	});
+
+	// Surface the experiment title in the layout header.
+	$effect(() => {
+		analysisMeta.title = title;
+	});
+
+	// Continuously autosave the whole wizard to localStorage. Only "Start new
+	// analysis" clears it, so a sign-in redirect / refresh / tab close is safe.
+	$effect(() => {
+		// Deep-read every persisted field so this effect re-runs on any change.
+		const serialized = JSON.stringify(currentDraft());
+		if (!draftHydrated) {
+			return;
+		}
+		void serialized;
+		scheduleDraftSave();
 	});
 
 	// Keep the per-isotope arrays on every material aligned with the isotope list.
@@ -1307,7 +1592,7 @@
 	{/if}
 
 	{#if validationErrors.length > 0}
-		<div class="my-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+		<div class="my-3 rounded border border-error-500 preset-tonal-error px-3 py-2 text-sm">
 			<ul class="ml-4 list-outside list-disc">
 				{#each validationErrors as validationError, errorIndex (errorIndex)}
 					<li>{validationError}</li>
@@ -1349,7 +1634,7 @@
 				</li>
 				<li>
 					Build a reference library by combining catalog entries with your own one-time custom
-					reference materials (custom data is never saved to the database).
+					reference materials (custom data is never saved to the catalog).
 				</li>
 				<li>
 					Automatic loading of more items whenever you scroll to the bottom of a catalog list.
@@ -1376,10 +1661,23 @@
 				Future additions, not planned yet (note: can be implemented in any order):
 			</h2>
 			<ul class="list-inside list-disc">
-				<li>Edit/Delete operations to the database through the UI.</li>
+				<li>Edit/Delete operations to the catalog through the UI.</li>
 			</ul>
 			<br />
-			<button type="button" onclick={next}>Get Started</button>
+			<div class="flex flex-wrap items-center gap-3">
+				<button type="button" onclick={next}>Get Started</button>
+				{#if isotopeInfo.length || materials.reference.length || materials.unknown.length}
+					<button type="button" class="btn preset-tonal-surface" onclick={startNewAnalysis}>
+						Start new analysis
+					</button>
+				{/if}
+			</div>
+			<p class="mt-3 text-sm">
+				As you work, your entries are saved automatically in this browser and stay on this device —
+				they are never uploaded. Use "Start new analysis" to clear them. Publishing an isotope or
+				reference material to the shared catalog (when signed in) is the only action that sends data
+				off your device.
+			</p>
 		{:else if stepType === StepType.SELECT_ISOTOPES}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Add the isotopes you want to analyze.</p>
@@ -1389,7 +1687,7 @@
 						>Sign in</button
 					>
 					to reach the shared catalog.
-					{#if localAuthNotice}<span class="text-amber-700">{localAuthNotice}</span>{/if}
+					{#if localAuthNotice}<span class="text-warning-600-400">{localAuthNotice}</span>{/if}
 				</p>
 			{/if}
 			<br />
@@ -1417,6 +1715,49 @@
 						onRemove={() => removeIsotope(index)}
 					>
 						<IsotopeInfo bind:this={isoRef[index]} bind:isotopeInfo={isotopeInfo[index]} />
+
+						{#if !isotope.id && swaAuth.signInAvailable}
+							{@const blockers = isotopeSaveBlockers(isotope)}
+							<div
+								class="mt-3 space-y-2 rounded border border-primary-500 preset-tonal-primary p-3"
+							>
+								<p class="font-bold">Share this isotope</p>
+								<p class="text-sm">
+									Add it to the reactor's shared catalog so future analyses can reuse it.
+								</p>
+								{#if blockers.length > 0}
+									<ul class="ml-4 list-disc text-sm text-warning-600-400">
+										{#each blockers as blocker (blocker)}<li>{blocker}</li>{/each}
+									</ul>
+								{/if}
+								{#if isotopeWriteFeedback[index]}
+									<p
+										class="text-sm {isotopeWriteFeedback[index].ok
+											? 'text-success-600-400'
+											: 'text-error-500'}"
+									>
+										{isotopeWriteFeedback[index].text}
+									</p>
+								{/if}
+								<button
+									type="button"
+									class="btn preset-filled-primary-500"
+									disabled={isotopeWriteBusy === index ||
+										blockers.length > 0 ||
+										(swaAuth.signedIn && !writerAccess)}
+									onclick={() => publishIsotope(index)}
+								>
+									{#if isotopeWriteBusy === index}
+										Saving…
+									{:else if !swaAuth.signedIn}
+										Sign in to save to catalog
+									{:else}
+										Save to shared catalog
+									{/if}
+								</button>
+							</div>
+						{/if}
+
 						<details class="mt-3">
 							<summary class="cursor-pointer text-sm">Debug information</summary>
 							<ComputedDisplay
@@ -1434,22 +1775,22 @@
 			<p>Add reference materials, then assign one to each isotope.</p>
 			<br />
 
-			<section class="rounded-lg border-2 border-blue-500 bg-blue-50 p-5">
+			<section class="rounded-lg border-2 border-primary-500 preset-tonal-primary p-5">
 				<h3 class="text-2xl font-bold">Add your own reference material</h3>
 				<p class="mt-2">
 					Enter a reference material for this analysis only. Nothing you enter here is saved to the
-					database.
+					shared catalog.
 				</p>
 				<button
 					type="button"
-					class="variant-filled-primary mt-4 btn text-xl"
+					class="mt-4 btn preset-filled-primary-500 text-xl"
 					onclick={addCustomReference}
 				>
 					+ Add custom reference material
 				</button>
 				{#if customReferenceNotice}
 					<p
-						class="mt-4 rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-emerald-800"
+						class="mt-4 rounded border border-success-500 preset-tonal-success px-3 py-2"
 						role="status"
 					>
 						{customReferenceNotice}
@@ -1498,6 +1839,125 @@
 							bind:refMatInfo={materials.reference[index]}
 							bind:this={matRefs.reference[index]}
 						/>
+						{#if referenceCatalogItemIds[index] === null && swaAuth.signInAvailable}
+							<div class="mt-3">
+								<button
+									type="button"
+									class="btn preset-tonal-surface"
+									onclick={() => togglePublishPanel(index)}
+								>
+									{publishPanelOpen.has(index)
+										? 'Hide publish options'
+										: 'Publish to shared catalog'}
+								</button>
+							</div>
+							{#if publishPanelOpen.has(index)}
+								{@const covered = coveredIsotopesForReference(index)}
+								{@const blockers = referenceMaterialSaveBlockers(reference, covered)}
+								<div
+									class="mt-2 space-y-3 rounded border border-primary-500 preset-tonal-primary p-3"
+								>
+									<p class="text-sm">
+										Saves this irradiation and its counting to the reactor's shared catalog. Needs a
+										reference datasheet (known concentrations), and every covered isotope must
+										already be in the shared catalog.
+									</p>
+
+									{#if blockers.length > 0}
+										<ul class="ml-4 list-disc text-sm text-warning-600-400">
+											{#each blockers as blocker (blocker)}<li>{blocker}</li>{/each}
+										</ul>
+									{/if}
+
+									<label class="label">
+										<span>Reference datasheet</span>
+										{#if datasheetsLoading}
+											<span class="text-sm">Loading datasheets…</span>
+										{:else}
+											<select class="select" bind:value={selectedDatasheetId[index]}>
+												<option value="">— Select a datasheet —</option>
+												{#each datasheets as sheet (sheet.id)}
+													<option value={sheet.id}>{sheet.sampleName}</option>
+												{/each}
+											</select>
+										{/if}
+										{#if datasheetsError}
+											<span class="text-sm text-error-500">{datasheetsError}</span>
+										{/if}
+									</label>
+
+									<button
+										type="button"
+										class="btn preset-tonal-surface"
+										onclick={() =>
+											newDatasheetOpen.has(index)
+												? newDatasheetOpen.delete(index)
+												: newDatasheetOpen.add(index)}
+									>
+										{newDatasheetOpen.has(index)
+											? 'Cancel new datasheet'
+											: 'Create a new datasheet'}
+									</button>
+
+									{#if newDatasheetOpen.has(index)}
+										<div class="rounded border border-surface-300-700 p-3">
+											<ReferenceDatasheetForm
+												bind:this={datasheetFormRefs[index]}
+												sampleName={reference.sampleName || reference.NETL_code || ''}
+											/>
+											<button
+												type="button"
+												class="mt-2 btn preset-filled-primary-500"
+												disabled={datasheetSavingByRef[index]}
+												onclick={() => createDatasheet(index)}
+											>
+												{datasheetSavingByRef[index] ? 'Saving…' : 'Save datasheet'}
+											</button>
+										</div>
+									{/if}
+
+									<label class="label">
+										<span>Counting label</span>
+										<input
+											class="input"
+											type="text"
+											placeholder="Counting 1"
+											bind:value={countingLabelByRef[index]}
+										/>
+									</label>
+									<label class="label">
+										<span>Notes (optional)</span>
+										<input class="input" type="text" bind:value={notesByRef[index]} />
+									</label>
+
+									{#if referenceWriteFeedback[index]}
+										<p
+											class="text-sm {referenceWriteFeedback[index].ok
+												? 'text-success-600-400'
+												: 'text-error-500'}"
+										>
+											{referenceWriteFeedback[index].text}
+										</p>
+									{/if}
+
+									<button
+										type="button"
+										class="btn preset-filled-primary-500"
+										disabled={referenceWriteBusy === index || (swaAuth.signedIn && !writerAccess)}
+										onclick={() => publishReference(index)}
+									>
+										{#if referenceWriteBusy === index}
+											Publishing…
+										{:else if !swaAuth.signedIn}
+											Sign in to publish
+										{:else}
+											Publish to shared catalog
+										{/if}
+									</button>
+								</div>
+							{/if}
+						{/if}
+
 						<details class="mt-3">
 							<summary class="cursor-pointer text-sm">Debug information</summary>
 							<ComputedDisplay
@@ -1518,7 +1978,7 @@
 					(_, i) => getCoveringReferenceIndicesForIsotope(i).length !== 1
 				)}
 				{#if isotopesMappingNeeded.length > 0}
-					<div class="mt-4 space-y-2 rounded border border-gray-300 p-3">
+					<div class="mt-4 space-y-2 rounded border border-surface-300-700 p-3">
 						<h3 class="text-lg font-bold">Isotope assignment</h3>
 						{#each isotopeInfo as isotope, isotopeIndex (isotopeIndex)}
 							{@const availableReferences = getCoveringReferenceIndicesForIsotope(isotopeIndex)}
@@ -1545,7 +2005,7 @@
 											{/each}
 										</select>
 									{:else}
-										<p class="text-sm text-red-700">No reference material covers this isotope.</p>
+										<p class="text-sm text-error-500">No reference material covers this isotope.</p>
 									{/if}
 								</div>
 							{/if}
@@ -1555,15 +2015,13 @@
 			{/if}
 
 			{#if referenceCatalogError}
-				<p class="mt-3 text-sm text-red-700">{referenceCatalogError}</p>
+				<p class="mt-3 text-sm text-error-500">{referenceCatalogError}</p>
 			{/if}
 			{#if referenceCatalogMessage}
-				<p class="mt-3 text-sm text-emerald-700">{referenceCatalogMessage}</p>
+				<p class="mt-3 text-sm text-success-600-400">{referenceCatalogMessage}</p>
 			{/if}
 			{#if referenceCatalogWarning}
-				<p
-					class="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
-				>
+				<p class="mt-3 rounded border border-warning-500 preset-tonal-warning px-3 py-2 text-sm">
 					{referenceCatalogWarning}
 				</p>
 			{/if}
@@ -1614,12 +2072,12 @@
 			<!--Display table & header with unit-->
 			<h3 class="text-xl font-bold">Predicted Concentrations</h3>
 			<!--Display a table here with isotopes as the columns and materials as the rows-->
-			<table class="table-auto border-collapse border border-gray-400">
+			<table class="table-auto border-collapse border border-surface-300-700">
 				<thead>
 					<tr>
-						<th class="border border-gray-400 px-4 py-2"></th>
+						<th class="border border-surface-300-700 px-4 py-2"></th>
 						{#each isotopeInfo as iso, index}
-							<th class="border border-gray-400 px-4 py-2">
+							<th class="border border-surface-300-700 px-4 py-2">
 								{iso.elementName}
 							</th>
 						{/each}
@@ -1627,9 +2085,9 @@
 				</thead>
 				<tbody>
 					<tr>
-						<td class="border border-gray-400 px-4 py-2 font-bold"> Units </td>
+						<td class="border border-surface-300-700 px-4 py-2 font-bold"> Units </td>
 						{#each isotopeInfo as _, index}
-							<td class="border border-gray-400 px-4 py-2">
+							<td class="border border-surface-300-700 px-4 py-2">
 								{(() => {
 									const referenceIndex = getLinkedReferenceIndex(index);
 									const unit =
@@ -1644,11 +2102,11 @@
 					{#each materials.unknown as unk, uIndex}
 						{@const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`}
 						<tr>
-							<td class="border border-gray-400 px-4 py-2 font-bold">
+							<td class="border border-surface-300-700 px-4 py-2 font-bold">
 								{unknownLabel}
 							</td>
 							{#each isotopeInfo as _, iIndex}
-								<td class="border border-gray-400 px-4 py-2">
+								<td class="border border-surface-300-700 px-4 py-2">
 									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)} ± {truncateToSigFigs(
 										everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute,
 										2
@@ -1657,11 +2115,11 @@
 							{/each}
 						</tr>
 						<tr>
-							<td class="border border-gray-400 px-4 py-2 font-bold">
+							<td class="border border-surface-300-700 px-4 py-2 font-bold">
 								{unknownLabel} Conc Det Lim
 							</td>
 							{#each isotopeInfo as _, iIndex}
-								<td class="border border-gray-400 px-4 py-2">
+								<td class="border border-surface-300-700 px-4 py-2">
 									{truncateToSigFigs(everythingComp[iIndex][uIndex].concentrationDetectionLimit, 3)}
 								</td>
 							{/each}
@@ -1675,7 +2133,7 @@
 			</button>
 			<br /><br />
 
-			<details class="mt-4 rounded border border-gray-300 p-3">
+			<details class="mt-4 rounded border border-surface-300-700 p-3">
 				<summary class="cursor-pointer font-semibold">Expand for debug information</summary>
 				<div class="mt-3 space-y-4">
 					<ComputedDisplay title="Isotope Information" data={isotopeInfo} />

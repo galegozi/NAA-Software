@@ -39,7 +39,9 @@ Vitest is split into two projects (vite.config.ts): `client` runs `src/**/*.svel
 The app deploys both to GitHub Pages (static only, `.github/workflows/deploy.yml`) and Azure Static Web Apps (static + `api/` functions). This is why the UI has two modes:
 
 - **Unauthed / static mode** (localhost, `*.github.io`): manual data-entry wizard, no API. Detected by hostname in `src/lib/utils/authEnvironment.ts`.
-- **Authed mode** (Azure SWA): sign-in via `/.auth/me` (`src/lib/components/AuthGate.svelte`), isotope/reference-material catalogs loaded from `/api/*`.
+- **Authed mode** (Azure SWA): the same wizard, plus "Save to shared catalog" / "Publish to shared catalog" panels on custom isotope and reference-material cards. Auth state comes from `/.auth/me` via `src/lib/utils/swaAuth.svelte.ts` (the `swaAuth` singleton + `redirectToSignIn`); reads/writes go through `/api/*` and `src/lib/utils/catalogWrite.ts`. (The shared store is called the "catalog" in the UI — never "database".)
+
+There is a single page (`/`). The wizard autosaves its full state to `localStorage` continuously (`src/lib/utils/analysisDraft.ts`) so a sign-in redirect / refresh / tab close never loses data; "Start new analysis" on the welcome screen clears it.
 
 The build is a fully static SPA: `adapter-static` with `404.html` fallback, `prerender = true`, `appDir: 'app'` (svelte.config.js). There is no SvelteKit server code.
 
