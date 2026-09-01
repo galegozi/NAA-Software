@@ -6,6 +6,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    ignore:
+      # TypeScript 7 is the native (tsgo) compiler; svelte-check / typescript-eslint
+      # still need the dual-install + --tsgo setup. Revisit as a deliberate migration.
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
     groups:
       # One PR per week for all non-breaking bumps; majors still come individually.
       minor-and-patch:
