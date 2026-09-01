@@ -65,6 +65,14 @@ export function redirectToSignIn(): void {
 	);
 }
 
+/** Sign the user out via the SWA logout endpoint and return to the home page. */
+export function signOut(): void {
+	if (!browser) {
+		return;
+	}
+	window.location.assign('/.auth/logout?post_logout_redirect_uri=/');
+}
+
 class SwaAuth {
 	/** True while the first/next `/.auth/me` probe is in flight. */
 	checking = $state(false);

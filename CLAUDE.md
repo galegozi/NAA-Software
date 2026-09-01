@@ -43,6 +43,8 @@ The app deploys both to GitHub Pages (static only, `.github/workflows/deploy.yml
 
 There is a single page (`/`). The wizard autosaves its full state to `localStorage` continuously (`src/lib/utils/analysisDraft.ts`) so a sign-in redirect / refresh / tab close never loses data; "Start new analysis" on the welcome screen clears it.
 
+Publishing anything to the catalog is a two-step confirm: the panel first shows a numbered list of exactly what will happen (including dependencies it resolves for you — publishing a reference material auto-adds any un-catalogued covered isotope and auto-creates its datasheet from the entered concentrations; recording a proxy relationship auto-adds either isotope), then a "Confirm & upload" button runs it. Proxy-measurement relationships ("isotope A measures B", `POST /api/isotope-measurements`) are recorded from Step 1's "Isotope relationships" panel, held with the draft, and feed catalog-matching immediately (`allMeasurementLinks` = API links + local ones).
+
 The build is a fully static SPA: `adapter-static` with `404.html` fallback, `prerender = true`, `appDir: 'app'` (svelte.config.js). There is no SvelteKit server code.
 
 ### Frontend
@@ -60,7 +62,7 @@ The build is a fully static SPA: `adapter-static` with `404.html` fallback, `pre
 
 ### Backend (`api/`)
 
-Azure Functions v4, plain JS ESM. Handlers in `api/src/functions/` (isotopes, reference-materials, reference-datasheets, isotope-measurements); shared logic in `api/src/lib/`. Payload normalization/merge logic (`isotopeWritePayload.js`, `referenceMaterialWritePayload.js`) is separated from handlers and unit-tested. Writes are upserts: existing isotopes get new energies appended; existing reference materials get countings appended.
+Azure Functions v4, plain JS ESM. Handlers in `api/src/functions/` (isotopes, reference-materials, reference-datasheets, isotope-measurements); shared logic in `api/src/lib/`. Payload normalization/merge logic (`isotopeWritePayload.js`, `referenceMaterialWritePayload.js`) is separated from handlers and unit-tested. Writes are upserts by default: existing isotopes get new energies appended; existing reference materials get countings appended. Both `POST` endpoints also take an update-in-place path — `POST /api/isotopes` with `"mode":"replace"` overwrites element/half-life/energies on the matched record; `POST /api/reference-materials` with `"mode":"replace-counting"` + `targetItemId`/`targetCountingId` swaps one counting on a document by id (see README).
 
 Cosmos DB access goes through `api/src/lib/cosmosClient.js` (env-driven; see README for the full `COSMOSDB_*` settings). Set `MOCK_COSMOS=true` for in-memory mock behavior with no database.
 

@@ -64,9 +64,13 @@ function normalizeCountData(payload, fieldPrefix) {
 	}
 
 	return {
-		grossCounts: normalizeFiniteNumber(payload.grossCounts, `${fieldPrefix}.grossCounts`, { min: 0 }),
+		grossCounts: normalizeFiniteNumber(payload.grossCounts, `${fieldPrefix}.grossCounts`, {
+			min: 0
+		}),
 		netCounts: normalizeFiniteNumber(payload.netCounts, `${fieldPrefix}.netCounts`, { min: 0 }),
-		uncertainty: normalizeFiniteNumber(payload.uncertainty, `${fieldPrefix}.uncertainty`, { min: 0 }),
+		uncertainty: normalizeFiniteNumber(payload.uncertainty, `${fieldPrefix}.uncertainty`, {
+			min: 0
+		}),
 		grossCountsPositionalCorrectionFactor: normalizeFiniteNumber(
 			payload.grossCountsPositionalCorrectionFactor,
 			`${fieldPrefix}.grossCountsPositionalCorrectionFactor`,
@@ -193,10 +197,17 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 		referenceDatasheetId,
 		mass: normalizeFiniteNumber(payload.mass, `${fieldPrefix}.mass`, { min: 0 }),
 		reactorPower: normalizeFiniteNumber(payload.reactorPower, `${fieldPrefix}.reactorPower`),
-		irradiationTime: normalizeFiniteNumber(payload.irradiationTime, `${fieldPrefix}.irradiationTime`, {
-			min: 0
-		}),
-		irradiationEnd: normalizeOptionalDateTime(payload.irradiationEnd, `${fieldPrefix}.irradiationEnd`),
+		irradiationTime: normalizeFiniteNumber(
+			payload.irradiationTime,
+			`${fieldPrefix}.irradiationTime`,
+			{
+				min: 0
+			}
+		),
+		irradiationEnd: normalizeOptionalDateTime(
+			payload.irradiationEnd,
+			`${fieldPrefix}.irradiationEnd`
+		),
 		measurementStartTime: normalizeOptionalDateTime(
 			payload.measurementStartTime,
 			`${fieldPrefix}.measurementStartTime`
@@ -211,7 +222,9 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 		irradiationType,
 		dtType: dtType || undefined,
 		knownConcentration: Array.from({ length: isotopeCount }, (_, i) => {
-			const val = Array.isArray(payload.knownConcentration) ? payload.knownConcentration[i] : undefined;
+			const val = Array.isArray(payload.knownConcentration)
+				? payload.knownConcentration[i]
+				: undefined;
 			const n = Number(val);
 			return Number.isFinite(n) && n >= 0 ? n : 0;
 		}),
@@ -221,7 +234,9 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 			return Number.isFinite(n) && n >= 0 ? n : 0;
 		}),
 		concentrationUnits: Array.from({ length: isotopeCount }, (_, i) => {
-			const val = Array.isArray(payload.concentrationUnits) ? toTrimmedString(payload.concentrationUnits[i]) : '';
+			const val = Array.isArray(payload.concentrationUnits)
+				? toTrimmedString(payload.concentrationUnits[i])
+				: '';
 			return ALLOWED_CONCENTRATION_UNITS.has(val) ? val : undefined;
 		})
 	};
@@ -280,10 +295,7 @@ function isotopeSelectionsEqual(left, right) {
 	for (let index = 0; index < left.length; index += 1) {
 		const l = left[index];
 		const r = right[index];
-		if (
-			l?.isotopeId !== r?.isotopeId ||
-			l?.energy !== r?.energy
-		) {
+		if (l?.isotopeId !== r?.isotopeId || l?.energy !== r?.energy) {
 			return false;
 		}
 	}
@@ -296,7 +308,11 @@ function isotopesEqual(left, right) {
 }
 
 function countsEqual(leftCounts, rightCounts) {
-	if (!Array.isArray(leftCounts) || !Array.isArray(rightCounts) || leftCounts.length !== rightCounts.length) {
+	if (
+		!Array.isArray(leftCounts) ||
+		!Array.isArray(rightCounts) ||
+		leftCounts.length !== rightCounts.length
+	) {
 		return false;
 	}
 
@@ -307,7 +323,8 @@ function countsEqual(leftCounts, rightCounts) {
 			left?.grossCounts !== right?.grossCounts ||
 			left?.netCounts !== right?.netCounts ||
 			left?.uncertainty !== right?.uncertainty ||
-			left?.grossCountsPositionalCorrectionFactor !== right?.grossCountsPositionalCorrectionFactor ||
+			left?.grossCountsPositionalCorrectionFactor !==
+				right?.grossCountsPositionalCorrectionFactor ||
 			left?.netCountsPositionalCorrectionFactor !== right?.netCountsPositionalCorrectionFactor ||
 			left?.uncertaintyPositionalCorrectionFactor !== right?.uncertaintyPositionalCorrectionFactor
 		) {
@@ -421,10 +438,12 @@ export function normalizeReferenceMaterialWritePayload(payload, principal) {
 	});
 
 	const referenceKey = normalizedCountings[0].identityKey;
-	const hasMixedIdentity = normalizedCountings.some((counting) => counting.identityKey !== referenceKey);
+	const hasMixedIdentity = normalizedCountings.some(
+		(counting) => counting.identityKey !== referenceKey
+	);
 	if (hasMixedIdentity) {
 		throw new Error(
-			"All submitted countings must represent the same material metadata and isotope set. Submit different materials separately."
+			'All submitted countings must represent the same material metadata and isotope set. Submit different materials separately.'
 		);
 	}
 	const now = new Date().toISOString();
@@ -479,4 +498,68 @@ export function mergeReferenceMaterialWrite(existingItem, incomingItem, principa
 		updatedByDetails: principal?.userDetails || '',
 		updatedByIdentityProvider: principal?.identityProvider || ''
 	};
+}
+
+/**
+ * In-place update of one counting on an existing reference-material document.
+ *
+ * The wizard's "Update existing" action loads a single counting from the catalog
+ * (identified by `targetCountingId`), lets the user edit its irradiation
+ * metadata / counts, then sends it back. This swaps that counting for the edited
+ * one — keeping its `countingId` so anything referencing it stays valid — and
+ * replaces the document's isotope set. Falls back to appending when the target
+ * counting is no longer present. The document id, `referenceKey` and
+ * creation audit fields are preserved.
+ */
+export function replaceCountingInReferenceMaterial(
+	existingItem,
+	incomingItem,
+	targetCountingId,
+	principal
+) {
+	const now = new Date().toISOString();
+	const existingCountings = Array.isArray(existingItem.countings) ? existingItem.countings : [];
+	const incomingCounting = Array.isArray(incomingItem.countings) ? incomingItem.countings[0] : null;
+
+	if (!incomingCounting) {
+		throw new Error('An incoming counting is required to replace one.');
+	}
+
+	const replacement = {
+		...incomingCounting,
+		countingId: targetCountingId || incomingCounting.countingId
+	};
+
+	let matched = false;
+	const nextCountings = existingCountings.map((counting) => {
+		if (counting.countingId === targetCountingId) {
+			matched = true;
+			return replacement;
+		}
+		return counting;
+	});
+
+	if (!matched) {
+		nextCountings.push(replacement);
+	}
+
+	return {
+		...existingItem,
+		docType: 'reference-material',
+		isotopes: incomingItem.isotopes,
+		countings: nextCountings,
+		notes: incomingItem.notes || existingItem.notes || '',
+		updatedAt: now,
+		updatedBy: principal?.userId || principal?.userDetails || 'unknown',
+		updatedByDetails: principal?.userDetails || '',
+		updatedByIdentityProvider: principal?.identityProvider || ''
+	};
+}
+
+/** True when `targetCountingId` is one of the document's stored countings. */
+export function referenceMaterialHasCounting(item, targetCountingId) {
+	return (
+		Array.isArray(item?.countings) &&
+		item.countings.some((counting) => counting.countingId === targetCountingId)
+	);
 }

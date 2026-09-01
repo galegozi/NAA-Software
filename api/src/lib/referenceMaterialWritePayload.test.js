@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 
 import {
 	mergeReferenceMaterialWrite,
-	normalizeReferenceMaterialWritePayload
+	normalizeReferenceMaterialWritePayload,
+	referenceMaterialHasCounting,
+	replaceCountingInReferenceMaterial
 } from './referenceMaterialWritePayload.js';
 
 function buildValidPayload() {
@@ -147,7 +149,9 @@ test('normalizeReferenceMaterialWritePayload rejects mismatched isotope/count ar
 });
 
 test('mergeReferenceMaterialWrite appends incoming countings', () => {
-	const existing = normalizeReferenceMaterialWritePayload(buildValidPayload(), { userId: 'writer-1' });
+	const existing = normalizeReferenceMaterialWritePayload(buildValidPayload(), {
+		userId: 'writer-1'
+	});
 	const nextPayload = buildValidPayload();
 	nextPayload.countings[0].referenceMaterial.counts[0].netCounts = 4300;
 	const incoming = normalizeReferenceMaterialWritePayload(nextPayload, { userId: 'writer-2' });
@@ -158,9 +162,52 @@ test('mergeReferenceMaterialWrite appends incoming countings', () => {
 });
 
 test('mergeReferenceMaterialWrite skips exact duplicate countings', () => {
-	const existing = normalizeReferenceMaterialWritePayload(buildValidPayload(), { userId: 'writer-1' });
-	const incoming = normalizeReferenceMaterialWritePayload(buildValidPayload(), { userId: 'writer-2' });
+	const existing = normalizeReferenceMaterialWritePayload(buildValidPayload(), {
+		userId: 'writer-1'
+	});
+	const incoming = normalizeReferenceMaterialWritePayload(buildValidPayload(), {
+		userId: 'writer-2'
+	});
 	const merged = mergeReferenceMaterialWrite(existing, incoming, { userId: 'writer-2' });
 
 	assert.equal(merged.countings.length, 1);
+});
+
+test('replaceCountingInReferenceMaterial swaps one counting in place and keeps the doc id', () => {
+	const existing = normalizeReferenceMaterialWritePayload(buildValidPayload(), {
+		userId: 'writer-1'
+	});
+	const targetCountingId = existing.countings[0].countingId;
+	assert.ok(referenceMaterialHasCounting(existing, targetCountingId));
+
+	const editedPayload = buildValidPayload();
+	editedPayload.countings[0].referenceMaterial.mass = 0.9;
+	const incoming = normalizeReferenceMaterialWritePayload(editedPayload, { userId: 'writer-2' });
+
+	const updated = replaceCountingInReferenceMaterial(existing, incoming, targetCountingId, {
+		userId: 'writer-2'
+	});
+
+	assert.equal(updated.id, existing.id);
+	assert.equal(updated.referenceKey, existing.referenceKey);
+	assert.equal(updated.countings.length, 1);
+	assert.equal(updated.countings[0].countingId, targetCountingId);
+	assert.equal(updated.countings[0].referenceMaterial.mass, 0.9);
+	assert.equal(updated.updatedBy, 'writer-2');
+});
+
+test('replaceCountingInReferenceMaterial appends when the target counting is gone', () => {
+	const existing = normalizeReferenceMaterialWritePayload(buildValidPayload(), {
+		userId: 'writer-1'
+	});
+	const incoming = normalizeReferenceMaterialWritePayload(buildValidPayload(), {
+		userId: 'writer-2'
+	});
+
+	const updated = replaceCountingInReferenceMaterial(existing, incoming, 'no-such-id', {
+		userId: 'writer-2'
+	});
+
+	assert.equal(updated.countings.length, 2);
+	assert.equal(referenceMaterialHasCounting(existing, 'no-such-id'), false);
 });

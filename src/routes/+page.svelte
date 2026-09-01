@@ -37,12 +37,12 @@
 		getIsotopeErrors,
 		getReferenceMaterialErrors
 	} from '$lib/utils/materialValidation.js';
-	import { isEnvironmentWithoutSignIn } from '$lib/utils/authEnvironment.js';
 	import {
 		loadDraft,
 		saveDraft,
 		clearDraft,
-		type AnalysisDraft
+		type AnalysisDraft,
+		type LocalIsotopeLink
 	} from '$lib/utils/analysisDraft.js';
 	import { swaAuth, redirectToSignIn } from '$lib/utils/swaAuth.svelte.js';
 	import { analysisMeta } from '$lib/utils/analysisMeta.svelte.js';
@@ -52,13 +52,26 @@
 		isotopeSaveBlockers,
 		saveIsotopeToCatalog,
 		referenceMaterialSaveBlockers,
+		uncataloguedIsotopes,
+		isotopeLabel,
+		type CoveredIsotope,
 		saveReferenceMaterialToCatalog,
 		saveReferenceDatasheet,
 		parseIsotopeName,
 		isotopeIdentityKey,
-		describeIsotope
+		describeIsotope,
+		normalizeEnergyList,
+		datasheetEntriesFromReference,
+		findCatalogIsotope,
+		findCatalogReferenceMaterial,
+		isotopeElementMismatch,
+		findIsotopeMeasurementLink,
+		saveIsotopeMeasurementLink,
+		type CatalogIsotopeMatch,
+		type CatalogReferenceMatch
 	} from '$lib/utils/catalogWrite.js';
 	import ReferenceDatasheetForm from '$lib/components/ReferenceDatasheetForm.svelte';
+	import IsotopeRelationshipForm from '$lib/components/IsotopeRelationshipForm.svelte';
 	import {
 		APP_VERSION,
 		REVIEW_STEP,
@@ -259,7 +272,8 @@
 			referenceCatalogItemIds,
 			expandedIsotopes: Array.from(expandedIsotopes),
 			expandedReferences: Array.from(expandedReferences),
-			expandedUnknowns: Array.from(expandedUnknowns)
+			expandedUnknowns: Array.from(expandedUnknowns),
+			localIsotopeLinks
 		};
 	}
 
@@ -327,6 +341,7 @@
 			(_, index) => saved.referenceCatalogItemIds?.[index] ?? null
 		);
 		isotopeReferenceMap = Array.isArray(saved.isotopeReferenceMap) ? saved.isotopeReferenceMap : [];
+		localIsotopeLinks = Array.isArray(saved.localIsotopeLinks) ? saved.localIsotopeLinks : [];
 
 		hydrateExpandedSet(expandedIsotopes, saved.expandedIsotopes ?? []);
 		hydrateExpandedSet(expandedReferences, saved.expandedReferences ?? []);
@@ -359,6 +374,24 @@
 		referenceCatalogError = '';
 		referenceCatalogWarning = '';
 		customReferenceNotice = '';
+		isotopeWriteFeedback = {};
+		referenceWriteFeedback = {};
+		isotopeUploadMode = {};
+		referenceUploadMode = {};
+		newReferenceName = {};
+		isotopeEnergyOverride = {};
+		isotopeDup = {};
+		referenceDup = {};
+		localIsotopeLinks = [];
+		relationshipFeedback = '';
+		relationshipConfirm = null;
+		relationshipPanelOpen = false;
+		isotopePublishConfirm = null;
+		referencePublishConfirm = null;
+		uploadAllConfirm = null;
+		uploadAllResult = '';
+		for (const k of Object.keys(isotopeDupKey)) delete isotopeDupKey[Number(k)];
+		for (const k of Object.keys(referenceDupKey)) delete referenceDupKey[Number(k)];
 		expandedIsotopes.clear();
 		expandedReferences.clear();
 		expandedUnknowns.clear();
@@ -368,7 +401,6 @@
 		if (!browser) {
 			return;
 		}
-		localAuthNotice = '';
 		flushDraft();
 		redirectToSignIn();
 	}
@@ -400,8 +432,84 @@
 	let isotopeUploadMode = $state<Record<number, 'update' | 'new'>>({});
 	let referenceUploadMode = $state<Record<number, 'update' | 'new'>>({});
 	let newReferenceName = $state<Record<number, string>>({});
+	// Editable "energy lines saved to the catalog" list, per isotope card.
+	let isotopeEnergyOverride = $state<Record<number, number[]>>({});
+
+	// Pre-flight duplicate lookups, per card.
+	type DupState<T> = { checking: boolean; checked: boolean; match: T | null };
+	let isotopeDup = $state<Record<number, DupState<CatalogIsotopeMatch>>>({});
+	let referenceDup = $state<Record<number, DupState<CatalogReferenceMatch>>>({});
+	const isotopeDupKey: Record<number, string> = {};
+	const referenceDupKey: Record<number, string> = {};
+
+	// Proxy-measurement relationships ("A measures B") recorded this session.
+	let localIsotopeLinks = $state<LocalIsotopeLink[]>([]);
+	let relationshipPanelOpen = $state(false);
+	let relationshipFeedback = $state('');
+	let relationshipForm = $state<IsotopeRelationshipForm>();
+	let relationshipBusy = $state(false);
+
+	/**
+	 * A pending upload the user must confirm first. `steps` are shown verbatim;
+	 * `run` does the work (dependency publishes + the main POST).
+	 */
+	type PendingConfirm = {
+		kind: 'isotope' | 'reference' | 'relationship' | 'all';
+		key: string | number;
+		steps: string[];
+		run: () => Promise<void>;
+	};
+	let isotopePublishConfirm = $state<PendingConfirm | null>(null);
+	let referencePublishConfirm = $state<PendingConfirm | null>(null);
+	let relationshipConfirm = $state<PendingConfirm | null>(null);
+	let uploadAllConfirm = $state<PendingConfirm | null>(null);
+	let uploadAllBusy = $state(false);
+	let uploadAllResult = $state('');
+
+	function cancelConfirm(pending: PendingConfirm) {
+		if (pending.kind === 'isotope') isotopePublishConfirm = null;
+		else if (pending.kind === 'reference') referencePublishConfirm = null;
+		else if (pending.kind === 'relationship') relationshipConfirm = null;
+		else uploadAllConfirm = null;
+	}
 
 	let writerAccess = $derived(swaAuth.hasRole(WRITER_ROLE));
+
+	async function runIsotopeDupCheck(index: number, parsed: ReturnType<typeof parseIsotopeName>) {
+		if (!parsed) {
+			return;
+		}
+		isotopeDup = { ...isotopeDup, [index]: { checking: true, checked: false, match: null } };
+		const match = await findCatalogIsotope(parsed);
+		isotopeDup = { ...isotopeDup, [index]: { checking: false, checked: true, match } };
+	}
+
+	async function runReferenceDupCheck(index: number, identity: { netlCode?: string }) {
+		referenceDup = { ...referenceDup, [index]: { checking: true, checked: false, match: null } };
+		const match = await findCatalogReferenceMaterial(identity);
+		referenceDup = { ...referenceDup, [index]: { checking: false, checked: true, match } };
+	}
+
+	/** Energy list to write for isotope `index`: user's edited list, else seeded from the catalog record + current line. */
+	function isotopeEnergyList(index: number): number[] {
+		const override = isotopeEnergyOverride[index];
+		if (override) {
+			return override;
+		}
+		const isotope = isotopeInfo[index];
+		if (!isotope) {
+			return [];
+		}
+		const catalogEnergies = isotope.id ? (isotopeCatalogById[isotope.id]?.energies ?? []) : [];
+		return normalizeEnergyList([...catalogEnergies, isotope.energy]);
+	}
+
+	function setIsotopeEnergiesFromText(index: number, text: string) {
+		isotopeEnergyOverride = {
+			...isotopeEnergyOverride,
+			[index]: normalizeEnergyList(text.split(/[\s,]+/))
+		};
+	}
 
 	function isotopeCatalogOriginalKey(isotope: IsotopeInfoType): string | null {
 		const id = isotope.id?.trim();
@@ -437,11 +545,83 @@
 		return isotopeUploadMode[index] ?? 'update';
 	}
 
+	const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+	/** The catalog doc + counting a reference was loaded from, if it can be updated in place. */
+	function referenceReplaceTarget(index: number): { itemId: string; countingId: string } | null {
+		const value = referenceCatalogItemIds[index];
+		if (typeof value !== 'string') {
+			return null;
+		}
+		const parts = value.split('::');
+		if (parts.length !== 2 || !parts[0] || !UUID_RE.test(parts[1])) {
+			return null;
+		}
+		return { itemId: parts[0], countingId: parts[1] };
+	}
+
 	function referenceModeFor(index: number): 'update' | 'new' {
-		if (typeof referenceCatalogItemIds[index] !== 'string') {
+		if (!referenceReplaceTarget(index)) {
 			return 'new';
 		}
 		return referenceUploadMode[index] ?? 'update';
+	}
+
+	/** Selected datasheet id for reference `index`: user's choice, else the material's own (if loaded). */
+	function datasheetValueFor(index: number): string {
+		const chosen = selectedDatasheetId[index];
+		if (chosen !== undefined) {
+			return chosen;
+		}
+		const fromMaterial = materials.reference[index]?.referenceDatasheetId;
+		if (fromMaterial && datasheets.some((sheet) => sheet.id === fromMaterial)) {
+			return fromMaterial;
+		}
+		return '';
+	}
+
+	/** Reasons the pending isotope upload would be a duplicate / no-op. */
+	function isotopeDupBlockers(index: number): string[] {
+		const state = isotopeDup[index];
+		const isotope = isotopeInfo[index];
+		if (!isotope || !state?.checked || !state.match) {
+			return [];
+		}
+		const match = state.match;
+		if (isotopeIdentityChanged(isotope)) {
+			return [
+				`"${isotope.isotopeName}" already exists in the catalog. Use a unique name, or clear the rename to update the original entry.`
+			];
+		}
+		if (isotopeModeFor(index) === 'new') {
+			return [
+				`"${isotope.isotopeName}" is already in the catalog — choose "Update the existing catalog entry" instead of creating a duplicate.`
+			];
+		}
+		const sameHalfLife =
+			Math.abs((match.halfLife?.number ?? NaN) - isotope.halfLife) < 1e-9 &&
+			(match.halfLife?.unit ?? '') === (isotope.unit ?? '');
+		const want = isotopeEnergyList(index);
+		const have = match.energies ?? [];
+		const sameEnergies =
+			want.length === have.length && want.every((e, i) => Math.abs(e - have[i]) < 1e-6);
+		if (sameHalfLife && sameEnergies) {
+			return ['This isotope is already in the catalog with identical data — nothing to upload.'];
+		}
+		return [];
+	}
+
+	/** Reasons the pending "save as new" reference upload would collide with an existing entry. */
+	function referenceDupBlockers(index: number): string[] {
+		const state = referenceDup[index];
+		if (!state?.checked || !state.match || referenceModeFor(index) === 'update') {
+			return [];
+		}
+		const match = state.match;
+		const countings = `${match.countingCount} counting${match.countingCount === 1 ? '' : 's'}`;
+		return [
+			`A reference material "${match.netlCode || match.sampleName}" is already in the catalog (${countings}). Use a different NETL code, or load it from the catalog and choose "Update the existing catalog entry".`
+		];
 	}
 
 	async function loadDatasheets(force = false) {
@@ -475,46 +655,107 @@
 		}
 	}
 
-	function coveredIsotopesForReference(referenceIndex: number): IsotopeInfoType[] {
-		return isotopeInfo.filter((_, i) => referenceCoversIsotope(referenceIndex, i));
+	function coveredIsotopesForReference(referenceIndex: number): CoveredIsotope[] {
+		return isotopeInfo
+			.map((isotope, index) => ({ isotope, index }))
+			.filter(({ index }) => referenceCoversIsotope(referenceIndex, index));
 	}
 
-	async function publishIsotope(index: number) {
+	/** Publish an analysis isotope if it isn't in the catalog yet; adopt its id. Returns the id. */
+	async function ensureIsotopeInCatalog(isotope: IsotopeInfoType): Promise<string> {
+		const existing = isotope.id?.trim();
+		if (existing) {
+			return existing;
+		}
+		const result = await saveIsotopeToCatalog(isotope, {
+			energies: [isotope.energy],
+			mode: 'append'
+		});
+		const id = result.item?.id;
+		if (typeof id !== 'string' || !id) {
+			throw new CatalogWriteError(`Could not add ${isotopeLabel(isotope)} to the catalog.`, 500);
+		}
+		const idx = isotopeInfo.indexOf(isotope);
+		if (idx >= 0) {
+			isotopeInfo = isotopeInfo.map((iso, i) => (i === idx ? { ...iso, id } : iso));
+		}
+		return id;
+	}
+
+	function isotopePublishBlockers(index: number): string[] {
 		const isotope = isotopeInfo[index];
 		if (!isotope) {
-			return;
+			return ['Isotope not found.'];
 		}
+		return [
+			...isotopeSaveBlockers(isotope),
+			...(isotopeEnergyList(index).length === 0 ? ['Add at least one energy line.'] : []),
+			...isotopeDupBlockers(index)
+		];
+	}
 
-		if (!swaAuth.signedIn) {
-			void handleSignIn();
-			return;
+	function isotopePublishSteps(index: number): string[] {
+		const isotope = isotopeInfo[index];
+		if (!isotope) {
+			return [];
 		}
-		if (!writerAccess) {
+		const energies = isotopeEnergyList(index).join(', ');
+		const label = isotopeLabel(isotope);
+		const writeMode = isotope.id && isotopeModeFor(index) === 'update' ? 'replace' : 'append';
+		if (writeMode === 'replace') {
+			return [
+				`Overwrite the catalog entry for ${label} (half-life, element, and the full energy list: ${energies} keV).`
+			];
+		}
+		return isotope.id
+			? [`Add energy lines to the catalog entry for ${label} (${energies} keV).`]
+			: [`Add ${label} to the shared catalog (energies ${energies} keV).`];
+	}
+
+	/** Execute the isotope publish (caller has already checked auth). Returns success. */
+	async function runIsotopePublish(index: number): Promise<boolean> {
+		const isotope = isotopeInfo[index];
+		if (!isotope) {
+			return false;
+		}
+		const blockers = isotopePublishBlockers(index);
+		if (blockers.length > 0) {
 			isotopeWriteFeedback = {
 				...isotopeWriteFeedback,
-				[index]: { ok: false, text: `Your account lacks the '${WRITER_ROLE}' role.` }
+				[index]: { ok: false, text: blockers.join(' ') }
 			};
-			return;
+			return false;
 		}
 
-		const mode = isotopeModeFor(index);
+		const uiMode = isotopeModeFor(index);
+		const writeMode: 'append' | 'replace' =
+			isotope.id && uiMode === 'update' ? 'replace' : 'append';
+		const energies = isotopeEnergyList(index);
 
 		isotopeWriteBusy = index;
 		try {
-			const result = await saveIsotopeToCatalog(isotope);
+			const result = await saveIsotopeToCatalog(isotope, { energies, mode: writeMode });
 			const newId = result.item?.id;
 			if (typeof newId === 'string' && newId) {
 				isotopeInfo = isotopeInfo.map((iso, i) => (i === index ? { ...iso, id: newId } : iso));
+				const savedItem = result.item as unknown as IsotopeCatalogItem | null;
+				if (savedItem && Array.isArray(savedItem.energies)) {
+					isotopeCatalogById = { ...isotopeCatalogById, [newId]: savedItem };
+					isotopeEnergyOverride = { ...isotopeEnergyOverride, [index]: savedItem.energies };
+				}
 			}
 			let text: string;
 			if (result.created) {
 				text = 'Saved as a new catalog isotope.';
-			} else if (mode === 'new') {
+			} else if (writeMode === 'replace') {
+				text = 'Updated the catalog entry — half-life, element and energy list overwritten.';
+			} else if (uiMode === 'new') {
 				text = 'An isotope with this name already exists — your energy lines were merged into it.';
 			} else {
 				text = 'Updated the catalog entry — new energy lines were merged in.';
 			}
 			isotopeWriteFeedback = { ...isotopeWriteFeedback, [index]: { ok: true, text } };
+			return true;
 		} catch (error) {
 			if (error instanceof CatalogWriteError && (error.status === 401 || error.status === 403)) {
 				void swaAuth.refresh(true);
@@ -526,9 +767,45 @@
 					text: error instanceof Error ? error.message : 'Unable to save isotope.'
 				}
 			};
+			return false;
 		} finally {
 			isotopeWriteBusy = null;
 		}
+	}
+
+	async function publishIsotope(index: number) {
+		const isotope = isotopeInfo[index];
+		if (!isotope) {
+			return;
+		}
+		if (!swaAuth.signedIn) {
+			void handleSignIn();
+			return;
+		}
+		if (!writerAccess) {
+			isotopeWriteFeedback = {
+				...isotopeWriteFeedback,
+				[index]: { ok: false, text: `Your account lacks the '${WRITER_ROLE}' role.` }
+			};
+			return;
+		}
+		const blockers = isotopePublishBlockers(index);
+		if (blockers.length > 0) {
+			isotopeWriteFeedback = {
+				...isotopeWriteFeedback,
+				[index]: { ok: false, text: blockers.join(' ') }
+			};
+			return;
+		}
+		isotopePublishConfirm = {
+			kind: 'isotope',
+			key: index,
+			steps: isotopePublishSteps(index),
+			run: async () => {
+				isotopePublishConfirm = null;
+				await runIsotopePublish(index);
+			}
+		};
 	}
 
 	async function createDatasheet(referenceIndex: number) {
@@ -564,34 +841,31 @@
 		}
 	}
 
-	async function publishReference(index: number) {
+	type ReferencePublishPlan = {
+		writeMode: 'append' | 'new' | 'replace-counting';
+		identityOverride?: { netlCode?: string };
+		replaceTarget?: { itemId: string; countingId: string };
+		needsCatalogIsotopes: IsotopeInfoType[];
+		needsDatasheet: boolean;
+		seedEntries: ReturnType<typeof datasheetEntriesFromReference>;
+		blockers: string[];
+		steps: string[];
+	};
+
+	function referencePublishPlan(index: number): ReferencePublishPlan {
 		const reference = materials.reference[index];
-		if (!reference) {
-			return;
-		}
-
-		if (!swaAuth.signedIn) {
-			void handleSignIn();
-			return;
-		}
-		if (!writerAccess) {
-			referenceWriteFeedback = {
-				...referenceWriteFeedback,
-				[index]: { ok: false, text: `Your account lacks the '${WRITER_ROLE}' role.` }
-			};
-			return;
-		}
-
 		const covered = coveredIsotopesForReference(index);
-		const blockers = referenceMaterialSaveBlockers(reference, covered);
-		const datasheetId = selectedDatasheetId[index] ?? '';
-		if (!datasheetId) {
-			blockers.push('Select or create a reference datasheet.');
-		}
+		const blockers = [
+			...(reference ? referenceMaterialSaveBlockers(reference) : ['Reference not found.']),
+			...referenceDupBlockers(index)
+		];
 
-		const mode = referenceModeFor(index);
+		const uiMode = referenceModeFor(index);
+		const replaceTarget = referenceReplaceTarget(index) ?? undefined;
+		const fromCatalog = typeof referenceCatalogItemIds[index] === 'string';
+
 		let identityOverride: { netlCode?: string } | undefined;
-		if (mode === 'new' && typeof referenceCatalogItemIds[index] === 'string') {
+		if (uiMode === 'new' && fromCatalog && reference) {
 			const newName = (newReferenceName[index] ?? '').trim();
 			if (!newName) {
 				blockers.push('Enter a name for the new reference material.');
@@ -602,33 +876,101 @@
 			}
 		}
 
-		if (blockers.length > 0) {
+		const needsCatalogIsotopes = uncataloguedIsotopes(covered.map((c) => c.isotope));
+		const seedEntries = reference ? datasheetEntriesFromReference(reference, covered) : [];
+		const needsDatasheet = !datasheetValueFor(index);
+		if (needsDatasheet && seedEntries.length === 0) {
+			blockers.push(
+				'Enter the known concentrations on this material (or pick an existing datasheet) so a datasheet can be created.'
+			);
+		}
+
+		const writeMode: ReferencePublishPlan['writeMode'] =
+			uiMode === 'update' && replaceTarget ? 'replace-counting' : fromCatalog ? 'new' : 'append';
+
+		const mainStep =
+			writeMode === 'replace-counting'
+				? 'Overwrite the counting on the existing catalog entry.'
+				: writeMode === 'new'
+					? `Save this reference material to the catalog as "${identityOverride?.netlCode ?? reference?.NETL_code ?? reference?.sampleName}".`
+					: fromCatalog
+						? 'Add this counting to the existing catalog entry.'
+						: 'Save this reference material to the shared catalog.';
+		const steps = [
+			...needsCatalogIsotopes.map((iso) => `Add ${isotopeLabel(iso)} to the shared catalog.`),
+			...(needsDatasheet
+				? [
+						`Create a reference datasheet ("${reference?.sampleName || reference?.NETL_code}") from this material's ${seedEntries.length} known concentration${seedEntries.length === 1 ? '' : 's'}.`
+					]
+				: []),
+			mainStep
+		];
+
+		return {
+			writeMode,
+			identityOverride,
+			replaceTarget,
+			needsCatalogIsotopes,
+			needsDatasheet,
+			seedEntries,
+			blockers,
+			steps
+		};
+	}
+
+	/** Execute the reference publish incl. auto-dependencies (caller has checked auth). */
+	async function runReferencePublish(index: number): Promise<boolean> {
+		const reference = materials.reference[index];
+		if (!reference) {
+			return false;
+		}
+		const plan = referencePublishPlan(index);
+		if (plan.blockers.length > 0) {
 			referenceWriteFeedback = {
 				...referenceWriteFeedback,
-				[index]: { ok: false, text: blockers.join(' ') }
+				[index]: { ok: false, text: plan.blockers.join(' ') }
 			};
-			return;
+			return false;
 		}
 
 		referenceWriteBusy = index;
 		try {
+			for (const iso of plan.needsCatalogIsotopes) {
+				await ensureIsotopeInCatalog(iso);
+			}
+			let datasheetId = datasheetValueFor(index);
+			if (plan.needsDatasheet) {
+				const saved = await saveReferenceDatasheet({
+					sampleName: reference.sampleName || reference.NETL_code || 'Reference datasheet',
+					entries: plan.seedEntries
+				});
+				datasheets = [{ id: saved.id, sampleName: saved.sampleName }, ...datasheets];
+				selectedDatasheetId = { ...selectedDatasheetId, [index]: saved.id };
+				datasheetId = saved.id;
+			}
+
 			const result = await saveReferenceMaterialToCatalog({
 				reference,
-				coveredIsotopes: covered,
+				covered: coveredIsotopesForReference(index),
 				referenceDatasheetId: datasheetId,
 				countingLabel: countingLabelByRef[index] ?? 'Counting 1',
 				notes: notesByRef[index] ?? '',
-				identityOverride
+				mode: plan.writeMode,
+				identityOverride: plan.identityOverride,
+				target: plan.replaceTarget
 			});
-			referenceWriteFeedback = {
-				...referenceWriteFeedback,
-				[index]: {
-					ok: true,
-					text: result.created
-						? 'Saved as a new reference material in the catalog.'
-						: `Added a counting to the existing catalog entry (${result.totalCountings} total).`
-				}
-			};
+			let text: string;
+			if (plan.writeMode === 'replace-counting') {
+				text = result.replacedCounting
+					? 'Updated the catalog entry in place.'
+					: 'The original counting was gone, so this was added to the catalog entry.';
+			} else if (result.created) {
+				text = 'Saved as a new reference material in the catalog.';
+			} else {
+				text = `Added a counting to the existing catalog entry (${result.totalCountings} total).`;
+			}
+			referenceWriteFeedback = { ...referenceWriteFeedback, [index]: { ok: true, text } };
+			return true;
 		} catch (error) {
 			if (error instanceof CatalogWriteError && (error.status === 401 || error.status === 403)) {
 				void swaAuth.refresh(true);
@@ -640,9 +982,44 @@
 					text: error instanceof Error ? error.message : 'Unable to publish reference material.'
 				}
 			};
+			return false;
 		} finally {
 			referenceWriteBusy = null;
 		}
+	}
+
+	async function publishReference(index: number) {
+		if (!materials.reference[index]) {
+			return;
+		}
+		if (!swaAuth.signedIn) {
+			void handleSignIn();
+			return;
+		}
+		if (!writerAccess) {
+			referenceWriteFeedback = {
+				...referenceWriteFeedback,
+				[index]: { ok: false, text: `Your account lacks the '${WRITER_ROLE}' role.` }
+			};
+			return;
+		}
+		const plan = referencePublishPlan(index);
+		if (plan.blockers.length > 0) {
+			referenceWriteFeedback = {
+				...referenceWriteFeedback,
+				[index]: { ok: false, text: plan.blockers.join(' ') }
+			};
+			return;
+		}
+		referencePublishConfirm = {
+			kind: 'reference',
+			key: index,
+			steps: plan.steps,
+			run: async () => {
+				referencePublishConfirm = null;
+				await runReferencePublish(index);
+			}
+		};
 	}
 
 	function togglePublishPanel(referenceIndex: number) {
@@ -652,6 +1029,236 @@
 			publishPanelOpen.add(referenceIndex);
 			void loadDatasheets();
 		}
+	}
+
+	// ---- Proxy-measurement relationships ("A measures B") ------------------
+
+	async function openRelationshipPanel(measuredAnalysisIndex?: number) {
+		relationshipPanelOpen = true;
+		await tick();
+		if (measuredAnalysisIndex !== undefined) {
+			relationshipForm?.preset('measured', measuredAnalysisIndex);
+		}
+		if (browser) {
+			requestAnimationFrame(() => {
+				document.getElementById('isotope-relationships')?.scrollIntoView({
+					behavior: 'smooth',
+					block: 'start'
+				});
+			});
+		}
+	}
+
+	/** Keep the live entry for an analysis pick (so its id can be adopted later); copy a custom one. */
+	function isotopeForLink(iso: IsotopeInfoType): IsotopeInfoType {
+		return isotopeInfo.includes(iso) ? iso : ($state.snapshot(iso) as IsotopeInfoType);
+	}
+
+	function addRelationship() {
+		const selection = relationshipForm?.getSelection();
+		if (!selection) {
+			return;
+		}
+		relationshipFeedback = '';
+		const link: LocalIsotopeLink = {
+			id: browser ? crypto.randomUUID() : `${Date.now()}-${localIsotopeLinks.length}`,
+			notes: selection.notes.trim(),
+			published: false,
+			measured: isotopeForLink(selection.measured.isotope),
+			target: isotopeForLink(selection.target.isotope)
+		};
+		// Skip an exact local duplicate.
+		const dup = localIsotopeLinks.some(
+			(l) =>
+				isotopeLabel(l.measured) === isotopeLabel(link.measured) &&
+				isotopeLabel(l.target) === isotopeLabel(link.target)
+		);
+		if (dup) {
+			relationshipFeedback = 'That relationship is already in your list.';
+			return;
+		}
+		localIsotopeLinks = [...localIsotopeLinks, link];
+		relationshipForm?.reset();
+	}
+
+	function removeRelationship(id: string) {
+		localIsotopeLinks = localIsotopeLinks.filter((l) => l.id !== id);
+		if (relationshipConfirm?.key === id) {
+			relationshipConfirm = null;
+		}
+	}
+
+	function relationshipPublishSteps(link: LocalIsotopeLink): string[] {
+		const m = isotopeLabel(link.measured);
+		const t = isotopeLabel(link.target);
+		return [
+			...(link.measured.id?.trim() ? [] : [`Add ${m} to the shared catalog.`]),
+			...(link.target.id?.trim() ? [] : [`Add ${t} to the shared catalog.`]),
+			`Record the relationship: ${m} measures ${t}.`
+		];
+	}
+
+	/** Execute a relationship publish incl. auto-dependencies (caller has checked auth). */
+	async function runRelationshipPublish(id: string): Promise<boolean> {
+		const link = localIsotopeLinks.find((l) => l.id === id);
+		if (!link) {
+			return false;
+		}
+		const m = isotopeLabel(link.measured);
+		const t = isotopeLabel(link.target);
+		relationshipBusy = true;
+		try {
+			const measuredId = await ensureIsotopeInCatalog(link.measured);
+			const targetId = await ensureIsotopeInCatalog(link.target);
+			localIsotopeLinks = localIsotopeLinks.map((l) =>
+				l.id === id
+					? {
+							...l,
+							measured: { ...l.measured, id: measuredId },
+							target: { ...l.target, id: targetId }
+						}
+					: l
+			);
+
+			if (await findIsotopeMeasurementLink(measuredId, targetId)) {
+				localIsotopeLinks = localIsotopeLinks.map((l) =>
+					l.id === id ? { ...l, published: true } : l
+				);
+				relationshipFeedback = `${m} → ${t} is already recorded in the catalog.`;
+				return true;
+			}
+
+			await saveIsotopeMeasurementLink({
+				measuredIsotopeId: measuredId,
+				targetIsotopeId: targetId,
+				notes: link.notes
+			});
+			localIsotopeLinks = localIsotopeLinks.map((l) =>
+				l.id === id ? { ...l, published: true } : l
+			);
+			relationshipFeedback = `Recorded: ${m} measures ${t}.`;
+			void loadIsotopeMeasurementLinks();
+			return true;
+		} catch (error) {
+			if (error instanceof CatalogWriteError && (error.status === 401 || error.status === 403)) {
+				void swaAuth.refresh(true);
+			}
+			relationshipFeedback =
+				error instanceof Error ? error.message : 'Unable to record the relationship.';
+			return false;
+		} finally {
+			relationshipBusy = false;
+		}
+	}
+
+	async function publishRelationship(id: string) {
+		const link = localIsotopeLinks.find((l) => l.id === id);
+		if (!link) {
+			return;
+		}
+		if (!swaAuth.signedIn) {
+			void handleSignIn();
+			return;
+		}
+		if (!writerAccess) {
+			relationshipFeedback = `Your account lacks the '${WRITER_ROLE}' role.`;
+			return;
+		}
+		relationshipFeedback = '';
+		relationshipConfirm = {
+			kind: 'relationship',
+			key: id,
+			steps: relationshipPublishSteps(link),
+			run: async () => {
+				relationshipConfirm = null;
+				await runRelationshipPublish(id);
+			}
+		};
+	}
+
+	// ---- "Upload all" (the `pending*` deriveds live further down, after state) --
+
+	function uploadAllSteps(): string[] {
+		const isotopeAdds: string[] = [];
+		const addIso = (label: string) => {
+			if (!isotopeAdds.includes(label)) isotopeAdds.push(label);
+		};
+		for (const i of pendingIsotopeIndices) {
+			addIso(isotopeLabel(isotopeInfo[i]));
+		}
+		for (const i of pendingReferenceIndices) {
+			for (const iso of referencePublishPlan(i).needsCatalogIsotopes) {
+				addIso(isotopeLabel(iso));
+			}
+		}
+		for (const l of pendingRelationships) {
+			if (!l.measured.id?.trim()) addIso(isotopeLabel(l.measured));
+			if (!l.target.id?.trim()) addIso(isotopeLabel(l.target));
+		}
+		const steps: string[] = [];
+		if (isotopeAdds.length > 0) {
+			steps.push(`Add ${isotopeAdds.join(', ')} to the shared catalog.`);
+		}
+		for (const i of pendingReferenceIndices) {
+			const ref = materials.reference[i];
+			steps.push(
+				`Publish the reference material "${ref.NETL_code || ref.sampleName || `Reference ${i + 1}`}" (creating its datasheet if needed).`
+			);
+		}
+		for (const l of pendingRelationships) {
+			steps.push(`Record: ${isotopeLabel(l.measured)} measures ${isotopeLabel(l.target)}.`);
+		}
+		return steps;
+	}
+
+	async function uploadAll() {
+		if (!swaAuth.signedIn) {
+			void handleSignIn();
+			return;
+		}
+		if (!writerAccess) {
+			uploadAllResult = `Your account lacks the '${WRITER_ROLE}' role.`;
+			return;
+		}
+		const isoIdx = [...pendingIsotopeIndices];
+		const refIdx = [...pendingReferenceIndices];
+		const linkIds = pendingRelationships.map((l) => l.id);
+		if (isoIdx.length + refIdx.length + linkIds.length === 0) {
+			uploadAllResult = 'Nothing new to upload.';
+			return;
+		}
+		uploadAllResult = '';
+		uploadAllConfirm = {
+			kind: 'all',
+			key: 'all',
+			steps: uploadAllSteps(),
+			run: async () => {
+				uploadAllConfirm = null;
+				uploadAllBusy = true;
+				let ok = 0;
+				let fail = 0;
+				try {
+					for (const i of isoIdx) {
+						if (await runIsotopePublish(i)) ok++;
+						else fail++;
+					}
+					for (const i of refIdx) {
+						if (await runReferencePublish(i)) ok++;
+						else fail++;
+					}
+					for (const id of linkIds) {
+						if (await runRelationshipPublish(id)) ok++;
+						else fail++;
+					}
+				} finally {
+					uploadAllBusy = false;
+				}
+				uploadAllResult =
+					fail === 0
+						? `Uploaded ${ok} item${ok === 1 ? '' : 's'} to the shared catalog.`
+						: `Uploaded ${ok}; ${fail} failed — check the message on each item.`;
+			}
+		};
 	}
 
 	let step = $state(0);
@@ -679,14 +1286,41 @@
 	let customReferenceNotice = $state('');
 	let referenceListEl = $state<HTMLDivElement>();
 	let isotopeMeasurementLinks = $state<IsotopeMeasurementLink[]>([]);
+
+	/** API-loaded proxy links plus the ones recorded locally this session. */
+	let allMeasurementLinks = $derived<IsotopeMeasurementLink[]>([
+		...isotopeMeasurementLinks,
+		...localIsotopeLinks.map((link) => ({
+			id: link.id,
+			measuredIsotope: { isotopeId: link.measured.id ?? '' },
+			targetIsotope: { isotopeId: link.target.id ?? '' }
+		}))
+	]);
+
+	// New items "Upload all" would publish (blocker-free, not yet in the catalog).
+	let pendingIsotopeIndices = $derived(
+		isotopeInfo
+			.map((_, i) => i)
+			.filter((i) => !isotopeInfo[i].id?.trim() && isotopePublishBlockers(i).length === 0)
+	);
+	let pendingReferenceIndices = $derived(
+		materials.reference
+			.map((_, i) => i)
+			.filter(
+				(i) => referenceCatalogItemIds[i] === null && referencePublishPlan(i).blockers.length === 0
+			)
+	);
+	let pendingRelationships = $derived(localIsotopeLinks.filter((l) => !l.published));
+	let pendingUploadCount = $derived(
+		pendingIsotopeIndices.length + pendingReferenceIndices.length + pendingRelationships.length
+	);
+
 	let isotopeCatalogById = $state<Record<string, IsotopeCatalogItem>>({});
 	let hasRequestedIsotopeCatalog = $state(false);
 	let hasRequestedIsotopeMeasurementLinks = $state(false);
 	let isotopeReferenceMap = $state<number[]>([]);
 
 	let catalogAvailable = $state(false);
-	let localAuthNotice = $state('');
-	let currentHostname = $state(browser ? window.location.hostname : '');
 
 	const expandedIsotopes = new SvelteSet<number>();
 	const expandedReferences = new SvelteSet<number>();
@@ -697,10 +1331,6 @@
 	let referenceCount = $derived(materials.reference.length);
 	// computed isotope information
 	let isoComp = $derived(isotopeInfo.map(isoGA));
-
-	let showSignInPrompt = $derived(
-		currentHostname !== '' && !isEnvironmentWithoutSignIn(currentHostname) && !catalogAvailable
-	);
 
 	let matComp = $derived({
 		reference: materials.reference.map((ref) => matGA(ref)),
@@ -745,7 +1375,7 @@
 	function getCatalogMatchCandidateIds(targetId: string): string[] {
 		const candidateIds = [targetId];
 
-		for (const link of isotopeMeasurementLinks) {
+		for (const link of allMeasurementLinks) {
 			const measuredId = extractMeasurementLinkId(link, 'measured');
 			const linkedTargetId = extractMeasurementLinkId(link, 'target');
 
@@ -904,9 +1534,12 @@
 		// One-time hydration — never let the reads inside restoreDraft() make this
 		// effect reactive (it would re-hydrate on every edit).
 		untrack(() => {
-			currentHostname = window.location.hostname;
 			restoreDraft();
 			draftHydrated = true;
+			analysisMeta.registerWelcomeHandler(() => {
+				step = 0;
+				window.scrollTo({ top: 0, behavior: 'smooth' });
+			});
 		});
 		void swaAuth.refresh();
 
@@ -945,6 +1578,39 @@
 		}
 		void serialized;
 		scheduleDraftSave();
+	});
+
+	// Pre-flight duplicate lookups: as identities change, ask the catalog whether
+	// the isotope / reference already exists so the panels can warn before upload.
+	$effect(() => {
+		if (!browser || !swaAuth.signedIn || !writerAccess) {
+			return;
+		}
+
+		for (let i = 0; i < isotopeInfo.length; i++) {
+			const parsed = isotopeInfo[i] ? parseIsotopeName(isotopeInfo[i].isotopeName) : null;
+			const key = parsed ? isotopeIdentityKey(parsed) : '';
+			if (key && isotopeDupKey[i] !== key) {
+				isotopeDupKey[i] = key;
+				void runIsotopeDupCheck(i, parsed);
+			}
+		}
+
+		for (let i = 0; i < materials.reference.length; i++) {
+			if (!publishPanelOpen.has(i)) {
+				continue;
+			}
+			const ref = materials.reference[i];
+			const name =
+				referenceModeFor(i) === 'new' && typeof referenceCatalogItemIds[i] === 'string'
+					? (newReferenceName[i] ?? '').trim()
+					: (ref?.NETL_code ?? '').trim() || (ref?.sampleName ?? '').trim();
+			const key = `${referenceModeFor(i)}|${name}`;
+			if (name && referenceDupKey[i] !== key) {
+				referenceDupKey[i] = key;
+				void runReferenceDupCheck(i, { netlCode: name });
+			}
+		}
 	});
 
 	// Keep the per-isotope arrays on every material aligned with the isotope list.
@@ -1132,6 +1798,7 @@
 		nextReference.fluence = sourceMaterial.fluence;
 		nextReference.irradiationType = sourceMaterial.irradiationType;
 		nextReference.dtType = sourceMaterial.dtType;
+		nextReference.referenceDatasheetId = sourceMaterial.referenceDatasheetId;
 
 		const sourceCounts = Array.isArray(sourceMaterial.counts) ? sourceMaterial.counts : [];
 		const sourceConcentrations = Array.isArray(sourceMaterial.knownConcentration)
@@ -1271,7 +1938,23 @@
 
 		customReferenceNotice = `Added Reference ${materials.reference.length}. Fill in its details in "Library entries" below.`;
 		await tick();
-		referenceListEl?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		scrollNewCardIntoView();
+	}
+
+	/** Scroll the last card in the library list to just below the sticky header. */
+	function scrollNewCardIntoView() {
+		if (!browser) {
+			return;
+		}
+		requestAnimationFrame(() => {
+			const card = referenceListEl?.lastElementChild as HTMLElement | null;
+			if (!card) {
+				return;
+			}
+			const STICKY_NAV_OFFSET = 88;
+			const top = card.getBoundingClientRect().top + window.scrollY - STICKY_NAV_OFFSET;
+			window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+		});
 	}
 
 	function removeReference(referenceIndex: number) {
@@ -1647,6 +2330,35 @@
 
 <svelte:window onkeydown={handleKeyPress} />
 
+{#snippet confirmBox(pending: PendingConfirm | null, busy: boolean)}
+	{#if pending}
+		<div class="mt-2 space-y-2 rounded border-2 border-primary-500 preset-tonal-primary p-3">
+			<p class="font-bold">Before uploading, confirm this will:</p>
+			<ol class="ml-5 list-decimal space-y-1 text-sm">
+				{#each pending.steps as stepText, i (i)}<li>{stepText}</li>{/each}
+			</ol>
+			<div class="flex flex-wrap gap-2">
+				<button
+					type="button"
+					class="btn preset-filled-primary-500"
+					disabled={busy}
+					onclick={() => pending.run()}
+				>
+					{busy ? 'Working…' : 'Confirm & upload'}
+				</button>
+				<button
+					type="button"
+					class="btn preset-tonal-surface"
+					disabled={busy}
+					onclick={() => cancelConfirm(pending)}
+				>
+					Cancel
+				</button>
+			</div>
+		</div>
+	{/if}
+{/snippet}
+
 <div style="padding: 5%">
 	<h1 class="text-3xl font-bold">NAA Analysis Software - Version {APP_VERSION}</h1>
 	<br />
@@ -1747,15 +2459,6 @@
 		{:else if stepType === StepType.SELECT_ISOTOPES}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Add the isotopes you want to analyze.</p>
-			{#if showSignInPrompt}
-				<p class="mt-2 text-sm">
-					Not seeing the catalog? <button type="button" class="underline" onclick={handleSignIn}
-						>Sign in</button
-					>
-					to reach the shared catalog.
-					{#if localAuthNotice}<span class="text-warning-600-400">{localAuthNotice}</span>{/if}
-				</p>
-			{/if}
 			<br />
 
 			{#if catalogAvailable}
@@ -1782,11 +2485,38 @@
 					>
 						<IsotopeInfo bind:this={isoRef[index]} bind:isotopeInfo={isotopeInfo[index]} />
 
+						{#if isotopeElementMismatch(isotope)}
+							{@const mismatch = isotopeElementMismatch(isotope)}
+							<div
+								class="mt-3 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3"
+							>
+								<p class="text-sm">
+									<strong>{isotope.isotopeName}</strong> looks like a
+									<strong>{mismatch?.nameElement}</strong> isotope, but this entry is labelled
+									<strong>{mismatch?.labelElement}</strong>. If it's a stand-in for measuring a
+									{mismatch?.labelElement} isotope, record that relationship.
+								</p>
+								<button
+									type="button"
+									class="btn preset-tonal-surface"
+									onclick={() => openRelationshipPanel(index)}
+								>
+									Record how this is measured
+								</button>
+							</div>
+						{/if}
+
 						{#if swaAuth.signInAvailable}
-							{@const blockers = isotopeSaveBlockers(isotope)}
 							{@const parsed = parseIsotopeName(isotope.isotopeName)}
 							{@const isoMode = isotopeModeFor(index)}
 							{@const renamed = isotopeIdentityChanged(isotope)}
+							{@const energies = isotopeEnergyList(index)}
+							{@const dupState = isotopeDup[index]}
+							{@const blockers = [
+								...isotopeSaveBlockers(isotope),
+								...(energies.length === 0 ? ['Add at least one energy line.'] : []),
+								...isotopeDupBlockers(index)
+							]}
 							<div
 								class="mt-3 space-y-2 rounded border border-primary-500 preset-tonal-primary p-3"
 							>
@@ -1798,6 +2528,23 @@
 									<p class="text-sm">
 										Saves as <strong>{describeIsotope(parsed, isotope.elementName)}</strong>.
 									</p>
+								{/if}
+
+								{#if parsed}
+									{#if dupState?.checking}
+										<p class="text-sm">Checking the catalog for a match…</p>
+									{:else if dupState?.match}
+										<p class="text-sm text-warning-600-400">
+											⚠ Already in the catalog — half-life {dupState.match.halfLife?.number}
+											{dupState.match.halfLife?.unit}, energies {(
+												dupState.match.energies ?? []
+											).join(', ')} keV.
+										</p>
+									{:else if dupState?.checked}
+										<p class="text-sm text-success-600-400">
+											Not in the catalog yet — this will create a new entry.
+										</p>
+									{/if}
 								{/if}
 
 								{#if isotope.id}
@@ -1830,11 +2577,21 @@
 										</p>
 									{:else if isoMode === 'update'}
 										<p class="text-sm">
-											Adds any new energy lines to the shared record. Its half-life and element name
-											are not changed by an upload.
+											Overwrites the shared record's half-life, element name and the full energy
+											list below.
 										</p>
 									{/if}
 								{/if}
+
+								<label class="label text-sm">
+									<span>Energy lines saved to the catalog (keV, comma-separated)</span>
+									<input
+										class="input"
+										type="text"
+										value={energies.join(', ')}
+										onchange={(e) => setIsotopeEnergiesFromText(index, e.currentTarget.value)}
+									/>
+								</label>
 
 								{#if blockers.length > 0}
 									<ul class="ml-4 list-disc text-sm text-warning-600-400">
@@ -1850,11 +2607,18 @@
 										{isotopeWriteFeedback[index].text}
 									</p>
 								{/if}
+
+								{@render confirmBox(
+									isotopePublishConfirm?.key === index ? isotopePublishConfirm : null,
+									isotopeWriteBusy === index
+								)}
+
 								<button
 									type="button"
 									class="btn preset-filled-primary-500"
 									disabled={isotopeWriteBusy === index ||
 										blockers.length > 0 ||
+										isotopePublishConfirm?.key === index ||
 										(swaAuth.signedIn && !writerAccess)}
 									onclick={() => publishIsotope(index)}
 								>
@@ -1885,6 +2649,79 @@
 			</div>
 			<br />
 			<button type="button" onclick={addCustomIsotope}>Add custom isotope</button>
+
+			<div id="isotope-relationships" class="mt-8 scroll-mt-24">
+				<button
+					type="button"
+					class="btn preset-tonal-surface"
+					onclick={() => (relationshipPanelOpen = !relationshipPanelOpen)}
+				>
+					{relationshipPanelOpen ? 'Hide' : 'Isotope relationships (proxy measurements)'}
+					{#if localIsotopeLinks.length > 0}
+						({localIsotopeLinks.length})
+					{/if}
+				</button>
+
+				{#if relationshipPanelOpen}
+					<div class="mt-2 space-y-3 rounded border border-surface-300-700 p-3">
+						<p class="text-sm">
+							Some analyses detect one isotope (the <em>measured</em> isotope) to quantify another
+							(the <em>target</em>). Record that here — it's used for matching reference materials
+							right away, and can be published to the shared catalog.
+						</p>
+
+						<IsotopeRelationshipForm bind:this={relationshipForm} analysisIsotopes={isotopeInfo} />
+						<button type="button" class="btn preset-filled-primary-500" onclick={addRelationship}>
+							Add relationship
+						</button>
+
+						{#if relationshipFeedback}
+							<p class="text-sm">{relationshipFeedback}</p>
+						{/if}
+
+						{#if localIsotopeLinks.length > 0}
+							<ul class="space-y-2">
+								{#each localIsotopeLinks as link (link.id)}
+									<li class="space-y-2 rounded border border-surface-300-700 p-2 text-sm">
+										<div class="flex flex-wrap items-center justify-between gap-2">
+											<span>
+												<strong>{isotopeLabel(link.measured)}</strong> measures
+												<strong>{isotopeLabel(link.target)}</strong>
+												{#if link.notes}<span> — {link.notes}</span>{/if}
+											</span>
+											<span class="flex flex-wrap gap-2">
+												{#if link.published}
+													<span class="text-success-600-400">✓ In the catalog</span>
+												{:else if swaAuth.signInAvailable}
+													<button
+														type="button"
+														class="btn preset-tonal-surface"
+														disabled={relationshipBusy}
+														onclick={() => publishRelationship(link.id)}
+													>
+														{swaAuth.signedIn ? 'Publish to catalog' : 'Sign in to publish'}
+													</button>
+												{/if}
+												<button
+													type="button"
+													class="btn preset-tonal-surface"
+													onclick={() => removeRelationship(link.id)}
+												>
+													Remove
+												</button>
+											</span>
+										</div>
+										{@render confirmBox(
+											relationshipConfirm?.key === link.id ? relationshipConfirm : null,
+											relationshipBusy
+										)}
+									</li>
+								{/each}
+							</ul>
+						{/if}
+					</div>
+				{/if}
+			</div>
 		{:else if stepType === StepType.BUILD_LIBRARY}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Add reference materials, then assign one to each isotope.</p>
@@ -1972,15 +2809,59 @@
 							</div>
 							{#if publishPanelOpen.has(index)}
 								{@const covered = coveredIsotopesForReference(index)}
-								{@const blockers = referenceMaterialSaveBlockers(reference, covered)}
+								{@const seedEntries = datasheetEntriesFromReference(reference, covered)}
+								{@const datasheetId = datasheetValueFor(index)}
+								{@const refDupState = referenceDup[index]}
+								{@const needsName =
+									refMode === 'new' &&
+									fromCatalog &&
+									(newReferenceName[index] ?? '').trim().length === 0}
+								{@const autoSteps = [
+									...uncataloguedIsotopes(covered.map((c) => c.isotope)).map(
+										(iso) => `add ${isotopeLabel(iso)} to the catalog`
+									),
+									...(datasheetId
+										? []
+										: seedEntries.length > 0
+											? ["create a datasheet from this material's known concentrations"]
+											: [])
+								]}
+								{@const blockers = [
+									...referenceMaterialSaveBlockers(reference),
+									...referenceDupBlockers(index),
+									...(needsName ? ['Enter a name for the new reference material.'] : []),
+									...(datasheetId || seedEntries.length > 0
+										? []
+										: [
+												'Enter the known concentrations on this material, or pick an existing datasheet.'
+											])
+								]}
 								<div
 									class="mt-2 space-y-3 rounded border border-primary-500 preset-tonal-primary p-3"
 								>
 									<p class="text-sm">
-										Saves this irradiation and its counting to the reactor's shared catalog. Needs a
-										reference datasheet (known concentrations), and every covered isotope must
-										already be in the shared catalog.
+										Saves this irradiation and its counting to the reactor's shared catalog. Any
+										covered isotope not in the catalog yet, and the reference datasheet, are added
+										for you as part of publishing.
 									</p>
+
+									{#if autoSteps.length > 0}
+										<p class="text-sm">
+											Publishing will also {autoSteps.join(', and ')}.
+										</p>
+									{/if}
+
+									{#if refDupState?.checking}
+										<p class="text-sm">Checking the catalog for a match…</p>
+									{:else if refDupState?.match}
+										<p class="text-sm text-warning-600-400">
+											⚠ "{refDupState.match.netlCode || refDupState.match.sampleName}" is already in
+											the catalog ({refDupState.match.countingCount} counting{refDupState.match
+												.countingCount === 1
+												? ''
+												: 's'}).
+										</p>
+									{/if}
 
 									{#if fromCatalog}
 										<fieldset class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -2007,8 +2888,8 @@
 										</fieldset>
 										{#if refMode === 'update'}
 											<p class="text-sm">
-												Adds this counting to the existing entry. If you changed the irradiation
-												details, the catalog stores it as a new entry automatically.
+												Overwrites the counting you loaded from the catalog with your edited values,
+												in place.
 											</p>
 										{:else}
 											<label class="label">
@@ -2029,52 +2910,76 @@
 										</ul>
 									{/if}
 
-									<label class="label">
-										<span>Reference datasheet</span>
-										{#if datasheetsLoading}
-											<span class="text-sm">Loading datasheets…</span>
-										{:else}
-											<select class="select" bind:value={selectedDatasheetId[index]}>
-												<option value="">— Select a datasheet —</option>
-												{#each datasheets as sheet (sheet.id)}
-													<option value={sheet.id}>{sheet.sampleName}</option>
-												{/each}
-											</select>
-										{/if}
-										{#if datasheetsError}
-											<span class="text-sm text-error-500">{datasheetsError}</span>
-										{/if}
-									</label>
+									<div class="rounded border border-surface-300-700 p-3">
+										<p class="text-sm font-bold">Reference datasheet (certified concentrations)</p>
+										<label class="label mt-2">
+											<span class="text-sm">Choose an existing datasheet</span>
+											{#if datasheetsLoading}
+												<span class="text-sm">Loading datasheets…</span>
+											{:else}
+												<select
+													class="select"
+													value={datasheetId}
+													onchange={(e) =>
+														(selectedDatasheetId = {
+															...selectedDatasheetId,
+															[index]: e.currentTarget.value
+														})}
+												>
+													<option value="">— None selected —</option>
+													{#each datasheets as sheet (sheet.id)}
+														<option value={sheet.id}>{sheet.sampleName}</option>
+													{/each}
+												</select>
+											{/if}
+											{#if datasheetsError}
+												<span class="text-sm text-error-500">{datasheetsError}</span>
+											{:else if !datasheetsLoading && datasheets.length === 0}
+												<span class="text-sm">No datasheets saved yet — create one below.</span>
+											{/if}
+										</label>
 
-									<button
-										type="button"
-										class="btn preset-tonal-surface"
-										onclick={() =>
-											newDatasheetOpen.has(index)
-												? newDatasheetOpen.delete(index)
-												: newDatasheetOpen.add(index)}
-									>
-										{newDatasheetOpen.has(index)
-											? 'Cancel new datasheet'
-											: 'Create a new datasheet'}
-									</button>
+										<button
+											type="button"
+											class="mt-2 btn preset-tonal-surface"
+											onclick={() =>
+												newDatasheetOpen.has(index)
+													? newDatasheetOpen.delete(index)
+													: newDatasheetOpen.add(index)}
+										>
+											{newDatasheetOpen.has(index)
+												? 'Cancel'
+												: seedEntries.length > 0
+													? "Create one from this material's concentrations"
+													: 'Create a new datasheet'}
+										</button>
 
-									{#if newDatasheetOpen.has(index)}
-										<div class="rounded border border-surface-300-700 p-3">
-											<ReferenceDatasheetForm
-												bind:this={datasheetFormRefs[index]}
-												sampleName={reference.sampleName || reference.NETL_code || ''}
-											/>
-											<button
-												type="button"
-												class="mt-2 btn preset-filled-primary-500"
-												disabled={datasheetSavingByRef[index]}
-												onclick={() => createDatasheet(index)}
-											>
-												{datasheetSavingByRef[index] ? 'Saving…' : 'Save datasheet'}
-											</button>
-										</div>
-									{/if}
+										{#if newDatasheetOpen.has(index)}
+											{#key seedEntries.length}
+												<div class="mt-2 space-y-2">
+													{#if seedEntries.length > 0}
+														<p class="text-sm">
+															Pre-filled from the concentrations entered on this material — review
+															and edit, then save.
+														</p>
+													{/if}
+													<ReferenceDatasheetForm
+														bind:this={datasheetFormRefs[index]}
+														sampleName={reference.sampleName || reference.NETL_code || ''}
+														initialEntries={seedEntries}
+													/>
+													<button
+														type="button"
+														class="btn preset-filled-primary-500"
+														disabled={datasheetSavingByRef[index]}
+														onclick={() => createDatasheet(index)}
+													>
+														{datasheetSavingByRef[index] ? 'Saving…' : 'Save datasheet'}
+													</button>
+												</div>
+											{/key}
+										{/if}
+									</div>
 
 									<label class="label">
 										<span>Counting label</span>
@@ -2100,10 +3005,17 @@
 										</p>
 									{/if}
 
+									{@render confirmBox(
+										referencePublishConfirm?.key === index ? referencePublishConfirm : null,
+										referenceWriteBusy === index
+									)}
+
 									<button
 										type="button"
 										class="btn preset-filled-primary-500"
-										disabled={referenceWriteBusy === index || (swaAuth.signedIn && !writerAccess)}
+										disabled={referenceWriteBusy === index ||
+											referencePublishConfirm?.key === index ||
+											(swaAuth.signedIn && (!writerAccess || blockers.length > 0))}
 										onclick={() => publishReference(index)}
 									>
 										{#if referenceWriteBusy === index}
@@ -2296,6 +3208,50 @@
 				Download Table as CSV
 			</button>
 			<br /><br />
+
+			{#if swaAuth.signInAvailable}
+				<section class="mt-4 space-y-2 rounded border border-primary-500 preset-tonal-primary p-4">
+					<h3 class="text-xl font-bold">Contribute to the shared catalog</h3>
+					{#if pendingUploadCount === 0}
+						<p class="text-sm">
+							Nothing new to upload — every isotope and reference material in this analysis is
+							already in the catalog (or has been published).
+						</p>
+					{:else}
+						<p class="text-sm">
+							{pendingUploadCount} new item{pendingUploadCount === 1 ? '' : 's'} can be uploaded:
+							{pendingIsotopeIndices.length} isotope{pendingIsotopeIndices.length === 1 ? '' : 's'},
+							{pendingReferenceIndices.length} reference material{pendingReferenceIndices.length ===
+							1
+								? ''
+								: 's'}{pendingRelationships.length > 0
+								? `, ${pendingRelationships.length} relationship${pendingRelationships.length === 1 ? '' : 's'}`
+								: ''}. Dependencies (catalog isotopes, datasheets) are handled automatically.
+						</p>
+
+						{@render confirmBox(uploadAllConfirm, uploadAllBusy)}
+
+						<button
+							type="button"
+							class="btn preset-filled-primary-500"
+							disabled={uploadAllBusy || uploadAllConfirm !== null}
+							onclick={uploadAll}
+						>
+							{#if uploadAllBusy}
+								Uploading…
+							{:else if !swaAuth.signedIn}
+								Sign in to upload all
+							{:else}
+								Upload all ({pendingUploadCount})
+							{/if}
+						</button>
+					{/if}
+					{#if uploadAllResult}
+						<p class="text-sm">{uploadAllResult}</p>
+					{/if}
+				</section>
+				<br />
+			{/if}
 
 			<details class="mt-4 rounded border border-surface-300-700 p-3">
 				<summary class="cursor-pointer font-semibold">Expand for debug information</summary>

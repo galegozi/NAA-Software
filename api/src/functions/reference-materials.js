@@ -8,7 +8,12 @@ import {
 } from '../lib/cosmosClient.js';
 import { mapIsotopeItem } from '../lib/isotopeMapper.js';
 import { enrichReferenceMaterialCatalogItems } from '../lib/referenceMaterialCatalogEnrichment.js';
-import { mergeReferenceMaterialWrite, normalizeReferenceMaterialWritePayload } from '../lib/referenceMaterialWritePayload.js';
+import {
+	mergeReferenceMaterialWrite,
+	normalizeReferenceMaterialWritePayload,
+	referenceMaterialHasCounting,
+	replaceCountingInReferenceMaterial
+} from '../lib/referenceMaterialWritePayload.js';
 import { canWriteIsotopes } from '../lib/staticWebAppsAuth.js';
 
 const MOCK_REFERENCE_MATERIALS = [
@@ -328,7 +333,8 @@ async function buildReferenceMaterialEnrichmentLookups(items) {
 			}
 		}
 
-		const latestDatasheetId = item?.latestCounting?.referenceMaterial?.referenceDatasheetId?.trim?.();
+		const latestDatasheetId =
+			item?.latestCounting?.referenceMaterial?.referenceDatasheetId?.trim?.();
 		if (latestDatasheetId) {
 			datasheetIds.push(latestDatasheetId);
 		}
@@ -487,7 +493,6 @@ async function getReferenceMaterialsHandler(request, context) {
 }
 
 async function createReferenceMaterialHandler(request, context) {
-
 	const authorization = canWriteIsotopes(request);
 	if (!authorization.authorized) {
 		return {
@@ -522,6 +527,17 @@ async function createReferenceMaterialHandler(request, context) {
 		};
 	}
 
+	// "Update existing": overwrite one counting on a known document by id, rather
+	// than matching on the metadata fingerprint (which forks on any edit).
+	const replaceTarget =
+		body?.mode === 'replace-counting' &&
+		typeof body.targetItemId === 'string' &&
+		body.targetItemId.trim() &&
+		typeof body.targetCountingId === 'string' &&
+		body.targetCountingId.trim()
+			? { itemId: body.targetItemId.trim(), countingId: body.targetCountingId.trim() }
+			: null;
+
 	if (isMockCosmosEnabled()) {
 		context.log('MOCK_COSMOS enabled: mock-saving reference material payload.', {
 			referenceKey: item.referenceKey,
@@ -530,11 +546,13 @@ async function createReferenceMaterialHandler(request, context) {
 		});
 
 		return {
-			status: 201,
+			status: replaceTarget ? 200 : 201,
 			jsonBody: {
 				item,
-				created: true,
-				appendedCountings: item.countings.length,
+				created: !replaceTarget,
+				...(replaceTarget
+					? { replacedCounting: true }
+					: { appendedCountings: item.countings.length }),
 				totalCountings: item.countings.length,
 				mocked: true
 			}
@@ -543,10 +561,42 @@ async function createReferenceMaterialHandler(request, context) {
 
 	try {
 		const container = getReferenceMaterialsContainer();
+
+		if (replaceTarget) {
+			const targetItem = await findReferenceMaterialById(container, replaceTarget.itemId);
+			if (!targetItem) {
+				return {
+					status: 404,
+					jsonBody: { error: 'The reference material to update no longer exists in the catalog.' }
+				};
+			}
+
+			const replacedCounting = referenceMaterialHasCounting(targetItem, replaceTarget.countingId);
+			const updatedItem = replaceCountingInReferenceMaterial(
+				targetItem,
+				item,
+				replaceTarget.countingId,
+				authorization.principal
+			);
+			const response = await container.items.upsert(updatedItem);
+
+			return {
+				status: 200,
+				jsonBody: {
+					item: response.resource ?? updatedItem,
+					created: false,
+					replacedCounting,
+					totalCountings: updatedItem.countings.length
+				}
+			};
+		}
+
 		const existingItem = await findExistingReferenceMaterial(container, item.referenceKey);
 
 		if (existingItem) {
-			const previousCount = Array.isArray(existingItem.countings) ? existingItem.countings.length : 0;
+			const previousCount = Array.isArray(existingItem.countings)
+				? existingItem.countings.length
+				: 0;
 			const mergedItem = mergeReferenceMaterialWrite(existingItem, item, authorization.principal);
 			const response = await container.items.upsert(mergedItem);
 			const nextCount = Array.isArray(mergedItem.countings) ? mergedItem.countings.length : 0;
@@ -595,6 +645,19 @@ async function findExistingReferenceMaterial(container, referenceKey) {
 		parameters: [
 			{ name: '@docType', value: 'reference-material' },
 			{ name: '@referenceKey', value: referenceKey }
+		]
+	});
+
+	const { resources } = await query.fetchAll();
+	return resources[0] ?? null;
+}
+
+async function findReferenceMaterialById(container, id) {
+	const query = container.items.query({
+		query: 'SELECT TOP 1 * FROM c WHERE c.docType = @docType AND c.id = @id',
+		parameters: [
+			{ name: '@docType', value: 'reference-material' },
+			{ name: '@id', value: id }
 		]
 	});
 

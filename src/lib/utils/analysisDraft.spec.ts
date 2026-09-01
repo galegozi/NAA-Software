@@ -42,6 +42,7 @@ function makeDraft(overrides: Partial<AnalysisDraft> = {}): AnalysisDraft {
 		expandedIsotopes: [0],
 		expandedReferences: [],
 		expandedUnknowns: [],
+		localIsotopeLinks: [],
 		...overrides
 	};
 }
@@ -62,6 +63,23 @@ describe('analysisDraft', () => {
 		const draft = makeDraft();
 		saveDraft(draft);
 		expect(loadDraft()).toEqual(draft);
+	});
+
+	it('round-trips recorded isotope relationships', () => {
+		const measured = {
+			elementName: 'Neptunium',
+			isotopeName: 'Np-239',
+			energy: 277.6,
+			halfLife: 2.36,
+			linkedReference: 0,
+			unit: 'days'
+		};
+		const target = { ...measured, elementName: 'Uranium', isotopeName: 'U-238', id: 'u238' };
+		const draft = makeDraft({
+			localIsotopeLinks: [{ id: 'r1', notes: 'via n,gamma', published: false, measured, target }]
+		});
+		saveDraft(draft);
+		expect(loadDraft()?.localIsotopeLinks).toEqual(draft.localIsotopeLinks);
 	});
 
 	it('clearDraft removes the stored draft', () => {

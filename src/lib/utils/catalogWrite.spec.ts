@@ -1,5 +1,17 @@
-import { describe, expect, it } from 'vitest';
-import { describeIsotope, isotopeIdentityKey, parseIsotopeName } from './catalogWrite.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
+import {
+	datasheetEntriesFromReference,
+	describeIsotope,
+	findCatalogIsotope,
+	findCatalogReferenceMaterial,
+	findIsotopeMeasurementLink,
+	isotopeElementMismatch,
+	isotopeIdentityKey,
+	normalizeEnergyList,
+	parseIsotopeName,
+	saveReferenceMaterialToCatalog
+} from './catalogWrite.js';
 
 describe('parseIsotopeName', () => {
 	it('parses a hyphenated isotope name', () => {
@@ -63,5 +75,204 @@ describe('describeIsotope', () => {
 		expect(describeIsotope({ shortName: 'Au', massNumber: 198, suffix: '' }, 'Gold')).toBe(
 			'Au-198 — Gold, mass 198'
 		);
+	});
+});
+
+describe('normalizeEnergyList', () => {
+	it('parses, dedupes, sorts and drops non-positive values', () => {
+		expect(normalizeEnergyList(['1332.5', 1173.2, '1173.2', 'x', 0, -5])).toEqual([1173.2, 1332.5]);
+	});
+});
+
+describe('datasheetEntriesFromReference', () => {
+	const covered = [
+		{ isotope: { isotopeName: 'Au-198', elementName: 'Gold' }, index: 1 },
+		{ isotope: { isotopeName: 'Ag-110m', elementName: 'Silver' }, index: 3 }
+	] as unknown as Array<{ isotope: IsotopeInfo; index: number }>;
+
+	it('reads concentrations by the isotope’s position in the analysis, not the covered subset', () => {
+		const reference = {
+			// index 1 => Au-198, index 3 => Ag-110m (indices 0 and 2 are uncovered)
+			knownConcentration: [0, 12.5, 0, 4],
+			knownUncertainty: [0, 0.4, 0, 0.1],
+			concentrationUnits: ['', 'ppm', '', 'percentage']
+		} as unknown as ReferenceMaterial;
+
+		expect(datasheetEntriesFromReference(reference, covered)).toEqual([
+			{ label: 'Au-198', concentration: 12.5, uncertainty: 0.4, unit: 'ppm' },
+			{ label: 'Ag-110m', concentration: 4, uncertainty: 0.1, unit: 'percentage' }
+		]);
+	});
+
+	it('returns an empty list when nothing has a concentration', () => {
+		const reference = {
+			knownConcentration: [0, 0, 0, 0],
+			knownUncertainty: [0, 0, 0, 0],
+			concentrationUnits: []
+		} as unknown as ReferenceMaterial;
+		expect(datasheetEntriesFromReference(reference, covered)).toEqual([]);
+	});
+});
+
+function stubFetchJson(payload: unknown, ok = true) {
+	vi.stubGlobal(
+		'fetch',
+		vi.fn(async () => ({ ok, json: async () => payload }) as unknown as Response)
+	);
+}
+
+describe('findCatalogIsotope', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('matches on exact (shortName, massNumber, suffix), distinguishing the metastable state', async () => {
+		stubFetchJson({
+			items: [
+				{
+					id: 'a',
+					shortName: 'Ag',
+					massNumber: 110,
+					suffix: '',
+					energies: [658],
+					halfLife: { number: 24.6, unit: 'seconds' }
+				},
+				{
+					id: 'b',
+					shortName: 'Ag',
+					massNumber: 110,
+					suffix: 'm',
+					energies: [657.8, 884.7],
+					halfLife: { number: 249.8, unit: 'days' }
+				}
+			]
+		});
+		const match = await findCatalogIsotope({ shortName: 'Ag', massNumber: 110, suffix: 'm' });
+		expect(match?.id).toBe('b');
+	});
+
+	it('returns null when nothing matches or the request fails', async () => {
+		stubFetchJson({ items: [{ id: 'a', shortName: 'Au', massNumber: 198, suffix: '' }] });
+		expect(await findCatalogIsotope({ shortName: 'Ag', massNumber: 110, suffix: 'm' })).toBeNull();
+
+		stubFetchJson({}, false);
+		expect(await findCatalogIsotope({ shortName: 'Au', massNumber: 198, suffix: '' })).toBeNull();
+	});
+});
+
+describe('findCatalogReferenceMaterial', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('matches a NETL code inside any counting', async () => {
+		stubFetchJson({
+			items: [
+				{
+					id: 'rm1',
+					countingCount: 2,
+					countings: [{ referenceMaterial: { NETL_code: 'AB0053', sampleName: 'SRM1633c' } }]
+				}
+			]
+		});
+		const match = await findCatalogReferenceMaterial({ netlCode: 'ab0053' });
+		expect(match).toMatchObject({ itemId: 'rm1', netlCode: 'AB0053', countingCount: 2 });
+	});
+
+	it('returns null with no identity or no match', async () => {
+		expect(await findCatalogReferenceMaterial({})).toBeNull();
+		stubFetchJson({ items: [] });
+		expect(await findCatalogReferenceMaterial({ netlCode: 'ZZ' })).toBeNull();
+	});
+});
+
+describe('isotopeElementMismatch', () => {
+	it('flags a proxy: name implies a different element than the label', () => {
+		expect(
+			isotopeElementMismatch({ isotopeName: 'Np-239', elementName: 'Uranium' } as IsotopeInfo)
+		).toEqual({ nameElement: 'Neptunium', labelElement: 'Uranium' });
+	});
+
+	it('returns null when name and label agree, or a piece is missing', () => {
+		expect(
+			isotopeElementMismatch({ isotopeName: 'Au-198', elementName: 'Gold' } as IsotopeInfo)
+		).toBeNull();
+		expect(
+			isotopeElementMismatch({ isotopeName: 'gibberish', elementName: 'Uranium' } as IsotopeInfo)
+		).toBeNull();
+		expect(
+			isotopeElementMismatch({ isotopeName: 'Np-239', elementName: '' } as IsotopeInfo)
+		).toBeNull();
+	});
+});
+
+describe('findIsotopeMeasurementLink', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('finds an existing (measured, target) pair', async () => {
+		stubFetchJson({
+			items: [{ measuredIsotope: { isotopeId: 'np239' }, targetIsotope: { isotopeId: 'u238' } }]
+		});
+		expect(await findIsotopeMeasurementLink('np239', 'u238')).toBe(true);
+		expect(await findIsotopeMeasurementLink('np239', 'u235')).toBe(false);
+	});
+
+	it('is false with missing ids or a failed request', async () => {
+		expect(await findIsotopeMeasurementLink('', 'u238')).toBe(false);
+		stubFetchJson({}, false);
+		expect(await findIsotopeMeasurementLink('np239', 'u238')).toBe(false);
+	});
+});
+
+describe('saveReferenceMaterialToCatalog', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('sends counts/known values for exactly the covered isotopes, in order', async () => {
+		type SentBody = {
+			isotopes: Array<{ isotopeId: string }>;
+			countings: Array<{
+				referenceMaterial: {
+					counts: Array<{ netCounts: number }>;
+					knownConcentration: number[];
+					knownUncertainty: number[];
+					concentrationUnits: string[];
+				};
+			}>;
+		};
+		let sentBody: SentBody = { isotopes: [], countings: [] };
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: string, init: RequestInit) => {
+				sentBody = JSON.parse(String(init.body)) as SentBody;
+				return {
+					ok: true,
+					json: async () => ({ created: true, totalCountings: 1 })
+				} as unknown as Response;
+			})
+		);
+
+		// Analysis has 3 isotopes; this reference only covers indices 0 and 2.
+		const reference = {
+			NETL_code: 'AB1',
+			sampleName: 'S1',
+			counts: [{ netCounts: 10 }, { netCounts: 999 }, { netCounts: 30 }],
+			knownConcentration: [1, 999, 3],
+			knownUncertainty: [0.1, 999, 0.3],
+			concentrationUnits: ['ppm', 'percentage', 'ppm']
+		} as unknown as ReferenceMaterial;
+
+		await saveReferenceMaterialToCatalog({
+			reference,
+			covered: [
+				{ isotope: { id: 'iso0', energy: 100 }, index: 0 },
+				{ isotope: { id: 'iso2', energy: 300 }, index: 2 }
+			] as never,
+			referenceDatasheetId: 'ds1',
+			countingLabel: 'C1',
+			notes: ''
+		});
+
+		const rm = sentBody.countings[0].referenceMaterial;
+		expect(sentBody.isotopes.map((i) => i.isotopeId)).toEqual(['iso0', 'iso2']);
+		expect(rm.counts.map((c) => c.netCounts)).toEqual([10, 30]);
+		expect(rm.knownConcentration).toEqual([1, 3]);
+		expect(rm.knownUncertainty).toEqual([0.1, 0.3]);
+		expect(rm.concentrationUnits).toEqual(['ppm', 'ppm']);
 	});
 });

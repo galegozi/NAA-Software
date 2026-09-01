@@ -53,6 +53,17 @@ body {
 	flex-direction: column;
 	line-height: 1.2;
 	min-width: 0;
+	border: 0;
+	background: transparent;
+	padding: 0.1rem 0;
+	font-family: inherit;
+	text-align: start;
+	cursor: pointer;
+	border-radius: 0.4rem;
+}
+
+.top-nav__wordmark:hover .top-nav__experiment {
+	text-decoration: underline;
 }
 
 .top-nav__brand {
@@ -109,9 +120,64 @@ body {
 	color: rgb(15 23 42);
 }
 
+.top-nav__right {
+	margin-inline-start: auto;
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+}
+
+.top-nav__auth {
+	font-size: 0.9rem;
+	white-space: nowrap;
+	color: rgb(51 65 85);
+}
+
+.top-nav__auth-note {
+	color: rgb(180 83 9);
+}
+
+.top-nav__auth-action {
+	border: 0;
+	background: transparent;
+	padding: 0;
+	font: inherit;
+	font-size: 0.9rem;
+	font-weight: 700;
+	color: rgb(37 99 235);
+	text-decoration: underline;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.top-nav__auth-action:hover {
+	color: rgb(29 78 216);
+}
+
+.top-nav__auth-action:disabled {
+	color: rgb(100 116 139);
+	text-decoration: none;
+	cursor: default;
+}
+
+:root[data-mode='dark'] .top-nav__auth {
+	color: rgb(203 213 225);
+}
+
+:root[data-mode='dark'] .top-nav__auth-note {
+	color: rgb(253 230 138);
+}
+
+:root[data-mode='dark'] .top-nav__auth-action {
+	color: rgb(96 165 250);
+}
+
+:root[data-mode='dark'] .top-nav__auth-action:hover {
+	color: rgb(147 197 253);
+}
+
 /* Segmented light/dark control: both options visible, the current one filled in. */
 .top-nav__theme {
-	margin-inline-start: auto;
 	display: inline-flex;
 	gap: 0.15rem;
 	padding: 0.2rem;
@@ -212,6 +278,15 @@ body {
 	.top-nav__link {
 		padding: 0.65rem 0.85rem;
 		font-size: 0.95rem;
+	}
+
+	.top-nav__right {
+		gap: 0.6rem;
+	}
+
+	.top-nav__auth,
+	.top-nav__auth-action {
+		font-size: 0.8rem;
 	}
 
 	.page-shell {

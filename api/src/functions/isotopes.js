@@ -240,11 +240,14 @@ async function isotopesHandler(request, context) {
 			const offset = url.searchParams.get('offset');
 			const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
 
-			context.warn('Cosmos query failed in local development. Falling back to mock isotope catalog.', {
-				search,
-				count: mockItems.length,
-				error: error instanceof Error ? error.message : String(error)
-			});
+			context.warn(
+				'Cosmos query failed in local development. Falling back to mock isotope catalog.',
+				{
+					search,
+					count: mockItems.length,
+					error: error instanceof Error ? error.message : String(error)
+				}
+			);
 
 			return {
 				status: 200,
@@ -305,6 +308,10 @@ async function createIsotopeHandler(request, context) {
 		};
 	}
 
+	// 'replace' lets the wizard's "Update existing" action overwrite half-life /
+	// element / energy list on the matched record. Defaults to append-only.
+	const writeMode = body?.mode === 'replace' ? 'replace' : 'append';
+
 	if (isMockCosmosEnabled()) {
 		context.log('MOCK_COSMOS enabled: mock-saving isotope payload.', {
 			shortName: item.shortName,
@@ -329,7 +336,9 @@ async function createIsotopeHandler(request, context) {
 		const existingItem = await findExistingIsotope(container, item);
 
 		if (existingItem) {
-			const mergedItem = mergeIsotopeWrite(existingItem, item, authorization.principal);
+			const mergedItem = mergeIsotopeWrite(existingItem, item, authorization.principal, {
+				mode: writeMode
+			});
 			const response = await container.items.upsert(mergedItem);
 
 			return {
@@ -337,7 +346,8 @@ async function createIsotopeHandler(request, context) {
 				jsonBody: {
 					item: mapIsotopeItem(response.resource ?? mergedItem),
 					created: false,
-					appendedEnergy: true
+					appendedEnergy: writeMode === 'append',
+					replaced: writeMode === 'replace'
 				}
 			};
 		}

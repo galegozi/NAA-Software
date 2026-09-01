@@ -20,13 +20,35 @@
 		}>;
 	};
 
-	let { sampleName = $bindable('') }: { sampleName?: string } = $props();
+	export type DatasheetSeedEntry = {
+		label: string;
+		concentration: number;
+		uncertainty: number;
+		unit: ConcentrationUnit;
+	};
+
+	let {
+		sampleName = $bindable(''),
+		initialEntries = [] as DatasheetSeedEntry[]
+	}: { sampleName?: string; initialEntries?: DatasheetSeedEntry[] } = $props();
 
 	function createEntry(): ConcentrationEntry {
 		return { label: '', concentration: '', uncertainty: '', unit: 'ppm' };
 	}
 
-	let entries = $state<ConcentrationEntry[]>([createEntry()]);
+	function seededEntries(): ConcentrationEntry[] {
+		if (initialEntries.length === 0) {
+			return [createEntry()];
+		}
+		return initialEntries.map((e) => ({
+			label: e.label,
+			concentration: e.concentration,
+			uncertainty: e.uncertainty,
+			unit: e.unit
+		}));
+	}
+
+	let entries = $state<ConcentrationEntry[]>(seededEntries());
 	let error = $state('');
 
 	function addEntry() {
@@ -41,7 +63,7 @@
 	}
 
 	export function reset() {
-		entries = [createEntry()];
+		entries = seededEntries();
 		error = '';
 	}
 

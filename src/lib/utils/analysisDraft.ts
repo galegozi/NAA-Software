@@ -14,6 +14,20 @@ export const DRAFT_VERSION = 3;
 const LEGACY_KEY = 'naa-auth-redirect-state';
 const LEGACY_VERSION = 2;
 
+/**
+ * A proxy-measurement relationship the user has recorded this session ("measured
+ * isotope is used to quantify target isotope"). Kept with the draft so it
+ * survives reload / sign-in; feeds the wizard's catalog-matching immediately and
+ * can be published to the shared catalog later.
+ */
+export type LocalIsotopeLink = {
+	id: string;
+	notes: string;
+	published: boolean;
+	measured: IsotopeInfo;
+	target: IsotopeInfo;
+};
+
 export type AnalysisDraft = {
 	version: number;
 	step: number;
@@ -29,6 +43,7 @@ export type AnalysisDraft = {
 	expandedIsotopes: number[];
 	expandedReferences: number[];
 	expandedUnknowns: number[];
+	localIsotopeLinks: LocalIsotopeLink[];
 };
 
 function hasLocalStorage(): boolean {
@@ -90,7 +105,8 @@ function parseDraft(raw: string | null, expectedVersion: number): AnalysisDraft 
 				: [],
 			expandedIsotopes: Array.isArray(parsed.expandedIsotopes) ? parsed.expandedIsotopes : [],
 			expandedReferences: Array.isArray(parsed.expandedReferences) ? parsed.expandedReferences : [],
-			expandedUnknowns: Array.isArray(parsed.expandedUnknowns) ? parsed.expandedUnknowns : []
+			expandedUnknowns: Array.isArray(parsed.expandedUnknowns) ? parsed.expandedUnknowns : [],
+			localIsotopeLinks: Array.isArray(parsed.localIsotopeLinks) ? parsed.localIsotopeLinks : []
 		};
 	} catch {
 		return null;

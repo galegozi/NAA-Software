@@ -54,6 +54,12 @@ This project now includes an integrated Azure Functions backend under `api/` for
 - `POST /api/isotopes`
 - `GET /api/reference-materials`
 - `POST /api/reference-materials`
+- `GET` / `POST /api/reference-datasheets`
+- `GET` / `POST /api/isotope-measurements` — proxy-measurement relationships
+  ("isotope A is measured to quantify isotope B"). `POST` body:
+  `{ "measuredIsotope": { "isotopeId": "<catalog id>" }, "targetIsotope": { "isotopeId": "<catalog id>" }, "notes": "" }`.
+  Upserts by the (measured, target) pair. Both methods, plus both methods of
+  `reference-datasheets`, require the `isotope_writer` role.
 
 The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
 The reference material viewer calls `/api/reference-materials` by default. You can override that by setting `PUBLIC_REFERENCE_MATERIAL_API_URL`.
@@ -126,12 +132,15 @@ To grant access, assign the `isotope_writer` role in Azure Static Web Apps invit
 
 If a document with the same normalized `referenceKey` already exists, the API appends the incoming countings to that existing record.
 
+To update one counting in place instead, send `"mode": "replace-counting"` together with `"targetItemId"` (the document id) and `"targetCountingId"` (the counting to overwrite). The document id and `referenceKey` are preserved; the targeted counting is swapped for the incoming one (keeping its `countingId`), and the isotope set is replaced. If the target counting is gone, the incoming counting is appended.
+
 ### Write payload
 
 `POST /api/isotopes` expects JSON in this shape:
 
 ```json
 {
+	"mode": "append",
 	"elementName": "Cobalt",
 	"shortName": "Co",
 	"massNumber": 60,
@@ -150,7 +159,10 @@ The function derives:
 - `halfLifeSeconds`
 - audit metadata such as `createdAt` and `createdBy`
 
-If the isotope already exists, the function updates that existing document and appends any new energies that are not already present.
+Isotope identity is `(shortName, massNumber, suffix)`, so `Co-60m` is a distinct record from `Co-60`. If an isotope with that identity already exists:
+
+- `"mode": "append"` (default) keeps every stored field and unions in any new energies.
+- `"mode": "replace"` treats the payload as authoritative — `elementName`, `halfLife` and the **entire** `energies` list overwrite what is stored (identity and creation audit fields are kept). The wizard's "Update existing" action uses this after asking the user to confirm the full energy list.
 
 ### Backend configuration
 
