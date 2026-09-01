@@ -31,13 +31,15 @@ updates:
           - minor
           - patch
 
-  # GitHub Actions used by the deploy workflows
+  # GitHub Actions used by the deploy workflows. First-party actions
+  # (checkout, setup-node, deploy-pages…) — group every update, majors included,
+  # into a single weekly PR so they don't arrive one at a time.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     groups:
       actions:
-        update-types:
-          - minor
-          - patch
+        patterns:
+          - '*'

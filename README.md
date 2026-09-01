@@ -75,7 +75,12 @@ and `POST` are registered; other methods 404.
 The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
 The reference material viewer calls `/api/reference-materials` by default. You can override that by setting `PUBLIC_REFERENCE_MATERIAL_API_URL`.
 
-Both GET endpoints accept `q` (search), `limit` (clamped to 100), and `offset` query parameters, and respond with `{ items, count, search, hasMore }`. `hasMore` signals that another batch is available at `offset + items.length`; the catalog viewers use it to fetch the next batch when the user scrolls to the bottom of the list.
+Both GET endpoints accept `q` (search) and `limit` (page size) and respond with `{ items, count, search, hasMore, ... }`; the catalog viewers fetch the next page when the user scrolls to the bottom.
+
+- `/api/isotopes` pages with a **Cosmos continuation token**: the response carries `continuation` (an opaque string, `null` on the last page); send it back as `?continuation=…` for the next page. The query is a plain `SELECT * FROM c` — no `ORDER BY`/`OFFSET`, so it needs no index.
+- `/api/reference-materials` pages with `?offset=…` (`ORDER BY c._ts DESC OFFSET … LIMIT …`).
+
+When no `COSMOSDB_*` settings are present (or `MOCK_COSMOS=true`), both endpoints serve a small built-in sample catalog with `"mocked": true`, and the app shows a "sample data" banner. A configured database is always used.
 
 ### API access control
 

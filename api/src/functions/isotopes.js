@@ -46,62 +46,46 @@ function isMockCosmosEnabled() {
 	return value === '1' || value === 'true' || value === 'yes';
 }
 
-function isLocalDevelopmentEnvironment() {
-	const runtime = process.env.AZURE_FUNCTIONS_ENVIRONMENT?.trim().toLowerCase();
-	const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
-	return runtime === 'development' || nodeEnv === 'development';
-}
-
 function hasCosmosConfiguration() {
+	// Only endpoint + key are required — database and container names have
+	// defaults in cosmosClient.js.
 	const endpoint = process.env.COSMOSDB_ENDPOINT?.trim();
 	const key = process.env.COSMOSDB_KEY?.trim();
-	const database = process.env.COSMOSDB_DATABASE?.trim();
-	const container = process.env.COSMOSDB_CONTAINER?.trim();
 
-	return Boolean(endpoint && key && database && container);
+	return Boolean(endpoint && key);
 }
 
+/**
+ * Serve the built-in sample catalog only when `MOCK_COSMOS` is set, or when no
+ * database is configured at all. If a database IS configured it is always used —
+ * no guessing from `NODE_ENV` / `AZURE_FUNCTIONS_ENVIRONMENT` (Azure SWA managed
+ * functions default that to "Development", which previously masked prod).
+ */
 function shouldUseMockCatalog() {
-	if (isMockCosmosEnabled()) {
-		return true;
-	}
-
-	return isLocalDevelopmentEnvironment() && !hasCosmosConfiguration();
+	return isMockCosmosEnabled() || !hasCosmosConfiguration();
 }
 
+/** Page size. Paging is via Cosmos continuation tokens, not the query text. */
 function clampLimit(rawValue) {
-	const parsed = Number.parseInt(rawValue ?? '25', 10);
+	const parsed = Number.parseInt(rawValue ?? '100', 10);
 	if (!Number.isFinite(parsed)) {
-		return 25;
+		return 100;
 	}
-
-	return Math.min(Math.max(parsed, 1), 100);
+	return Math.min(Math.max(parsed, 1), 200);
 }
 
-function clampOffset(rawValue) {
-	const parsed = Number.parseInt(rawValue ?? '0', 10);
-	if (!Number.isFinite(parsed)) {
-		return 0;
-	}
-
-	return Math.max(parsed, 0);
-}
-
-function buildSearchQuery(rawSearch, rawLimit, rawOffset) {
-	const limit = clampLimit(rawLimit);
-	const offset = clampOffset(rawOffset);
+/**
+ * Plain `SELECT` — no `TOP`, `ORDER BY` or `OFFSET`. Paging is done with the
+ * Cosmos SDK's continuation token (`fetchNext()` + `maxItemCount`), which needs
+ * no index and has no per-page RU penalty. Cosmos rejects `OFFSET LIMIT` without
+ * an `ORDER BY`, and an `ORDER BY` on an unindexed path fails — hence neither.
+ */
+function buildSearchQuery(rawSearch) {
 	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
-	const pagingParameters = [
-		{ name: '@offset', value: offset },
-		{ name: '@limit', value: limit }
-	];
 
 	if (!normalizedSearch) {
-		// No ORDER BY: it requires the sort path to be indexed, and an unindexed
-		// path silently drops rows. OFFSET/LIMIT is valid without ORDER BY.
 		return {
-			query: 'SELECT * FROM c OFFSET @offset LIMIT @limit',
-			parameters: pagingParameters
+			query: 'SELECT * FROM c'
 		};
 	}
 
@@ -130,8 +114,8 @@ function buildSearchQuery(rawSearch, rawLimit, rawOffset) {
 	}
 
 	return {
-		query: `SELECT * FROM c WHERE ${conditions.join(' OR ')} OFFSET @offset LIMIT @limit`,
-		parameters: [...parameters, ...pagingParameters]
+		query: `SELECT * FROM c WHERE ${conditions.join(' OR ')}`,
+		parameters
 	};
 }
 
@@ -172,15 +156,18 @@ function matchesMockSearch(item, normalizedSearch) {
 	return false;
 }
 
-function getMockSearchResults(rawSearch, rawLimit, rawOffset) {
+/** Mock paging: the "continuation token" is just the next offset as a string. */
+function getMockSearchResults(rawSearch, rawLimit, rawContinuation) {
 	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
 	const limit = clampLimit(rawLimit);
-	const offset = clampOffset(rawOffset);
+	const offset = Math.max(Number.parseInt(rawContinuation ?? '0', 10) || 0, 0);
 	const matches = MOCK_ISOTOPES.filter((item) => matchesMockSearch(item, normalizedSearch));
+	const page = matches.slice(offset, offset + limit);
+	const nextOffset = offset + page.length;
 
 	return {
-		items: matches.slice(offset, offset + limit),
-		hasMore: offset + limit < matches.length
+		items: page,
+		continuation: nextOffset < matches.length ? String(nextOffset) : null
 	};
 }
 
@@ -197,18 +184,22 @@ async function isotopesHandler(request, context) {
 		};
 	}
 
+	const url = new URL(request.url);
+	const search = url.searchParams.get('q') ?? '';
+	const rawLimit = url.searchParams.get('limit');
+	const continuation = url.searchParams.get('continuation') || undefined;
+
 	if (shouldUseMockCatalog()) {
-		const url = new URL(request.url);
-		const search = url.searchParams.get('q') ?? '';
-		const limit = url.searchParams.get('limit');
-		const offset = url.searchParams.get('offset');
-		const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
+		const { items: mockItems, continuation: nextToken } = getMockSearchResults(
+			search,
+			rawLimit,
+			continuation
+		);
 
 		context.log('Returning mock isotope catalog results.', {
 			search,
 			count: mockItems.length,
-			mockCosmos: isMockCosmosEnabled(),
-			fallbackLocal: !isMockCosmosEnabled() && isLocalDevelopmentEnvironment()
+			reason: isMockCosmosEnabled() ? 'MOCK_COSMOS' : 'no COSMOSDB_* configured'
 		});
 
 		return {
@@ -217,21 +208,23 @@ async function isotopesHandler(request, context) {
 				items: mockItems.map(mapIsotopeItem),
 				count: mockItems.length,
 				search,
-				hasMore,
+				continuation: nextToken,
+				hasMore: Boolean(nextToken),
 				mocked: true
 			}
 		};
 	}
 
 	try {
-		const url = new URL(request.url);
-		const search = url.searchParams.get('q') ?? '';
-		const limit = url.searchParams.get('limit');
-		const offset = url.searchParams.get('offset');
-		const queryText = buildSearchQuery(search, limit, offset);
+		const queryText = buildSearchQuery(search);
 		const container = getCosmosContainer();
-		const query = container.items.query(queryText);
-		const { resources } = await query.fetchAll();
+		const iterator = container.items.query(queryText, {
+			maxItemCount: clampLimit(rawLimit),
+			continuationToken: continuation
+		});
+		const page = await iterator.fetchNext();
+		const resources = Array.isArray(page.resources) ? page.resources : [];
+		const nextToken = page.hasMoreResults ? (page.continuationToken ?? null) : null;
 
 		return {
 			status: 200,
@@ -239,39 +232,13 @@ async function isotopesHandler(request, context) {
 				items: resources.map(mapIsotopeItem),
 				count: resources.length,
 				search,
-				hasMore: resources.length === clampLimit(limit)
+				continuation: nextToken,
+				hasMore: Boolean(nextToken)
 			}
 		};
 	} catch (error) {
-		if (isLocalDevelopmentEnvironment()) {
-			const url = new URL(request.url);
-			const search = url.searchParams.get('q') ?? '';
-			const limit = url.searchParams.get('limit');
-			const offset = url.searchParams.get('offset');
-			const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
-
-			context.warn(
-				'Cosmos query failed in local development. Falling back to mock isotope catalog.',
-				{
-					search,
-					count: mockItems.length,
-					error: error instanceof Error ? error.message : String(error)
-				}
-			);
-
-			return {
-				status: 200,
-				jsonBody: {
-					items: mockItems.map(mapIsotopeItem),
-					count: mockItems.length,
-					search,
-					hasMore,
-					mocked: true,
-					fallback: 'local-cosmos-error'
-				}
-			};
-		}
-
+		// A database is configured (we would not be here otherwise) but the query
+		// failed — a real error. Surface it; never silently serve sample data.
 		context.error('Failed to load isotopes from Cosmos DB.', error);
 
 		return {
@@ -412,4 +379,4 @@ app.http('isotopes', {
 	handler: isotopesHandler
 });
 
-export { isotopesHandler };
+export { isotopesHandler, buildSearchQuery, shouldUseMockCatalog };

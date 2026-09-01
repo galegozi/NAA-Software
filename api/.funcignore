@@ -1,0 +1,7 @@
+# Files never deployed with the function app. The Azure Functions host imports
+# every file matched by package.json "main" to discover `app.http()` calls, so a
+# stray test file in the functions dir would be loaded into the running app.
+*.test.js
+**/*.test.js
+test/
+.vscode/

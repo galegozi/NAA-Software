@@ -68,6 +68,7 @@
 		findCatalogIsotope,
 		findCatalogReferenceMaterial,
 		isotopeElementMismatch,
+		knownProxyHint,
 		findIsotopeMeasurementLink,
 		saveIsotopeMeasurementLink,
 		applyDatasheetToReference,
@@ -1441,6 +1442,33 @@
 		isotopeInfo.map((iso, i) => applyProxyMeasured(iso, proxyByIsotope[i]))
 	);
 
+	/**
+	 * Per-isotope "you may have made a mistake" prompts (name/label element
+	 * mismatch, or a well-known proxy nuclide reporting its own element), surfaced
+	 * as a summary at the top of Step 1 rather than buried under each card.
+	 */
+	let isotopeWarnings = $derived(
+		isotopeInfo
+			.map((isotope, index) => {
+				const mismatch = isotopeElementMismatch(isotope);
+				if (mismatch) {
+					return {
+						index,
+						text: `${isotope.isotopeName || `Isotope ${index + 1}`} looks like a ${mismatch.nameElement} isotope but is labelled ${mismatch.labelElement}. If it stands in for measuring a ${mismatch.labelElement} isotope, record that.`
+					};
+				}
+				const hint = proxyByIsotope[index] ? null : knownProxyHint(isotope);
+				if (hint) {
+					return {
+						index,
+						text: `${isotope.isotopeName} is usually detected to measure ${hint.targetElement} (${hint.note}). This entry will report a ${hint.proxyElement} concentration — if you meant ${hint.targetElement}, record that.`
+					};
+				}
+				return null;
+			})
+			.filter((w): w is { index: number; text: string } => w !== null)
+	);
+
 	// computed isotope information
 	let isoComp = $derived(mathIsotopeInfo.map(isoGA));
 
@@ -1851,21 +1879,32 @@
 		const apiUrl = import.meta.env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
 
 		try {
-			const response = await fetch(`${apiUrl}?limit=1000`, {
-				headers: {
-					accept: 'application/json'
+			// Page through the whole catalog (needed for reference/proxy matching).
+			const all: IsotopeCatalogItem[] = [];
+			let continuation: string | null = null;
+			for (let guard = 0; guard < 50; guard++) {
+				const url = new URL(apiUrl, window.location.origin);
+				url.searchParams.set('limit', '200');
+				if (continuation) {
+					url.searchParams.set('continuation', continuation);
 				}
-			});
-
-			const body = await response.json().catch(() => null);
-			if (!response.ok) {
-				return;
+				const response = await fetch(url, { headers: { accept: 'application/json' } });
+				const body = await response.json().catch(() => null);
+				if (!response.ok) {
+					return;
+				}
+				catalogStatus.noteResponse(body);
+				if (Array.isArray(body?.items)) {
+					all.push(...(body.items as IsotopeCatalogItem[]));
+				}
+				continuation = typeof body?.continuation === 'string' ? body.continuation : null;
+				if (!continuation) {
+					break;
+				}
 			}
-			catalogStatus.noteResponse(body);
 
-			const items = Array.isArray(body?.items) ? body.items : [];
 			isotopeCatalogById = Object.fromEntries(
-				(items as IsotopeCatalogItem[])
+				all
 					.filter((item) => typeof item?.id === 'string' && item.id.trim().length > 0)
 					.map((item) => [item.id, item])
 			);
@@ -2724,6 +2763,27 @@
 			{/if}
 
 			<h3 class="text-xl font-bold">Isotopes to analyze ({isotopeInfo.length})</h3>
+
+			{#if isotopeWarnings.length > 0}
+				<div class="mt-2 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
+					<p class="font-bold">⚠ Check these isotopes</p>
+					<ul class="space-y-2">
+						{#each isotopeWarnings as warning (warning.index)}
+							<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+								<span>{warning.text}</span>
+								<button
+									type="button"
+									class="btn shrink-0 preset-tonal-surface"
+									onclick={() => openRelationshipPanel(warning.index)}
+								>
+									Record how this is measured
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
+
 			{#if isotopeInfo.length === 0}
 				<p>
 					No isotopes yet. {catalogAvailable
@@ -2741,45 +2801,6 @@
 						onRemove={() => removeIsotope(index)}
 					>
 						<IsotopeInfo bind:this={isoRef[index]} bind:isotopeInfo={isotopeInfo[index]} />
-
-						{#if proxyByIsotope[index]}
-							{@const proxy = proxyByIsotope[index]}
-							<div
-								class="mt-3 space-y-1 rounded border border-primary-500 preset-tonal-primary p-3"
-							>
-								<p class="text-sm">
-									Measured via <strong>{describeProxyMeasured(proxy)}</strong>
-									({proxy.source === 'catalog'
-										? 'from the shared catalog'
-										: 'from your relationship'}).
-								</p>
-								<p class="text-sm">
-									Decay and dead-time corrections use its half-life; the concentration is reported
-									for {isotope.elementName || isotope.isotopeName || `isotope ${index + 1}`}.
-								</p>
-							</div>
-						{/if}
-
-						{#if isotopeElementMismatch(isotope)}
-							{@const mismatch = isotopeElementMismatch(isotope)}
-							<div
-								class="mt-3 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3"
-							>
-								<p class="text-sm">
-									<strong>{isotope.isotopeName}</strong> looks like a
-									<strong>{mismatch?.nameElement}</strong> isotope, but this entry is labelled
-									<strong>{mismatch?.labelElement}</strong>. If it's a stand-in for measuring a
-									{mismatch?.labelElement} isotope, record that relationship.
-								</p>
-								<button
-									type="button"
-									class="btn preset-tonal-surface"
-									onclick={() => openRelationshipPanel(index)}
-								>
-									Record how this is measured
-								</button>
-							</div>
-						{/if}
 
 						{#if swaAuth.signInAvailable}
 							{@const parsed = parseIsotopeName(isotope.isotopeName)}
@@ -2920,6 +2941,22 @@
 							/>
 						</details>
 					</CollapsibleCard>
+
+					{#if proxyByIsotope[index]}
+						{@const proxy = proxyByIsotope[index]}
+						<div class="space-y-1 rounded border border-primary-500 preset-tonal-primary p-3">
+							<p class="text-sm">
+								Measured via <strong>{describeProxyMeasured(proxy)}</strong>
+								({proxy.source === 'catalog'
+									? 'from the shared catalog'
+									: 'from your relationship'}).
+							</p>
+							<p class="text-sm">
+								Decay and dead-time corrections use its half-life; the concentration is reported for
+								{isotope.elementName || isotope.isotopeName || `isotope ${index + 1}`}.
+							</p>
+						</div>
+					{/if}
 				{/each}
 			</div>
 			<br />
