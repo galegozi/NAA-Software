@@ -2136,6 +2136,22 @@
 		untrack(() => reconcileCatalogReferenceCoverage());
 	});
 
+	// Auto-expand freshly added isotope cards (from the catalog picker or "Add
+	// custom isotope") so their contents — including the proxy / "did you mean"
+	// warnings — are visible right away.
+	let seenIsotopeCount = 0;
+	$effect(() => {
+		const count = isotopeInfo.length;
+		untrack(() => {
+			if (draftHydrated && count > seenIsotopeCount) {
+				for (let i = seenIsotopeCount; i < count; i++) {
+					expandedIsotopes.add(i);
+				}
+			}
+			seenIsotopeCount = count;
+		});
+	});
+
 	function addCustomIsotope() {
 		isotopeInfo = [...isotopeInfo, createIsotopeInfo()];
 		isoRef = [...isoRef, undefined];
