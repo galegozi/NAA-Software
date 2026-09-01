@@ -2754,24 +2754,6 @@
 					>
 						<IsotopeInfo bind:this={isoRef[index]} bind:isotopeInfo={isotopeInfo[index]} />
 
-						{#if proxyByIsotope[index]}
-							{@const proxy = proxyByIsotope[index]}
-							<div
-								class="mt-3 space-y-1 rounded border border-primary-500 preset-tonal-primary p-3"
-							>
-								<p class="text-sm">
-									Measured via <strong>{describeProxyMeasured(proxy)}</strong>
-									({proxy.source === 'catalog'
-										? 'from the shared catalog'
-										: 'from your relationship'}).
-								</p>
-								<p class="text-sm">
-									Decay and dead-time corrections use its half-life; the concentration is reported
-									for {isotope.elementName || isotope.isotopeName || `isotope ${index + 1}`}.
-								</p>
-							</div>
-						{/if}
-
 						{#if swaAuth.signInAvailable}
 							{@const parsed = parseIsotopeName(isotope.isotopeName)}
 							{@const isoMode = isotopeModeFor(index)}
@@ -2911,6 +2893,22 @@
 							/>
 						</details>
 					</CollapsibleCard>
+
+					{#if proxyByIsotope[index]}
+						{@const proxy = proxyByIsotope[index]}
+						<div class="space-y-1 rounded border border-primary-500 preset-tonal-primary p-3">
+							<p class="text-sm">
+								Measured via <strong>{describeProxyMeasured(proxy)}</strong>
+								({proxy.source === 'catalog'
+									? 'from the shared catalog'
+									: 'from your relationship'}).
+							</p>
+							<p class="text-sm">
+								Decay and dead-time corrections use its half-life; the concentration is reported for
+								{isotope.elementName || isotope.isotopeName || `isotope ${index + 1}`}.
+							</p>
+						</div>
+					{/if}
 
 					{#if isotopeElementMismatch(isotope)}
 						{@const mismatch = isotopeElementMismatch(isotope)}
