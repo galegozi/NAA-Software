@@ -2136,22 +2136,6 @@
 		untrack(() => reconcileCatalogReferenceCoverage());
 	});
 
-	// Auto-expand freshly added isotope cards (from the catalog picker or "Add
-	// custom isotope") so their contents — including the proxy / "did you mean"
-	// warnings — are visible right away.
-	let seenIsotopeCount = 0;
-	$effect(() => {
-		const count = isotopeInfo.length;
-		untrack(() => {
-			if (draftHydrated && count > seenIsotopeCount) {
-				for (let i = seenIsotopeCount; i < count; i++) {
-					expandedIsotopes.add(i);
-				}
-			}
-			seenIsotopeCount = count;
-		});
-	});
-
 	function addCustomIsotope() {
 		isotopeInfo = [...isotopeInfo, createIsotopeInfo()];
 		isoRef = [...isoRef, undefined];
@@ -2788,47 +2772,6 @@
 							</div>
 						{/if}
 
-						{#if isotopeElementMismatch(isotope)}
-							{@const mismatch = isotopeElementMismatch(isotope)}
-							<div
-								class="mt-3 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3"
-							>
-								<p class="text-sm">
-									<strong>{isotope.isotopeName}</strong> looks like a
-									<strong>{mismatch?.nameElement}</strong> isotope, but this entry is labelled
-									<strong>{mismatch?.labelElement}</strong>. If it's a stand-in for measuring a
-									{mismatch?.labelElement} isotope, record that relationship.
-								</p>
-								<button
-									type="button"
-									class="btn preset-tonal-surface"
-									onclick={() => openRelationshipPanel(index)}
-								>
-									Record how this is measured
-								</button>
-							</div>
-						{:else if knownProxyHint(isotope) && !proxyByIsotope[index]}
-							{@const hint = knownProxyHint(isotope)}
-							<div
-								class="mt-3 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3"
-							>
-								<p class="text-sm">
-									<strong>{isotope.isotopeName}</strong> is usually detected to measure
-									<strong>{hint?.targetElement}</strong>
-									({hint?.note}). This entry will report a
-									<strong>{hint?.proxyElement}</strong> concentration — if you meant to measure
-									{hint?.targetElement}, record that relationship.
-								</p>
-								<button
-									type="button"
-									class="btn preset-tonal-surface"
-									onclick={() => openRelationshipPanel(index)}
-								>
-									Record how this is measured
-								</button>
-							</div>
-						{/if}
-
 						{#if swaAuth.signInAvailable}
 							{@const parsed = parseIsotopeName(isotope.isotopeName)}
 							{@const isoMode = isotopeModeFor(index)}
@@ -2968,6 +2911,43 @@
 							/>
 						</details>
 					</CollapsibleCard>
+
+					{#if isotopeElementMismatch(isotope)}
+						{@const mismatch = isotopeElementMismatch(isotope)}
+						<div class="space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
+							<p class="text-sm">
+								<strong>{isotope.isotopeName}</strong> looks like a
+								<strong>{mismatch?.nameElement}</strong> isotope, but this entry is labelled
+								<strong>{mismatch?.labelElement}</strong>. If it's a stand-in for measuring a
+								{mismatch?.labelElement} isotope, record that relationship.
+							</p>
+							<button
+								type="button"
+								class="btn preset-tonal-surface"
+								onclick={() => openRelationshipPanel(index)}
+							>
+								Record how this is measured
+							</button>
+						</div>
+					{:else if knownProxyHint(isotope) && !proxyByIsotope[index]}
+						{@const hint = knownProxyHint(isotope)}
+						<div class="space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
+							<p class="text-sm">
+								<strong>{isotope.isotopeName}</strong> is usually detected to measure
+								<strong>{hint?.targetElement}</strong>
+								({hint?.note}). This entry will report a
+								<strong>{hint?.proxyElement}</strong> concentration — if you meant to measure
+								{hint?.targetElement}, record that relationship.
+							</p>
+							<button
+								type="button"
+								class="btn preset-tonal-surface"
+								onclick={() => openRelationshipPanel(index)}
+							>
+								Record how this is measured
+							</button>
+						</div>
+					{/if}
 				{/each}
 			</div>
 			<br />
