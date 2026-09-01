@@ -2757,8 +2757,15 @@
 			<p>Add the isotopes you want to analyze.</p>
 			<br />
 
+			{#if catalogAvailable}
+				<IsotopeViewer bind:selectedIsotopes={isotopeInfo} showSelectionList={false} />
+				<br />
+			{/if}
+
+			<h3 class="text-xl font-bold">Isotopes to analyze ({isotopeInfo.length})</h3>
+
 			{#if isotopeWarnings.length > 0}
-				<div class="mb-4 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
+				<div class="mt-2 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
 					<p class="font-bold">⚠ Check these isotopes</p>
 					<ul class="space-y-2">
 						{#each isotopeWarnings as warning (warning.index)}
@@ -2777,12 +2784,6 @@
 				</div>
 			{/if}
 
-			{#if catalogAvailable}
-				<IsotopeViewer bind:selectedIsotopes={isotopeInfo} showSelectionList={false} />
-				<br />
-			{/if}
-
-			<h3 class="text-xl font-bold">Isotopes to analyze ({isotopeInfo.length})</h3>
 			{#if isotopeInfo.length === 0}
 				<p>
 					No isotopes yet. {catalogAvailable
