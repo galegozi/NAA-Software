@@ -32,9 +32,10 @@
 		const measurementStart = material?.measurementStartTime?.trim?.() ?? '';
 		const irradiationEnd = material?.irradiationEnd?.trim?.() ?? '';
 		const irradiationType = material?.irradiationType?.trim?.() ?? '';
+		const countingMode = material?.countingMode?.trim?.() ?? '';
 		const countingLabel = counting.countingLabel?.trim() ?? 'counting';
 
-		return `${item.id}::${countingLabel}::${createdAt}::${measurementStart}::${irradiationEnd}::${irradiationType}`;
+		return `${item.id}::${countingLabel}::${createdAt}::${measurementStart}::${irradiationEnd}::${irradiationType}::${countingMode}`;
 	}
 
 	function formatDatetime(str: string | undefined): string {
@@ -147,6 +148,7 @@
 					material?.measurementStartTime,
 					material?.irradiationType,
 					material?.dtType,
+					material?.countingMode,
 					material?.irradiationTime,
 					material?.decayTime,
 					material?.liveTime,
@@ -401,6 +403,11 @@
 								{#if material?.dtType}
 									<div class="text-sm">Dead time correction: {material.dtType}</div>
 								{/if}
+									<div class="text-sm">
+										Counting mode: {material?.countingMode === 'compton'
+											? 'Compton-suppressed'
+											: 'Normal (singles)'}
+									</div>
 									<div class="text-sm">Countings saved: {entry.item.countingCount}</div>
 									<div class="text-sm">Isotopes saved: {entry.item.isotopes.length}</div>
 								</div>

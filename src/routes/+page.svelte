@@ -1562,6 +1562,42 @@
 				})
 	);
 
+	/** (unknown, linked-reference) pairs counted in different modes — surfaced on the Review step. */
+	let countingModeMismatches = $derived.by(() => {
+		const modeOf = (m?: { countingMode?: string }) =>
+			m?.countingMode === 'compton' ? 'compton' : 'normal';
+		const seen: string[] = [];
+		const out: {
+			unknownLabel: string;
+			referenceLabel: string;
+			unknownMode: string;
+			referenceMode: string;
+		}[] = [];
+		materials.unknown.forEach((unk, uIndex) => {
+			isotopeInfo.forEach((_, iIndex) => {
+				const rIndex = getLinkedReferenceIndex(iIndex);
+				const ref = materials.reference[rIndex];
+				if (!ref) {
+					return;
+				}
+				const key = `${uIndex}::${rIndex}`;
+				if (seen.includes(key)) {
+					return;
+				}
+				seen.push(key);
+				if (modeOf(unk) !== modeOf(ref)) {
+					out.push({
+						unknownLabel: unk.NETL_code || unk.sampleName || `Unknown ${uIndex + 1}`,
+						referenceLabel: ref.NETL_code || ref.sampleName || `Reference ${rIndex + 1}`,
+						unknownMode: modeOf(unk),
+						referenceMode: modeOf(ref)
+					});
+				}
+			});
+		});
+		return out;
+	});
+
 	let nextButtonText = $derived(getNextButtonText(step));
 	let backButtonText = $derived(getBackButtonText(step));
 	let stepTitle = $derived(getStepTitle(step));
@@ -1811,8 +1847,9 @@
 		const measurementStart = material?.measurementStartTime?.trim?.() ?? '';
 		const irradiationEnd = material?.irradiationEnd?.trim?.() ?? '';
 		const irradiationType = material?.irradiationType?.trim?.() ?? '';
+		const countingMode = material?.countingMode?.trim?.() ?? '';
 
-		return `${itemId}::${countingLabel}::${createdAt}::${measurementStart}::${irradiationEnd}::${irradiationType}`;
+		return `${itemId}::${countingLabel}::${createdAt}::${measurementStart}::${irradiationEnd}::${irradiationType}::${countingMode}`;
 	}
 
 	function applyReferenceMaterialCatalogItem(
@@ -1852,6 +1889,7 @@
 		nextReference.fluence = sourceMaterial.fluence;
 		nextReference.irradiationType = sourceMaterial.irradiationType;
 		nextReference.dtType = sourceMaterial.dtType;
+		nextReference.countingMode = sourceMaterial.countingMode === 'compton' ? 'compton' : 'normal';
 		nextReference.referenceDatasheetId = sourceMaterial.referenceDatasheetId;
 
 		const sourceCounts = Array.isArray(sourceMaterial.counts) ? sourceMaterial.counts : [];
@@ -3243,6 +3281,24 @@
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Review your inputs and the computed results below.</p>
 			<br /><br />
+			{#if countingModeMismatches.length > 0}
+				<div class="mb-4 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3">
+					<p class="font-bold">⚠ Counting-mode mismatch</p>
+					<p class="text-sm">
+						A reference and the unknown it is compared against must be counted the same way. These
+						pairs differ:
+					</p>
+					<ul class="ml-4 list-disc text-sm">
+						{#each countingModeMismatches as mm (mm.unknownLabel + '::' + mm.referenceLabel)}
+							<li>
+								<strong>{mm.unknownLabel}</strong> was counted in {mm.unknownMode} mode, but its reference
+								<strong>{mm.referenceLabel}</strong>
+								was counted in {mm.referenceMode} mode.
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
 			<!--Display table & header with unit-->
 			<h3 class="text-xl font-bold">Predicted Concentrations</h3>
 			<!--Display a table here with isotopes as the columns and materials as the rows-->

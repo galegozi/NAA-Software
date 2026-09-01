@@ -121,6 +121,7 @@ To grant access, assign the `isotope_writer` role in Azure Static Web Apps invit
 					}
 				],
 				"dtType": "simple",
+				"countingMode": "normal",
 				"knownConcentration": [0.1],
 				"knownUncertainty": [0.005],
 				"concentrationUnits": ["ppm"]
@@ -129,6 +130,8 @@ To grant access, assign the `isotope_writer` role in Azure Static Web Apps invit
 	]
 }
 ```
+
+`countingMode` is `"normal"` (singles, the default when omitted) or `"compton"` (Compton-suppressed). It is part of the reference-material identity fingerprint, so a normal and a Compton-suppressed counting of the same physical sample are stored as separate records rather than merged.
 
 If a document with the same normalized `referenceKey` already exists, the API appends the incoming countings to that existing record.
 

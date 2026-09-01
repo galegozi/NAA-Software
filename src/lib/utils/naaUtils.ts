@@ -58,6 +58,7 @@ export function createReferenceMaterial(isotopeCount: number): ReferenceMaterial
 		counts: createCountDataArray(isotopeCount),
 		irradiationType: 'total',
 		dtType: undefined,
+		countingMode: 'normal',
 		concentrationUnits: Array.from({ length: isotopeCount }, () => undefined),
 		knownConcentration: Array.from({ length: isotopeCount }, () => 0),
 		knownUncertainty: Array.from({ length: isotopeCount }, () => 0)
@@ -82,7 +83,8 @@ export function createUnknownMaterial(isotopeCount: number): UnknownMaterial {
 		fluence: 0,
 		counts: createCountDataArray(isotopeCount),
 		irradiationType: 'total',
-		dtType: undefined
+		dtType: undefined,
+		countingMode: 'normal'
 	};
 }
 

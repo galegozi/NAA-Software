@@ -31,6 +31,13 @@ export type DeadTimeType = 'short' | 'simple' | 'mixed' | undefined;
 export type IrradiationType = 'gated' | 'total' | undefined;
 export type ConcUnitType = 'percentage' | 'ppm' | undefined;
 
+/**
+ * Detector counting mode. `'normal'` is singles counting; `'compton'` is
+ * Compton-suppressed counting (anti-coincidence shield). A reference and the
+ * unknown it is compared against must use the same mode. Absent means `'normal'`.
+ */
+export type CountingModeType = 'normal' | 'compton';
+
 export interface BaseMaterialInfo {
 	NETL_code: string;
 	sampleName: string;
@@ -46,6 +53,7 @@ export interface BaseMaterialInfo {
 	counts: CountData[];
 	irradiationType: IrradiationType;
 	dtType: DeadTimeType;
+	countingMode?: CountingModeType;
 }
 
 export interface ReferenceMaterial extends BaseMaterialInfo {

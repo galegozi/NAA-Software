@@ -211,3 +211,49 @@ test('replaceCountingInReferenceMaterial appends when the target counting is gon
 	assert.equal(updated.countings.length, 2);
 	assert.equal(referenceMaterialHasCounting(existing, 'no-such-id'), false);
 });
+
+test('normalizeReferenceMaterialWritePayload defaults countingMode to normal', () => {
+	const result = normalizeReferenceMaterialWritePayload(buildValidPayload(), {
+		userId: 'writer-1'
+	});
+	assert.equal(result.countings[0].referenceMaterial.countingMode, 'normal');
+});
+
+test('normalizeReferenceMaterialWritePayload accepts and rejects countingMode values', () => {
+	const compton = buildValidPayload();
+	compton.countings[0].referenceMaterial.countingMode = 'compton';
+	const result = normalizeReferenceMaterialWritePayload(compton, { userId: 'writer-1' });
+	assert.equal(result.countings[0].referenceMaterial.countingMode, 'compton');
+
+	const bad = buildValidPayload();
+	bad.countings[0].referenceMaterial.countingMode = 'suppressed';
+	assert.throws(
+		() => normalizeReferenceMaterialWritePayload(bad, { userId: 'writer-1' }),
+		/countingMode/u
+	);
+});
+
+test('countingMode is part of the reference-material identity', () => {
+	const normal = normalizeReferenceMaterialWritePayload(buildValidPayload(), {
+		userId: 'writer-1'
+	});
+
+	const comptonPayload = buildValidPayload();
+	comptonPayload.countings[0].referenceMaterial.countingMode = 'compton';
+	const compton = normalizeReferenceMaterialWritePayload(comptonPayload, { userId: 'writer-1' });
+
+	assert.notEqual(normal.referenceKey, compton.referenceKey);
+});
+
+test('mergeReferenceMaterialWrite keeps a compton counting alongside a normal one', () => {
+	const existing = normalizeReferenceMaterialWritePayload(buildValidPayload(), {
+		userId: 'writer-1'
+	});
+
+	const comptonPayload = buildValidPayload();
+	comptonPayload.countings[0].referenceMaterial.countingMode = 'compton';
+	const incoming = normalizeReferenceMaterialWritePayload(comptonPayload, { userId: 'writer-2' });
+
+	const merged = mergeReferenceMaterialWrite(existing, incoming, { userId: 'writer-2' });
+	assert.equal(merged.countings.length, 2);
+});

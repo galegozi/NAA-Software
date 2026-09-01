@@ -30,7 +30,7 @@
 			})),
 			irradiationType: 'total',
 			dtType: undefined,
-
+			countingMode: 'normal'
 		}),
 		getRoiIndex,
 		isotopeInfo = $bindable([]),
@@ -570,6 +570,18 @@
 		<option value="Deprecated" disabled>Deprecated Options</option>
 		<option value="mixed">Mixed (deprecated): Short Lived in presence of Long Lived</option>
 		<!--(net counts)/(1-e^(-decay constant * live time))-->
+	</select>
+</label>
+
+<label class="label">
+	<span>Counting Mode</span>
+	<select
+		class="select input w-50 bg-surface-50-950 text-surface-950-50"
+		bind:value={materialInfo.countingMode}
+		required
+	>
+		<option value="normal">Normal (singles)</option>
+		<option value="compton">Compton-suppressed</option>
 	</select>
 </label>
 

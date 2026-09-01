@@ -28,6 +28,7 @@
 			})),
 			irradiationType: 'total',
 			dtType: undefined,
+			countingMode: 'normal',
 
 			// specific to Reference Material
 			// concentration units (in percentage or ppm) for each isotope

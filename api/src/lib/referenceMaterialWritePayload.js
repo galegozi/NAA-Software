@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 const ALLOWED_DT_TYPES = new Set(['short', 'simple', 'mixed']);
 const ALLOWED_IRRADIATION_TYPES = new Set(['gated', 'total']);
 const ALLOWED_CONCENTRATION_UNITS = new Set(['percentage', 'ppm']);
+const ALLOWED_COUNTING_MODES = new Set(['normal', 'compton']);
 
 function toTrimmedString(value) {
 	return typeof value === 'string' ? value.trim() : '';
@@ -191,6 +192,11 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 		throw new Error(`'${fieldPrefix}.irradiationType' must be one of: gated, total.`);
 	}
 
+	const countingMode = toTrimmedString(payload.countingMode) || 'normal';
+	if (!ALLOWED_COUNTING_MODES.has(countingMode)) {
+		throw new Error(`'${fieldPrefix}.countingMode' must be one of: normal, compton.`);
+	}
+
 	const normalizedMaterial = {
 		NETL_code: requireString(payload.NETL_code, `${fieldPrefix}.NETL_code`, 64),
 		sampleName: requireString(payload.sampleName, `${fieldPrefix}.sampleName`, 120),
@@ -221,6 +227,7 @@ function normalizeReferenceMaterial(payload, isotopeCount, fieldPrefix) {
 		),
 		irradiationType,
 		dtType: dtType || undefined,
+		countingMode,
 		knownConcentration: Array.from({ length: isotopeCount }, (_, i) => {
 			const val = Array.isArray(payload.knownConcentration)
 				? payload.knownConcentration[i]
@@ -355,7 +362,8 @@ function referenceMaterialEqual(left, right, { includeCounts = true } = {}) {
 		left.realTime === right.realTime &&
 		left.fluence === right.fluence &&
 		left.irradiationType === right.irradiationType &&
-		left.dtType === right.dtType;
+		left.dtType === right.dtType &&
+		(left.countingMode || 'normal') === (right.countingMode || 'normal');
 
 	if (!baseMatches) {
 		return false;
@@ -384,6 +392,7 @@ function buildReferenceIdentityMaterial(material, isotopes) {
 		realTime: material.realTime,
 		fluence: material.fluence,
 		dtType: material.dtType || '',
+		countingMode: material.countingMode || 'normal',
 		isotopes
 	};
 }

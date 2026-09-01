@@ -490,6 +490,7 @@ export async function saveReferenceMaterialToCatalog(args: {
 	const referenceMaterial: ReferenceMaterial = {
 		...reference,
 		referenceDatasheetId,
+		countingMode: reference.countingMode === 'compton' ? 'compton' : 'normal',
 		counts: covered.map(({ index }) => reference.counts?.[index] ?? blankCount()),
 		knownConcentration: covered.map(
 			({ index }) => Number(reference.knownConcentration?.[index]) || 0

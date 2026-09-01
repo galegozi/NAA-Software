@@ -277,6 +277,46 @@ describe('saveReferenceMaterialToCatalog', () => {
 		expect(rm.knownUncertainty).toEqual([0.1, 0.3]);
 		expect(rm.concentrationUnits).toEqual(['ppm', 'ppm']);
 	});
+
+	it('sends countingMode, defaulting to normal and passing compton through', async () => {
+		type SentBody = { countings: Array<{ referenceMaterial: { countingMode: string } }> };
+		let sentBody: SentBody = { countings: [] };
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: string, init: RequestInit) => {
+				sentBody = JSON.parse(String(init.body)) as SentBody;
+				return { ok: true, json: async () => ({ created: true }) } as unknown as Response;
+			})
+		);
+
+		const covered = [{ isotope: { id: 'iso0', energy: 100 }, index: 0 }] as never;
+		const base = {
+			NETL_code: 'AB1',
+			sampleName: 'S1',
+			counts: [{ netCounts: 10 }],
+			knownConcentration: [1],
+			knownUncertainty: [0.1],
+			concentrationUnits: ['ppm']
+		};
+
+		await saveReferenceMaterialToCatalog({
+			reference: base as unknown as ReferenceMaterial,
+			covered,
+			referenceDatasheetId: 'ds1',
+			countingLabel: 'C1',
+			notes: ''
+		});
+		expect(sentBody.countings[0].referenceMaterial.countingMode).toBe('normal');
+
+		await saveReferenceMaterialToCatalog({
+			reference: { ...base, countingMode: 'compton' } as unknown as ReferenceMaterial,
+			covered,
+			referenceDatasheetId: 'ds1',
+			countingLabel: 'C1',
+			notes: ''
+		});
+		expect(sentBody.countings[0].referenceMaterial.countingMode).toBe('compton');
+	});
 });
 
 describe('applyDatasheetToReference', () => {
