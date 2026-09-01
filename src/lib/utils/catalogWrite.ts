@@ -90,6 +90,45 @@ export function isotopeElementMismatch(
 	return { nameElement, labelElement };
 }
 
+/**
+ * Nuclides that in practice are almost always detected as a delayed stand-in for
+ * another element — you count the daughter but you're quantifying the parent's
+ * element. Keyed by `isotopeIdentityKey`.
+ */
+const KNOWN_PROXY_ISOTOPES: Record<string, { targetElement: string; note: string }> = {
+	'np|239|': { targetElement: 'Uranium', note: 'U-238 captures a neutron → U-239 → Np-239' },
+	'pa|233|': { targetElement: 'Thorium', note: 'Th-232 captures a neutron → Th-233 → Pa-233' }
+};
+
+/**
+ * When `isotope`'s name is a well-known proxy nuclide (Np-239, Pa-233…), returns
+ * the element it's normally used to measure so the wizard can check the user
+ * isn't reporting the proxy element by mistake. Returns null when it isn't one,
+ * or when the entry is already labelled as the target element (in which case
+ * `isotopeElementMismatch` handles it).
+ */
+export function knownProxyHint(
+	isotope: IsotopeInfo
+): { proxyElement: string; targetElement: string; note: string } | null {
+	const parsed = parseIsotopeName(isotope.isotopeName);
+	if (!parsed) {
+		return null;
+	}
+	const known = KNOWN_PROXY_ISOTOPES[isotopeIdentityKey(parsed)];
+	if (!known) {
+		return null;
+	}
+	const label = (isotope.elementName ?? '').trim();
+	if (label.toLowerCase() === known.targetElement.toLowerCase()) {
+		return null;
+	}
+	return {
+		proxyElement: lookupElementName(parsed.shortName) || parsed.shortName,
+		targetElement: known.targetElement,
+		note: known.note
+	};
+}
+
 /** Best-effort GET; returns null on any error (the caller degrades gracefully). */
 async function getJson<T>(url: string): Promise<T | null> {
 	try {

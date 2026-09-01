@@ -8,6 +8,7 @@ import {
 	findCatalogReferenceMaterial,
 	findIsotopeMeasurementLink,
 	isotopeElementMismatch,
+	knownProxyHint,
 	isotopeIdentityKey,
 	normalizeEnergyList,
 	parseIsotopeName,
@@ -200,6 +201,33 @@ describe('isotopeElementMismatch', () => {
 		).toBeNull();
 		expect(
 			isotopeElementMismatch({ isotopeName: 'Np-239', elementName: '' } as IsotopeInfo)
+		).toBeNull();
+	});
+});
+
+describe('knownProxyHint', () => {
+	it('hints for a known proxy nuclide labelled as its own element', () => {
+		expect(
+			knownProxyHint({ isotopeName: 'Pa-233', elementName: 'Protactinium' } as IsotopeInfo)
+		).toEqual({
+			proxyElement: 'Protactinium',
+			targetElement: 'Thorium',
+			note: 'Th-232 captures a neutron → Th-233 → Pa-233'
+		});
+		expect(
+			knownProxyHint({ isotopeName: 'Np-239', elementName: '' } as IsotopeInfo)?.targetElement
+		).toBe('Uranium');
+	});
+
+	it('does not hint when already labelled as the target element', () => {
+		expect(
+			knownProxyHint({ isotopeName: 'Pa-233', elementName: 'Thorium' } as IsotopeInfo)
+		).toBeNull();
+	});
+
+	it('does not hint for ordinary isotopes', () => {
+		expect(
+			knownProxyHint({ isotopeName: 'Au-198', elementName: 'Gold' } as IsotopeInfo)
 		).toBeNull();
 	});
 });

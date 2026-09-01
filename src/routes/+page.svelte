@@ -68,6 +68,7 @@
 		findCatalogIsotope,
 		findCatalogReferenceMaterial,
 		isotopeElementMismatch,
+		knownProxyHint,
 		findIsotopeMeasurementLink,
 		saveIsotopeMeasurementLink,
 		applyDatasheetToReference,
@@ -2781,6 +2782,26 @@
 									<strong>{mismatch?.nameElement}</strong> isotope, but this entry is labelled
 									<strong>{mismatch?.labelElement}</strong>. If it's a stand-in for measuring a
 									{mismatch?.labelElement} isotope, record that relationship.
+								</p>
+								<button
+									type="button"
+									class="btn preset-tonal-surface"
+									onclick={() => openRelationshipPanel(index)}
+								>
+									Record how this is measured
+								</button>
+							</div>
+						{:else if knownProxyHint(isotope) && !proxyByIsotope[index]}
+							{@const hint = knownProxyHint(isotope)}
+							<div
+								class="mt-3 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3"
+							>
+								<p class="text-sm">
+									<strong>{isotope.isotopeName}</strong> is usually detected to measure
+									<strong>{hint?.targetElement}</strong>
+									({hint?.note}). This entry will report a
+									<strong>{hint?.proxyElement}</strong> concentration — if you meant to measure
+									{hint?.targetElement}, record that relationship.
 								</p>
 								<button
 									type="button"
