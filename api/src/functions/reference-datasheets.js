@@ -99,7 +99,9 @@ async function listReferenceDatasheets() {
 			entries: Array.isArray(item?.entries) ? item.entries : [],
 			createdAt: item?.createdAt ?? null
 		}))
-		.filter((item) => typeof item.id === 'string' && item.id.length > 0 && item.sampleName.length > 0);
+		.filter(
+			(item) => typeof item.id === 'string' && item.id.length > 0 && item.sampleName.length > 0
+		);
 }
 
 async function referenceDatasheetsHandler(request, context) {
@@ -110,15 +112,15 @@ async function referenceDatasheetsHandler(request, context) {
 		};
 	}
 
-	const authorization = canWriteIsotopes(request);
-	if (!authorization.authorized) {
-		return {
-			status: authorization.status,
-			jsonBody: { error: authorization.message }
-		};
-	}
-
+	// Reads are public — datasheets are certified reference concentrations, like
+	// the rest of the shared catalog. Only writes require the `isotope_writer` role.
 	if (request.method === 'GET') {
+		if (isMockCosmosEnabled()) {
+			return {
+				status: 200,
+				jsonBody: { items: [] }
+			};
+		}
 		try {
 			const items = await listReferenceDatasheets();
 			return {
@@ -132,6 +134,14 @@ async function referenceDatasheetsHandler(request, context) {
 				jsonBody: { error: 'Failed to load reference datasheets.' }
 			};
 		}
+	}
+
+	const authorization = canWriteIsotopes(request);
+	if (!authorization.authorized) {
+		return {
+			status: authorization.status,
+			jsonBody: { error: authorization.message }
+		};
 	}
 
 	let body;
@@ -189,3 +199,5 @@ app.http('reference-datasheets', {
 	route: 'reference-datasheets',
 	handler: referenceDatasheetsHandler
 });
+
+export { referenceDatasheetsHandler };

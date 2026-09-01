@@ -12,7 +12,7 @@
 		},
 		{
 			"route": "/api/isotope-measurements",
-			"methods": ["GET", "POST"],
+			"methods": ["POST"],
 			"allowedRoles": ["isotope_writer"]
 		}
 	],

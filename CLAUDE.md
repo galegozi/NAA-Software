@@ -68,12 +68,14 @@ Cosmos DB access goes through `api/src/lib/cosmosClient.js` (env-driven; see REA
 
 ### Access control (security-relevant)
 
-Write endpoints are protected in **two independent layers**, and both must be kept in sync:
+**Every `GET` is public** (shared catalog data). Only `POST`s are protected:
 
-1. `staticwebapp.config.json` route rules restrict POSTs to the `isotope_writer` role.
-2. Each function re-validates the SWA-forwarded `x-ms-client-principal` header via `api/src/lib/staticWebAppsAuth.js`.
+1. `staticwebapp.config.json` route rules restrict `POST /api/isotopes` and `POST /api/reference-materials` to the `isotope_writer` role.
+2. Each function re-validates the SWA-forwarded `x-ms-client-principal` header via `api/src/lib/staticWebAppsAuth.js` (`canWriteIsotopes`) — **on the `POST` path only**, so `GET` is never gated.
 
-Functions stay at `authLevel: 'anonymous'` on purpose — Azure SWA is the authenticating layer. Don't remove the in-function role check; it guards against config regressions.
+`reference-datasheets` and `isotope-measurements` have **no route rule** — their in-function `POST` check is the sole guard, so never remove it. `isotopes` / `reference-materials` are double-guarded (config + in-function) and both layers must be kept in sync.
+
+Functions stay at `authLevel: 'anonymous'` on purpose — Azure SWA is the authenticating layer.
 
 ## Conventions
 

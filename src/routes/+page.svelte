@@ -2941,7 +2941,11 @@
 							right away, and can be published to the shared catalog.
 						</p>
 
-						<IsotopeRelationshipForm bind:this={relationshipForm} analysisIsotopes={isotopeInfo} />
+						<IsotopeRelationshipForm
+							bind:this={relationshipForm}
+							analysisIsotopes={isotopeInfo}
+							{catalogAvailable}
+						/>
 						<button type="button" class="btn preset-filled-primary-500" onclick={addRelationship}>
 							Add relationship
 						</button>

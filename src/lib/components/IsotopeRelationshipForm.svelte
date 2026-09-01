@@ -25,10 +25,10 @@
 
 	type Mode = 'catalog' | 'analysis' | 'custom';
 
-	let { analysisIsotopes = [] as IsotopeInfo[] } = $props();
+	let { analysisIsotopes = [] as IsotopeInfo[], catalogAvailable = false } = $props();
 
 	let measuredMode = $state<Mode>('analysis');
-	let targetMode = $state<Mode>('catalog');
+	let targetMode = $state<Mode>('analysis');
 	let measuredAnalysisIdx = $state<number | ''>('');
 	let targetAnalysisIdx = $state<number | ''>('');
 	let measuredCatalog = $state<IsotopeInfo[]>([]);
@@ -40,7 +40,7 @@
 
 	export function reset() {
 		measuredMode = 'analysis';
-		targetMode = 'catalog';
+		targetMode = 'analysis';
 		measuredAnalysisIdx = '';
 		targetAnalysisIdx = '';
 		measuredCatalog = [];
@@ -139,9 +139,11 @@
 			<label class="inline-flex items-center gap-1">
 				<input type="radio" value="analysis" bind:group={measuredMode} /> One of my analysis isotopes
 			</label>
-			<label class="inline-flex items-center gap-1">
-				<input type="radio" value="catalog" bind:group={measuredMode} /> From the catalog
-			</label>
+			{#if catalogAvailable}
+				<label class="inline-flex items-center gap-1">
+					<input type="radio" value="catalog" bind:group={measuredMode} /> From the catalog
+				</label>
+			{/if}
 			<label class="inline-flex items-center gap-1">
 				<input type="radio" value="custom" bind:group={measuredMode} /> A custom isotope
 			</label>
@@ -156,7 +158,7 @@
 					</option>
 				{/each}
 			</select>
-		{:else if measuredMode === 'catalog'}
+		{:else if measuredMode === 'catalog' && catalogAvailable}
 			<IsotopeViewer
 				bind:selectedIsotopes={measuredCatalog}
 				singleEntryPerIsotope
@@ -176,9 +178,11 @@
 			<label class="inline-flex items-center gap-1">
 				<input type="radio" value="analysis" bind:group={targetMode} /> One of my analysis isotopes
 			</label>
-			<label class="inline-flex items-center gap-1">
-				<input type="radio" value="catalog" bind:group={targetMode} /> From the catalog
-			</label>
+			{#if catalogAvailable}
+				<label class="inline-flex items-center gap-1">
+					<input type="radio" value="catalog" bind:group={targetMode} /> From the catalog
+				</label>
+			{/if}
 			<label class="inline-flex items-center gap-1">
 				<input type="radio" value="custom" bind:group={targetMode} /> A custom isotope
 			</label>
@@ -193,7 +197,7 @@
 					</option>
 				{/each}
 			</select>
-		{:else if targetMode === 'catalog'}
+		{:else if targetMode === 'catalog' && catalogAvailable}
 			<IsotopeViewer
 				bind:selectedIsotopes={targetCatalog}
 				singleEntryPerIsotope

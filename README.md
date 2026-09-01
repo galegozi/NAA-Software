@@ -61,8 +61,13 @@ This project now includes an integrated Azure Functions backend under `api/` for
 - `GET` / `POST /api/isotope-measurements` — proxy-measurement relationships
   ("isotope A is measured to quantify isotope B"). `POST` body:
   `{ "measuredIsotope": { "isotopeId": "<catalog id>" }, "targetIsotope": { "isotopeId": "<catalog id>" }, "notes": "" }`.
-  Upserts by the (measured, target) pair. Both methods, plus both methods of
-  `reference-datasheets`, require the `isotope_writer` role.
+  Upserts by the (measured, target) pair.
+
+`GET` on all four resources is **public** (shared catalog data). Only the `POST`
+endpoints require the `isotope_writer` role — `/api/isotopes` and
+`/api/reference-materials` via a `staticwebapp.config.json` route rule plus an
+in-function check; `/api/reference-datasheets` and `/api/isotope-measurements`
+via the in-function check on the `POST` path only.
 
 The frontend isotope viewer calls `/api/isotopes` by default. You can override that by setting `PUBLIC_ISOTOPE_API_URL`.
 The reference material viewer calls `/api/reference-materials` by default. You can override that by setting `PUBLIC_REFERENCE_MATERIAL_API_URL`.
