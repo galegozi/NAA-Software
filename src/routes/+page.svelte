@@ -47,6 +47,7 @@
 		type LocalIsotopeLink
 	} from '$lib/utils/analysisDraft.js';
 	import { swaAuth, redirectToSignIn } from '$lib/utils/swaAuth.svelte.js';
+	import { catalogStatus } from '$lib/utils/catalogStatus.svelte.js';
 	import { analysisMeta } from '$lib/utils/analysisMeta.svelte.js';
 	import {
 		WRITER_ROLE,
@@ -1860,6 +1861,7 @@
 			if (!response.ok) {
 				return;
 			}
+			catalogStatus.noteResponse(body);
 
 			const items = Array.isArray(body?.items) ? body.items : [];
 			isotopeCatalogById = Object.fromEntries(

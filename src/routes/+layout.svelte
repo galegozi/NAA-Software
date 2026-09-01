@@ -6,6 +6,7 @@
 	import { analysisMeta } from '$lib/utils/analysisMeta.svelte.js';
 	import { swaAuth, redirectToSignIn, signOut } from '$lib/utils/swaAuth.svelte.js';
 	import { WRITER_ROLE } from '$lib/utils/catalogWrite.js';
+	import { catalogStatus } from '$lib/utils/catalogStatus.svelte.js';
 	import './layout.css';
 
 	const { children } = $props();
@@ -101,6 +102,14 @@
 			</div>
 		</div>
 	</nav>
+
+	{#if catalogStatus.usingSampleData}
+		<div class="catalog-sample-banner" role="status">
+			⚠ Showing <strong>sample data</strong> — this deployment isn't connected to the catalog database,
+			so only a few built-in example isotopes and reference materials are available. Your saved catalog
+			is unaffected.
+		</div>
+	{/if}
 
 	<main class="page-shell">
 		{#key `${$page.url.pathname}${$page.url.search}`}

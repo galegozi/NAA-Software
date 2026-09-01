@@ -255,6 +255,13 @@ npm start            # Azure Functions Core Tools (func start)</code
 				Both fire on <code>main</code>. A PR against <code>main</code> gets an SWA preview environment;
 				it's torn down when the PR closes.
 			</p>
+			<p class="guide__why">
+				<strong>Preview environments do not inherit production app settings.</strong> A fresh preview
+				env has no <code>COSMOSDB_*</code> values, so the API can't reach the database and falls back
+				to a handful of built-in sample isotopes / reference materials (the app shows an amber
+				"sample data" banner). Add the settings to that environment's Configuration, or just test on
+				production. The real catalog is never touched by this.
+			</p>
 		</div>
 	</details>
 

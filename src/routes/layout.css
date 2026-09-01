@@ -31,6 +31,21 @@ body {
 	padding: 0 0 3rem;
 }
 
+.catalog-sample-banner {
+	padding: 0.75rem 5%;
+	font-size: 0.9rem;
+	line-height: 1.4;
+	color: rgb(120 53 15);
+	background: rgb(254 243 199);
+	border-bottom: 1px solid rgb(217 119 6 / 0.4);
+}
+
+:root[data-mode='dark'] .catalog-sample-banner {
+	color: rgb(253 230 138);
+	background: rgb(120 53 15 / 0.35);
+	border-bottom-color: rgb(217 119 6 / 0.5);
+}
+
 .top-nav {
 	display: flex;
 	align-items: center;

@@ -3,6 +3,7 @@
 	import { env } from '$env/dynamic/public';
 	import type { IsotopeCatalogItem, IsotopeInfo } from '$lib/types.js';
 	import { getIsotopeCatalogAccessMessage } from '$lib/utils/authEnvironment.js';
+	import { catalogStatus } from '$lib/utils/catalogStatus.svelte.js';
 
 	let {
 		selectedIsotopes = $bindable<IsotopeInfo[]>([]),
@@ -193,15 +194,14 @@
 			}
 
 			const payload: unknown = await response.json();
+			catalogStatus.noteResponse(payload);
 			const nextItems = normalizeItems(payload);
 			if (fetchSequence !== lastFetchSequence) {
 				return;
 			}
 
 			cachedItems = [
-				...cachedItems.filter(
-					(cachedItem) => !nextItems.some((item) => item.id === cachedItem.id)
-				),
+				...cachedItems.filter((cachedItem) => !nextItems.some((item) => item.id === cachedItem.id)),
 				...nextItems
 			];
 			lastFetchedSearch = trimmedSearch;
@@ -367,7 +367,6 @@
 	function removeSelectedIsotope(index: number) {
 		selectedIsotopes = selectedIsotopes.filter((_, isotopeIndex) => isotopeIndex !== index);
 	}
-
 </script>
 
 <div class="space-y-4">
@@ -395,21 +394,26 @@
 					<p class="p-2">Unable to load isotope catalog: {errorMessage}</p>
 				{:else if visibleRows.length > 0}
 					{#each visibleRows as row (row.id)}
-					{@const isAlreadySelected = selectedIsotopeKeys.has(getSelectionKey(row.item, row.energy))}
-					<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
-						<div class="flex items-start justify-between gap-4">
-							<div class="space-y-1">
-								<div class="font-bold">{row.item.elementName} ({getIsotopeName(row.item)})</div>
-								<div class="text-sm">Energy: {row.energy} keV</div>
-								<div class="text-sm">Half-life: {row.item.halfLife.number || row.item.halfLifeSeconds} {row.item.halfLife.unit}</div>
-							</div>
-							<button
-								class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
-								type="button"
-								onclick={() => addSelectedIsotope(row.item, row.energy)}
-								disabled={isAlreadySelected}
-							>
-								{isAlreadySelected ? 'Added' : 'Add'}
+						{@const isAlreadySelected = selectedIsotopeKeys.has(
+							getSelectionKey(row.item, row.energy)
+						)}
+						<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
+							<div class="flex items-start justify-between gap-4">
+								<div class="space-y-1">
+									<div class="font-bold">{row.item.elementName} ({getIsotopeName(row.item)})</div>
+									<div class="text-sm">Energy: {row.energy} keV</div>
+									<div class="text-sm">
+										Half-life: {row.item.halfLife.number || row.item.halfLifeSeconds}
+										{row.item.halfLife.unit}
+									</div>
+								</div>
+								<button
+									class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
+									type="button"
+									onclick={() => addSelectedIsotope(row.item, row.energy)}
+									disabled={isAlreadySelected}
+								>
+									{isAlreadySelected ? 'Added' : 'Add'}
 								</button>
 							</div>
 						</div>
@@ -435,29 +439,29 @@
 		</div>
 	</div>
 
-		{#if showSelectionList}
-			<div class="space-y-3">
-				<h3 class="text-xl font-bold">Selected isotopes</h3>
-				{#if selectedIsotopes.length === 0}
-					<p>Select one or more isotopes to continue.</p>
-				{:else}
-					<div class="isotope-grid">
-						{#each selectedIsotopes as isotope, index (`${isotope.isotopeName}-${index}`)}
-							<div class="rounded border border-gray-300 p-4">
-								<div class="flex items-start justify-between gap-4">
-									<div>
-										<div class="font-bold">{isotope.elementName} ({isotope.isotopeName})</div>
-										<div>Energy: {isotope.energy} keV</div>
-										<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
-									</div>
-									<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
+	{#if showSelectionList}
+		<div class="space-y-3">
+			<h3 class="text-xl font-bold">Selected isotopes</h3>
+			{#if selectedIsotopes.length === 0}
+				<p>Select one or more isotopes to continue.</p>
+			{:else}
+				<div class="isotope-grid">
+					{#each selectedIsotopes as isotope, index (`${isotope.isotopeName}-${index}`)}
+						<div class="rounded border border-gray-300 p-4">
+							<div class="flex items-start justify-between gap-4">
+								<div>
+									<div class="font-bold">{isotope.elementName} ({isotope.isotopeName})</div>
+									<div>Energy: {isotope.energy} keV</div>
+									<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
 								</div>
+								<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
 							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-		{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	{/if}
 </div>
 
 <style>

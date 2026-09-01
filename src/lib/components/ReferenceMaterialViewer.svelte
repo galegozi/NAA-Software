@@ -7,15 +7,16 @@
 		ReferenceMaterialCatalogCounting
 	} from '$lib/types.js';
 	import { getReferenceMaterialCatalogAccessMessage } from '$lib/utils/authEnvironment.js';
+	import { catalogStatus } from '$lib/utils/catalogStatus.svelte.js';
 
 	let {
 		isotopeIds = [] as string[],
 		selectedItemIds = [] as string[],
 		currentSelectionId = null as string | null,
-		onSelectItem = ((() => {}) as (
+		onSelectItem = (() => {}) as (
 			item: ReferenceMaterialCatalogItem,
 			counting: ReferenceMaterialCatalogCounting
-		) => void)
+		) => void
 	} = $props();
 
 	function getCountingSelectionId(
@@ -46,13 +47,13 @@
 
 	function formatDuration(seconds: number | undefined): string {
 		if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '—';
-		
-        const days = Math.floor(seconds / (24 * 60 * 60));
+
+		const days = Math.floor(seconds / (24 * 60 * 60));
 		const h = Math.floor((seconds % (24 * 60 * 60)) / 3600);
 		const m = Math.floor((seconds % 3600) / 60);
 		const s = Math.round(seconds % 60);
 		const parts: string[] = [];
-        if (days > 0) parts.push(`${days}d`);
+		if (days > 0) parts.push(`${days}d`);
 		if (h > 0) parts.push(`${h}h`);
 		if (m > 0) parts.push(`${m}m`);
 		if (s > 0 || parts.length === 0) parts.push(`${s}s`);
@@ -122,11 +123,12 @@
 	}
 
 	function getSearchText(item: ReferenceMaterialCatalogItem): string {
-		const countingEntries = Array.isArray(item.countings) && item.countings.length > 0
-			? item.countings
-			: item.latestCounting
-				? [item.latestCounting]
-				: [];
+		const countingEntries =
+			Array.isArray(item.countings) && item.countings.length > 0
+				? item.countings
+				: item.latestCounting
+					? [item.latestCounting]
+					: [];
 
 		const countingText = countingEntries
 			.map((counting) => {
@@ -173,14 +175,7 @@
 			})
 			.join(' ');
 
-		return [
-			item.referenceKey,
-			item.notes,
-			countingText
-		]
-			.filter(Boolean)
-			.join(' ')
-			.toLowerCase();
+		return [item.referenceKey, item.notes, countingText].filter(Boolean).join(' ').toLowerCase();
 	}
 
 	function matchesSearch(item: ReferenceMaterialCatalogItem, query: string): boolean {
@@ -226,15 +221,14 @@
 			}
 
 			const payload: unknown = await response.json();
+			catalogStatus.noteResponse(payload);
 			const nextItems = normalizeItems(payload);
 			if (fetchSequence !== lastFetchSequence) {
 				return;
 			}
 
 			cachedItems = [
-				...cachedItems.filter(
-					(cachedItem) => !nextItems.some((item) => item.id === cachedItem.id)
-				),
+				...cachedItems.filter((cachedItem) => !nextItems.some((item) => item.id === cachedItem.id)),
 				...nextItems
 			];
 			serverOffset = offset + nextItems.length;
@@ -280,11 +274,12 @@
 	);
 	let sortedCountings = $derived(
 		sortedItems.flatMap((item) => {
-			const countings = Array.isArray(item.countings) && item.countings.length > 0
-				? item.countings
-				: item.latestCounting
-					? [item.latestCounting]
-					: [];
+			const countings =
+				Array.isArray(item.countings) && item.countings.length > 0
+					? item.countings
+					: item.latestCounting
+						? [item.latestCounting]
+						: [];
 
 			return countings.map((counting) => ({
 				item,
@@ -378,12 +373,14 @@
 					{#each visibleCountings as entry (`${entry.item.id}:${entry.selectionId}`)}
 						{@const material = entry.counting.referenceMaterial}
 						{@const isUsedByAnotherReference =
-							selectedItemIds.includes(entry.selectionId) && entry.selectionId !== currentSelectionId}
+							selectedItemIds.includes(entry.selectionId) &&
+							entry.selectionId !== currentSelectionId}
 						<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
 							<div class="flex items-start justify-between gap-4">
 								<div class="space-y-1">
 									<div class="font-bold">
-										{material?.NETL_code || 'Unknown code'} ({material?.sampleName || 'Unknown sample'})
+										{material?.NETL_code || 'Unknown code'} ({material?.sampleName ||
+											'Unknown sample'})
 									</div>
 									{#if entry.counting.countingLabel}
 										<div class="text-sm">Counting: {entry.counting.countingLabel}</div>
@@ -391,18 +388,22 @@
 									{#if material?.irradiationType}
 										<div class="text-sm">Mode: {material.irradiationType}</div>
 									{/if}
-								{#if material?.irradiationEnd || material?.irradiationTime}
-									<div class="text-sm">Irradiation start: {getIrradiationStart(material)}</div>
-									<div class="text-sm">Irradiation end: {formatDatetime(material?.irradiationEnd)}</div>
-									<div class="text-sm">Irradiation Time: {formatDuration(material?.irradiationTime)}</div>
-								{/if}
+									{#if material?.irradiationEnd || material?.irradiationTime}
+										<div class="text-sm">Irradiation start: {getIrradiationStart(material)}</div>
+										<div class="text-sm">
+											Irradiation end: {formatDatetime(material?.irradiationEnd)}
+										</div>
+										<div class="text-sm">
+											Irradiation Time: {formatDuration(material?.irradiationTime)}
+										</div>
+									{/if}
 									<div class="text-sm">Decay Time: {formatDuration(material?.decayTime)}</div>
 									<div class="text-sm">Counting Time: {formatDuration(material?.liveTime)}</div>
 									<div class="text-sm">Sample Mass: {formatNumber(material?.mass)} g</div>
 									<div class="text-sm">Power: {formatNumber(material?.reactorPower)}</div>
-								{#if material?.dtType}
-									<div class="text-sm">Dead time correction: {material.dtType}</div>
-								{/if}
+									{#if material?.dtType}
+										<div class="text-sm">Dead time correction: {material.dtType}</div>
+									{/if}
 									<div class="text-sm">
 										Counting mode: {material?.countingMode === 'compton'
 											? 'Compton-suppressed'
