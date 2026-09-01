@@ -13,6 +13,9 @@ on:
 
 jobs:
   build_and_deploy_job:
+    # Dependabot PRs (and forks) don't get the deployment secret, so the deploy
+    # step can only fail there. Skip the job for them.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -34,11 +37,11 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PURPLE_BEACH_0C943171E }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: "upload"
-          app_location: "/"
-          api_location: "api"
-          output_location: "build"
-          # Remove app_build_command (or keep it only if you must; see note below)
+          action: 'upload'
+          app_location: '/'
+          api_location: 'api'
+          output_location: 'build'
+          skip_deploy_on_missing_secrets: true
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
@@ -50,4 +53,4 @@ jobs:
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PURPLE_BEACH_0C943171E }}
-          action: "close"
+          action: 'close'
