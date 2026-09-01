@@ -390,9 +390,10 @@
 		<summary>The catalog search boxes don't appear</summary>
 		<div>
 			<p>
-				The shared catalog is only available on the main (Azure) deployment. Other builds — the
-				public preview on GitHub Pages, and local copies — have no backend, so you enter every
-				isotope and reference material by hand and run the full analysis that way.
+				The shared catalog needs a backend and database, which only the main Azure deployment has.
+				The GitHub Pages copy is the same software and version, just deployed as static files with
+				no backend attached — so on that one (and when running locally) you enter every isotope and
+				reference material by hand and run the full analysis that way.
 			</p>
 		</div>
 	</details>

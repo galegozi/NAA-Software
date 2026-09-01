@@ -312,6 +312,76 @@ export async function saveReferenceDatasheet(input: {
 	return body.item;
 }
 
+function normalizeLabel(value: string): string {
+	return value
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]/g, '');
+}
+
+/** Whether a datasheet row (e.g. "Au", "Gold", "Au-198") is about this isotope. */
+function datasheetEntryMatchesIsotope(entry: DatasheetEntryInput, isotope: IsotopeInfo): boolean {
+	const label = normalizeLabel(entry.label);
+	if (!label) {
+		return false;
+	}
+	const candidates = new Set<string>();
+	if (isotope.elementName) {
+		candidates.add(normalizeLabel(isotope.elementName));
+	}
+	if (isotope.isotopeName) {
+		candidates.add(normalizeLabel(isotope.isotopeName));
+		const parsed = parseIsotopeName(isotope.isotopeName);
+		if (parsed) {
+			candidates.add(normalizeLabel(parsed.shortName));
+			candidates.add(normalizeLabel(`${parsed.shortName}${parsed.massNumber}${parsed.suffix}`));
+			const elementName = lookupElementName(parsed.shortName);
+			if (elementName) {
+				candidates.add(normalizeLabel(elementName));
+			}
+		}
+	}
+	return candidates.has(label);
+}
+
+/**
+ * Fill a reference material's known-concentration fields from an existing
+ * datasheet, matching rows to isotopes by element/isotope name — the reverse of
+ * `datasheetEntriesFromReference`. Isotopes with no matching row are left as-is.
+ */
+export function applyDatasheetToReference(
+	reference: ReferenceMaterial,
+	isotopes: IsotopeInfo[],
+	datasheet: SavedDatasheet
+): { reference: ReferenceMaterial; matchedCount: number } {
+	const knownConcentration = [...(reference.knownConcentration ?? [])];
+	const knownUncertainty = [...(reference.knownUncertainty ?? [])];
+	const concentrationUnits = [...(reference.concentrationUnits ?? [])];
+	let matchedCount = 0;
+
+	isotopes.forEach((isotope, index) => {
+		const entry = datasheet.entries.find((row) => datasheetEntryMatchesIsotope(row, isotope));
+		if (!entry) {
+			return;
+		}
+		knownConcentration[index] = entry.concentration;
+		knownUncertainty[index] = entry.uncertainty;
+		concentrationUnits[index] = entry.unit;
+		matchedCount++;
+	});
+
+	return {
+		reference: {
+			...reference,
+			knownConcentration,
+			knownUncertainty,
+			concentrationUnits,
+			referenceDatasheetId: datasheet.id
+		},
+		matchedCount
+	};
+}
+
 // --- Reference materials -----------------------------------------------
 
 export type ReferenceMaterialWriteResult = {

@@ -67,8 +67,10 @@
 		isotopeElementMismatch,
 		findIsotopeMeasurementLink,
 		saveIsotopeMeasurementLink,
+		applyDatasheetToReference,
 		type CatalogIsotopeMatch,
-		type CatalogReferenceMatch
+		type CatalogReferenceMatch,
+		type SavedDatasheet
 	} from '$lib/utils/catalogWrite.js';
 	import ReferenceDatasheetForm from '$lib/components/ReferenceDatasheetForm.svelte';
 	import IsotopeRelationshipForm from '$lib/components/IsotopeRelationshipForm.svelte';
@@ -390,11 +392,14 @@
 		referencePublishConfirm = null;
 		uploadAllConfirm = null;
 		uploadAllResult = '';
+		selectedLoadDatasheetId = {};
+		datasheetLoadFeedback = {};
 		for (const k of Object.keys(isotopeDupKey)) delete isotopeDupKey[Number(k)];
 		for (const k of Object.keys(referenceDupKey)) delete referenceDupKey[Number(k)];
 		expandedIsotopes.clear();
 		expandedReferences.clear();
 		expandedUnknowns.clear();
+		datasheetLoaderOpen.clear();
 	}
 
 	async function handleSignIn() {
@@ -417,7 +422,7 @@
 	const publishPanelOpen = new SvelteSet<number>();
 	const newDatasheetOpen = new SvelteSet<number>();
 
-	let datasheets = $state<{ id: string; sampleName: string }[]>([]);
+	let datasheets = $state<SavedDatasheet[]>([]);
 	let datasheetsLoading = $state(false);
 	let datasheetsError = $state('');
 	let datasheetsRequested = false;
@@ -427,6 +432,12 @@
 	let notesByRef = $state<Record<number, string>>({});
 	let datasheetSavingByRef = $state<Record<number, boolean>>({});
 	const datasheetFormRefs: Record<number, ReferenceDatasheetForm | undefined> = {};
+
+	// "Load known concentrations from an existing datasheet" — while building a
+	// reference material, not just when publishing.
+	const datasheetLoaderOpen = new SvelteSet<number>();
+	let selectedLoadDatasheetId = $state<Record<number, string>>({});
+	let datasheetLoadFeedback = $state<Record<number, string>>({});
 
 	// For entries pulled from the catalog: "update" the existing record or save "new".
 	let isotopeUploadMode = $state<Record<number, 'update' | 'new'>>({});
@@ -643,9 +654,10 @@
 				throw new Error(body?.error || `Request failed with status ${response.status}`);
 			}
 			datasheets = Array.isArray(body?.items)
-				? body.items.map((item: { id: string; sampleName: string }) => ({
+				? body.items.map((item: SavedDatasheet) => ({
 						id: item.id,
-						sampleName: item.sampleName
+						sampleName: item.sampleName,
+						entries: Array.isArray(item.entries) ? item.entries : []
 					}))
 				: [];
 		} catch (error) {
@@ -817,7 +829,7 @@
 		datasheetSavingByRef = { ...datasheetSavingByRef, [referenceIndex]: true };
 		try {
 			const saved = await saveReferenceDatasheet(payload);
-			datasheets = [{ id: saved.id, sampleName: saved.sampleName }, ...datasheets];
+			datasheets = [saved, ...datasheets];
 			selectedDatasheetId = { ...selectedDatasheetId, [referenceIndex]: saved.id };
 			newDatasheetOpen.delete(referenceIndex);
 			form?.reset();
@@ -839,6 +851,48 @@
 		} finally {
 			datasheetSavingByRef = { ...datasheetSavingByRef, [referenceIndex]: false };
 		}
+	}
+
+	function toggleDatasheetLoader(index: number) {
+		if (datasheetLoaderOpen.has(index)) {
+			datasheetLoaderOpen.delete(index);
+		} else {
+			datasheetLoaderOpen.add(index);
+			void loadDatasheets();
+		}
+	}
+
+	/** Fill this reference material's known concentrations from a picked datasheet. */
+	function loadDatasheetIntoReference(index: number) {
+		const reference = materials.reference[index];
+		const sheet = datasheets.find((d) => d.id === selectedLoadDatasheetId[index]);
+		if (!reference || !sheet) {
+			datasheetLoadFeedback = {
+				...datasheetLoadFeedback,
+				[index]: 'Choose a datasheet first.'
+			};
+			return;
+		}
+
+		const { reference: updated, matchedCount } = applyDatasheetToReference(
+			reference,
+			isotopeInfo,
+			sheet
+		);
+		materials = {
+			...materials,
+			reference: materials.reference.map((r, i) => (i === index ? updated : r))
+		};
+		// Also preselect it for publishing, so it doesn't need to be picked again there.
+		selectedDatasheetId = { ...selectedDatasheetId, [index]: sheet.id };
+
+		datasheetLoadFeedback = {
+			...datasheetLoadFeedback,
+			[index]:
+				matchedCount > 0
+					? `Loaded known concentrations for ${matchedCount} isotope${matchedCount === 1 ? '' : 's'} from "${sheet.sampleName}".`
+					: `"${sheet.sampleName}" didn't match any of your isotopes by name — nothing was changed.`
+		};
 	}
 
 	type ReferencePublishPlan = {
@@ -944,7 +998,7 @@
 					sampleName: reference.sampleName || reference.NETL_code || 'Reference datasheet',
 					entries: plan.seedEntries
 				});
-				datasheets = [{ id: saved.id, sampleName: saved.sampleName }, ...datasheets];
+				datasheets = [saved, ...datasheets];
 				selectedDatasheetId = { ...selectedDatasheetId, [index]: saved.id };
 				datasheetId = saved.id;
 			}
@@ -2782,6 +2836,50 @@
 						onToggle={() => toggleExpanded(expandedReferences, index)}
 						onRemove={() => removeReference(index)}
 					>
+						{#if swaAuth.signInAvailable}
+							<div class="mb-3 rounded border border-surface-300-700 p-2 text-sm">
+								<button
+									type="button"
+									class="btn preset-tonal-surface"
+									onclick={() => toggleDatasheetLoader(index)}
+								>
+									{datasheetLoaderOpen.has(index)
+										? 'Hide'
+										: 'Load known concentrations from a datasheet'}
+								</button>
+								{#if datasheetLoaderOpen.has(index)}
+									<div class="mt-2 flex flex-wrap items-end gap-2">
+										<label class="label grow">
+											<span>Datasheet</span>
+											{#if datasheetsLoading}
+												<span class="text-sm">Loading…</span>
+											{:else}
+												<select class="select" bind:value={selectedLoadDatasheetId[index]}>
+													<option value="">— Select a datasheet —</option>
+													{#each datasheets as sheet (sheet.id)}
+														<option value={sheet.id}>{sheet.sampleName}</option>
+													{/each}
+												</select>
+											{/if}
+										</label>
+										<button
+											type="button"
+											class="btn preset-filled-primary-500"
+											disabled={!selectedLoadDatasheetId[index]}
+											onclick={() => loadDatasheetIntoReference(index)}
+										>
+											Load
+										</button>
+									</div>
+									{#if datasheetsError}
+										<p class="mt-1 text-error-500">{datasheetsError}</p>
+									{/if}
+									{#if datasheetLoadFeedback[index]}
+										<p class="mt-1">{datasheetLoadFeedback[index]}</p>
+									{/if}
+								{/if}
+							</div>
+						{/if}
 						<RefMatInfo
 							{isotopeCount}
 							{isotopeInfo}

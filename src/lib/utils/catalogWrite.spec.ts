@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
 import {
+	applyDatasheetToReference,
 	datasheetEntriesFromReference,
 	describeIsotope,
 	findCatalogIsotope,
@@ -10,7 +11,8 @@ import {
 	isotopeIdentityKey,
 	normalizeEnergyList,
 	parseIsotopeName,
-	saveReferenceMaterialToCatalog
+	saveReferenceMaterialToCatalog,
+	type SavedDatasheet
 } from './catalogWrite.js';
 
 describe('parseIsotopeName', () => {
@@ -274,5 +276,61 @@ describe('saveReferenceMaterialToCatalog', () => {
 		expect(rm.knownConcentration).toEqual([1, 3]);
 		expect(rm.knownUncertainty).toEqual([0.1, 0.3]);
 		expect(rm.concentrationUnits).toEqual(['ppm', 'ppm']);
+	});
+});
+
+describe('applyDatasheetToReference', () => {
+	const isotopes = [
+		{ isotopeName: 'Au-198', elementName: 'Gold' },
+		{ isotopeName: 'Sb-124', elementName: 'Antimony' },
+		{ isotopeName: 'Ag-110m', elementName: 'Silver' }
+	] as unknown as IsotopeInfo[];
+
+	const reference = {
+		knownConcentration: [0, 0, 0],
+		knownUncertainty: [0, 0, 0],
+		concentrationUnits: []
+	} as unknown as ReferenceMaterial;
+
+	it('matches rows to isotopes by element name, isotope name, or symbol', () => {
+		const datasheet: SavedDatasheet = {
+			id: 'ds1',
+			sampleName: 'SRM 1633c',
+			entries: [
+				{ label: 'Gold', concentration: 81.5, uncertainty: 1.2, unit: 'ppm' },
+				{ label: 'Sb-124', concentration: 6.3, uncertainty: 0.3, unit: 'ppm' },
+				{ label: 'Ag', concentration: 0.5, uncertainty: 0.05, unit: 'percentage' },
+				{ label: 'Unrelated', concentration: 99, uncertainty: 1, unit: 'ppm' }
+			]
+		};
+
+		const { reference: updated, matchedCount } = applyDatasheetToReference(
+			reference,
+			isotopes,
+			datasheet
+		);
+
+		expect(matchedCount).toBe(3);
+		expect(updated.knownConcentration).toEqual([81.5, 6.3, 0.5]);
+		expect(updated.knownUncertainty).toEqual([1.2, 0.3, 0.05]);
+		expect(updated.concentrationUnits).toEqual(['ppm', 'ppm', 'percentage']);
+		expect(updated.referenceDatasheetId).toBe('ds1');
+	});
+
+	it('leaves unmatched isotopes untouched', () => {
+		const datasheet: SavedDatasheet = {
+			id: 'ds2',
+			sampleName: 'Gold-only sheet',
+			entries: [{ label: 'Au', concentration: 10, uncertainty: 1, unit: 'ppm' }]
+		};
+
+		const { reference: updated, matchedCount } = applyDatasheetToReference(
+			reference,
+			isotopes,
+			datasheet
+		);
+
+		expect(matchedCount).toBe(1);
+		expect(updated.knownConcentration).toEqual([10, 0, 0]);
 	});
 });
