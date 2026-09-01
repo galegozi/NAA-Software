@@ -97,8 +97,10 @@ function buildSearchQuery(rawSearch, rawLimit, rawOffset) {
 	];
 
 	if (!normalizedSearch) {
+		// No ORDER BY: it requires the sort path to be indexed, and an unindexed
+		// path silently drops rows. OFFSET/LIMIT is valid without ORDER BY.
 		return {
-			query: 'SELECT * FROM c ORDER BY c.id OFFSET @offset LIMIT @limit',
+			query: 'SELECT * FROM c OFFSET @offset LIMIT @limit',
 			parameters: pagingParameters
 		};
 	}
@@ -128,7 +130,7 @@ function buildSearchQuery(rawSearch, rawLimit, rawOffset) {
 	}
 
 	return {
-		query: `SELECT * FROM c WHERE ${conditions.join(' OR ')} ORDER BY c.id OFFSET @offset LIMIT @limit`,
+		query: `SELECT * FROM c WHERE ${conditions.join(' OR ')} OFFSET @offset LIMIT @limit`,
 		parameters: [...parameters, ...pagingParameters]
 	};
 }
