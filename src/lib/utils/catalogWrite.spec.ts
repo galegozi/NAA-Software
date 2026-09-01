@@ -373,4 +373,57 @@ describe('applyDatasheetToReference', () => {
 		expect(matchedCount).toBe(1);
 		expect(updated.knownConcentration).toEqual([10, 0, 0]);
 	});
+
+	it('matches element-labelled rows to a specific isotope', () => {
+		const uraniumIsotopes = [
+			{ isotopeName: 'U-238', elementName: 'Uranium' },
+			{ isotopeName: 'Np-239', elementName: '' }
+		] as unknown as IsotopeInfo[];
+		const datasheet: SavedDatasheet = {
+			id: 'ds3',
+			sampleName: 'element labels',
+			entries: [
+				{ label: 'Uranium', concentration: 5, uncertainty: 0.2, unit: 'ppm' },
+				{ label: 'Neptunium-239', concentration: 1.1, uncertainty: 0.05, unit: 'ppm' }
+			]
+		};
+		const { reference: updated, matchedCount } = applyDatasheetToReference(
+			{ knownConcentration: [0, 0], knownUncertainty: [0, 0], concentrationUnits: [] } as never,
+			uraniumIsotopes,
+			datasheet
+		);
+		expect(matchedCount).toBe(2);
+		expect(updated.knownConcentration).toEqual([5, 1.1]);
+	});
+
+	it('prefers an exact isotope row over a generic element row', () => {
+		const datasheet: SavedDatasheet = {
+			id: 'ds4',
+			sampleName: 'both',
+			entries: [
+				{ label: 'Gold', concentration: 1, uncertainty: 0.1, unit: 'ppm' },
+				{ label: 'Au-198', concentration: 2, uncertainty: 0.2, unit: 'ppm' }
+			]
+		};
+		const { reference: updated } = applyDatasheetToReference(
+			{ knownConcentration: [0], knownUncertainty: [0], concentrationUnits: [] } as never,
+			[{ isotopeName: 'Au-198', elementName: 'Gold' }] as unknown as IsotopeInfo[],
+			datasheet
+		);
+		expect(updated.knownConcentration).toEqual([2]);
+	});
+
+	it('does not match a different isotope of the same element', () => {
+		const datasheet: SavedDatasheet = {
+			id: 'ds5',
+			sampleName: 'wrong mass',
+			entries: [{ label: 'U-235', concentration: 0.7, uncertainty: 0.01, unit: 'ppm' }]
+		};
+		const { matchedCount } = applyDatasheetToReference(
+			{ knownConcentration: [0], knownUncertainty: [0], concentrationUnits: [] } as never,
+			[{ isotopeName: 'U-238', elementName: 'Uranium' }] as unknown as IsotopeInfo[],
+			datasheet
+		);
+		expect(matchedCount).toBe(0);
+	});
 });

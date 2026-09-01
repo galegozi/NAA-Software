@@ -131,3 +131,24 @@ export function normalizeElementSymbol(value: string): string {
 export function lookupElementName(symbol: string): string {
 	return ELEMENT_NAME_BY_SYMBOL[normalizeElementSymbol(symbol)] ?? '';
 }
+
+const SYMBOL_BY_ELEMENT_NAME: Record<string, string> = Object.fromEntries(
+	Object.entries(ELEMENT_NAME_BY_SYMBOL).map(([symbol, name]) => [name.toLowerCase(), symbol])
+);
+
+/**
+ * Element name (e.g. "Uranium", "gold") -> symbol ("U", "Au"). Also accepts a
+ * symbol as-is. Returns "" when unrecognized.
+ */
+export function lookupElementSymbol(value: string): string {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return '';
+	}
+	const byName = SYMBOL_BY_ELEMENT_NAME[trimmed.toLowerCase()];
+	if (byName) {
+		return byName;
+	}
+	const asSymbol = normalizeElementSymbol(trimmed);
+	return ELEMENT_NAME_BY_SYMBOL[asSymbol] ? asSymbol : '';
+}

@@ -4,7 +4,11 @@
  * `POST /api/reference-materials`). SWA enforces the `isotope_writer` role.
  */
 import type { HalfLife, IsotopeInfo, ReferenceMaterial } from '$lib/types.js';
-import { lookupElementName } from '$lib/utils/elementNames.js';
+import {
+	lookupElementName,
+	lookupElementSymbol,
+	normalizeElementSymbol
+} from '$lib/utils/elementNames.js';
 
 export const WRITER_ROLE = 'isotope_writer';
 
@@ -312,36 +316,91 @@ export async function saveReferenceDatasheet(input: {
 	return body.item;
 }
 
-function normalizeLabel(value: string): string {
-	return value
-		.trim()
-		.toLowerCase()
-		.replace(/[^a-z0-9]/g, '');
-}
+/** An element (+ optional mass number / isomer suffix) a label or isotope refers to. */
+type NuclideRef = { symbol: string; mass: number | null; suffix: string };
 
-/** Whether a datasheet row (e.g. "Au", "Gold", "Au-198") is about this isotope. */
-function datasheetEntryMatchesIsotope(entry: DatasheetEntryInput, isotope: IsotopeInfo): boolean {
-	const label = normalizeLabel(entry.label);
-	if (!label) {
-		return false;
+/**
+ * Parse one datasheet-row or isotope label into an element + optional mass.
+ * Handles: "U-238", "U238", "U", "Uranium", "Uranium-238", "Uranium 238",
+ * "Ag-110m", "gold". Returns null when the element can't be identified.
+ */
+function parseNuclideRef(value: string): NuclideRef | null {
+	const trimmed = (value ?? '').trim();
+	if (!trimmed) {
+		return null;
 	}
-	const candidates = new Set<string>();
-	if (isotope.elementName) {
-		candidates.add(normalizeLabel(isotope.elementName));
-	}
-	if (isotope.isotopeName) {
-		candidates.add(normalizeLabel(isotope.isotopeName));
-		const parsed = parseIsotopeName(isotope.isotopeName);
-		if (parsed) {
-			candidates.add(normalizeLabel(parsed.shortName));
-			candidates.add(normalizeLabel(`${parsed.shortName}${parsed.massNumber}${parsed.suffix}`));
-			const elementName = lookupElementName(parsed.shortName);
-			if (elementName) {
-				candidates.add(normalizeLabel(elementName));
-			}
+
+	// Symbol form, e.g. "U-238", "Ag-110m", "Au"
+	const parsed = parseIsotopeName(trimmed);
+	if (parsed) {
+		const symbol = lookupElementName(parsed.shortName)
+			? normalizeElementSymbol(parsed.shortName)
+			: '';
+		if (symbol) {
+			return { symbol, mass: parsed.massNumber, suffix: parsed.suffix.toLowerCase() };
 		}
 	}
-	return candidates.has(label);
+
+	// Bare element symbol, e.g. "U", "Au"
+	const bareSymbol = lookupElementSymbol(trimmed);
+	if (bareSymbol && /^[A-Za-z]{1,3}$/.test(trimmed)) {
+		return { symbol: bareSymbol, mass: null, suffix: '' };
+	}
+
+	// Element name, optionally with a mass number, e.g. "Uranium", "Uranium-238"
+	const nameMatch = trimmed.match(/^([A-Za-z]+)(?:[-\s]?(\d{1,3})\s*([A-Za-z]?\d*))?$/);
+	if (nameMatch) {
+		const symbol = lookupElementSymbol(nameMatch[1]);
+		if (symbol) {
+			return {
+				symbol,
+				mass: nameMatch[2] ? Number.parseInt(nameMatch[2], 10) : null,
+				suffix: (nameMatch[3] ?? '').toLowerCase()
+			};
+		}
+	}
+
+	return null;
+}
+
+/** Every element/nuclide an analysis isotope could be referred to as. */
+function isotopeNuclideRefs(isotope: IsotopeInfo): NuclideRef[] {
+	const refs: NuclideRef[] = [];
+	const fromName = parseNuclideRef(isotope.isotopeName ?? '');
+	if (fromName) {
+		refs.push(fromName);
+	}
+	const elementSymbol = lookupElementSymbol(isotope.elementName ?? '');
+	if (elementSymbol && !refs.some((r) => r.symbol === elementSymbol)) {
+		refs.push({ symbol: elementSymbol, mass: null, suffix: '' });
+	}
+	return refs;
+}
+
+/**
+ * How well a datasheet row matches an isotope: 2 = exact nuclide (element + mass
+ * [+ isomer]), 1 = element-level (one side has no mass), 0 = no match. Lets the
+ * caller prefer a specific "U-238" row over a generic "Uranium" row.
+ */
+function datasheetEntryMatchScore(entry: DatasheetEntryInput, isotope: IsotopeInfo): number {
+	const label = parseNuclideRef(entry.label);
+	if (!label) {
+		return 0;
+	}
+	let best = 0;
+	for (const ref of isotopeNuclideRefs(isotope)) {
+		if (ref.symbol !== label.symbol) {
+			continue;
+		}
+		if (ref.mass !== null && label.mass !== null) {
+			if (ref.mass === label.mass && ref.suffix === label.suffix) {
+				best = Math.max(best, 2);
+			}
+		} else {
+			best = Math.max(best, 1);
+		}
+	}
+	return best;
 }
 
 /**
@@ -360,7 +419,16 @@ export function applyDatasheetToReference(
 	let matchedCount = 0;
 
 	isotopes.forEach((isotope, index) => {
-		const entry = datasheet.entries.find((row) => datasheetEntryMatchesIsotope(row, isotope));
+		// Prefer the most specific row: an exact "U-238" beats a generic "Uranium".
+		let entry: DatasheetEntryInput | undefined;
+		let bestScore = 0;
+		for (const row of datasheet.entries) {
+			const score = datasheetEntryMatchScore(row, isotope);
+			if (score > bestScore) {
+				bestScore = score;
+				entry = row;
+			}
+		}
 		if (!entry) {
 			return;
 		}
