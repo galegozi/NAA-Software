@@ -414,4 +414,13 @@
 		Running or maintaining the deployment? See the
 		<a class="underline" href={resolve('/help/admin')}>Admin guide</a>.
 	</p>
+	<p class="mt-2 text-sm">
+		Source code, issues and releases:
+		<a
+			class="underline"
+			href="https://github.com/galegozi/NAA-Software"
+			target="_blank"
+			rel="noopener noreferrer">github.com/galegozi/NAA-Software</a
+		>.
+	</p>
 </div>
