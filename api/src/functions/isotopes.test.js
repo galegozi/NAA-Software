@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.MOCK_COSMOS = 'true';
 
-const { isotopesHandler } = await import('./isotopes.js');
+const { isotopesHandler, buildSearchQuery } = await import('./isotopes.js');
 
 function request(method, { principal, body, url = 'https://x/api/isotopes' } = {}) {
 	const headers = new Headers();
@@ -40,4 +40,15 @@ test('POST /api/isotopes without the writer role is rejected', async () => {
 		context
 	);
 	assert.equal(response.status, 403);
+});
+
+test('buildSearchQuery uses SELECT TOP and never OFFSET (Cosmos rejects OFFSET without ORDER BY)', () => {
+	const browse = buildSearchQuery('', '1000');
+	assert.match(browse.query, /^\s*SELECT TOP \d+ \* FROM c\s*$/);
+	assert.doesNotMatch(browse.query, /OFFSET/i);
+	assert.doesNotMatch(browse.query, /ORDER BY/i);
+
+	const search = buildSearchQuery('gold', '25');
+	assert.match(search.query, /^\s*SELECT TOP \d+ \* FROM c WHERE /);
+	assert.doesNotMatch(search.query, /OFFSET/i);
 });

@@ -164,7 +164,8 @@
 		const apiUrl = env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
 		const requestUrl = new URL(apiUrl, window.location.origin);
 		const trimmedSearch = search.trim();
-		const batchLimit = trimmedSearch ? 25 : 100;
+		// The isotopes endpoint has no server-side paging; pull the whole catalog.
+		const batchLimit = trimmedSearch ? 100 : 1000;
 		requestUrl.searchParams.set('limit', String(batchLimit));
 		if (offset > 0) {
 			requestUrl.searchParams.set('offset', String(offset));

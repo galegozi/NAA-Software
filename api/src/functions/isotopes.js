@@ -75,33 +75,26 @@ function clampLimit(rawValue) {
 		return 25;
 	}
 
-	return Math.min(Math.max(parsed, 1), 100);
+	// Cap raised so the whole isotope catalog loads in one `SELECT TOP` (there is
+	// no server-side paging on this endpoint — see buildSearchQuery).
+	return Math.min(Math.max(parsed, 1), 1000);
 }
 
 function clampOffset(rawValue) {
 	const parsed = Number.parseInt(rawValue ?? '0', 10);
-	if (!Number.isFinite(parsed)) {
-		return 0;
-	}
-
-	return Math.max(parsed, 0);
+	return Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
 }
 
-function buildSearchQuery(rawSearch, rawLimit, rawOffset) {
+function buildSearchQuery(rawSearch, rawLimit) {
 	const limit = clampLimit(rawLimit);
-	const offset = clampOffset(rawOffset);
 	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
-	const pagingParameters = [
-		{ name: '@offset', value: offset },
-		{ name: '@limit', value: limit }
-	];
 
+	// `SELECT TOP` — no ORDER BY / OFFSET. Cosmos rejects `OFFSET LIMIT` without a
+	// preceding `ORDER BY`, and an `ORDER BY` on an unindexed path fails too; this
+	// is the query that has run in production. `limit` is a clamped integer.
 	if (!normalizedSearch) {
-		// No ORDER BY: it requires the sort path to be indexed, and an unindexed
-		// path silently drops rows. OFFSET/LIMIT is valid without ORDER BY.
 		return {
-			query: 'SELECT * FROM c OFFSET @offset LIMIT @limit',
-			parameters: pagingParameters
+			query: `SELECT TOP ${limit} * FROM c`
 		};
 	}
 
@@ -130,8 +123,8 @@ function buildSearchQuery(rawSearch, rawLimit, rawOffset) {
 	}
 
 	return {
-		query: `SELECT * FROM c WHERE ${conditions.join(' OR ')} OFFSET @offset LIMIT @limit`,
-		parameters: [...parameters, ...pagingParameters]
+		query: `SELECT TOP ${limit} * FROM c WHERE ${conditions.join(' OR ')}`,
+		parameters
 	};
 }
 
@@ -227,8 +220,7 @@ async function isotopesHandler(request, context) {
 		const url = new URL(request.url);
 		const search = url.searchParams.get('q') ?? '';
 		const limit = url.searchParams.get('limit');
-		const offset = url.searchParams.get('offset');
-		const queryText = buildSearchQuery(search, limit, offset);
+		const queryText = buildSearchQuery(search, limit);
 		const container = getCosmosContainer();
 		const query = container.items.query(queryText);
 		const { resources } = await query.fetchAll();
@@ -239,11 +231,14 @@ async function isotopesHandler(request, context) {
 				items: resources.map(mapIsotopeItem),
 				count: resources.length,
 				search,
-				hasMore: resources.length === clampLimit(limit)
+				hasMore: false
 			}
 		};
 	} catch (error) {
-		if (isLocalDevelopmentEnvironment()) {
+		// Only fall back to sample data when there is genuinely no database
+		// configured (pure local dev). If Cosmos IS configured and the query
+		// failed, that is a real error — surface it, never silently serve mocks.
+		if (isLocalDevelopmentEnvironment() && !hasCosmosConfiguration()) {
 			const url = new URL(request.url);
 			const search = url.searchParams.get('q') ?? '';
 			const limit = url.searchParams.get('limit');
@@ -251,7 +246,7 @@ async function isotopesHandler(request, context) {
 			const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
 
 			context.warn(
-				'Cosmos query failed in local development. Falling back to mock isotope catalog.',
+				'Cosmos query failed with no database configured. Falling back to mock isotope catalog.',
 				{
 					search,
 					count: mockItems.length,
@@ -412,4 +407,4 @@ app.http('isotopes', {
 	handler: isotopesHandler
 });
 
-export { isotopesHandler };
+export { isotopesHandler, buildSearchQuery };

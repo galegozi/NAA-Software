@@ -452,7 +452,9 @@ async function getReferenceMaterialsHandler(request, context) {
 			}
 		};
 	} catch (error) {
-		if (isLocalDevelopmentEnvironment()) {
+		// Only fall back to sample data when there is genuinely no database
+		// configured. A configured-DB query failure is a real error, not mocks.
+		if (isLocalDevelopmentEnvironment() && !hasCosmosConfiguration()) {
 			const url = new URL(request.url);
 			const search = url.searchParams.get('q') ?? '';
 			const limit = url.searchParams.get('limit');
@@ -460,7 +462,7 @@ async function getReferenceMaterialsHandler(request, context) {
 			const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
 
 			context.warn(
-				'Cosmos query failed in local development. Falling back to mock reference material catalog.',
+				'Cosmos query failed with no database configured. Falling back to mock reference material catalog.',
 				{
 					search,
 					count: mockItems.length,
