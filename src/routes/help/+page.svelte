@@ -14,12 +14,13 @@
 	<p class="mt-4">
 		This tool works out how much of each element is in an unknown sample. It compares the gamma-ray
 		counts from your sample against a <em>reference material</em> of known composition — both irradiated
-		in the reactor — and does the decay and dead-time corrections for you.
+		and counted the same way — and does the decay and dead-time corrections for you.
 	</p>
 
 	<nav class="mt-4 rounded border border-surface-300-700 p-3 text-sm">
 		<strong>On this page</strong>
 		<ul class="mt-1 ml-5 list-disc">
+			<li><a class="underline" href="#what-is-naa">What is Neutron Activation Analysis?</a></li>
 			<li><a class="underline" href="#a-lot-of-steps">"This looks like a lot of steps…"</a></li>
 			<li><a class="underline" href="#quick-start">Quick start</a></li>
 			<li><a class="underline" href="#the-steps">The steps, one by one</a></li>
@@ -29,9 +30,39 @@
 	</nav>
 
 	<!-- ------------------------------------------------------------------ -->
-	<h2 id="a-lot-of-steps" class="mt-8 text-2xl font-bold">"This looks like a lot of steps…"</h2>
+	<h2 id="what-is-naa" class="mt-8 text-2xl font-bold">What is Neutron Activation Analysis?</h2>
 
 	<details class="guide__item" open>
+		<summary>The short version</summary>
+		<div>
+			<p>
+				You put a sample in a neutron beam (in a research reactor). Some of its nuclei absorb a
+				neutron and become radioactive isotopes. As those decay they emit gamma rays at energies
+				that are characteristic of each isotope — so the gammas at, say, 411.8&nbsp;keV tell you
+				you're looking at Au-198, and how many of them per second tells you how much gold was in the
+				sample.
+			</p>
+			<p>
+				To turn a count rate into an actual concentration, you run a <strong
+					>reference material</strong
+				>
+				of certified composition through the same irradiation and counting, and compare. This is the "comparator
+				method" of NAA.
+			</p>
+			<p class="guide__why">
+				<strong>What this software does — and doesn't:</strong> it does the bookkeeping — the decay,
+				saturation and dead-time corrections, matching your sample's counts to the reference, and
+				propagating the uncertainties. It does <strong>not</strong> control or talk to the reactor or
+				the detector. You bring the numbers (from your counting software, e.g. a Maestro ROI report);
+				it does the maths and gives you concentrations with uncertainties.
+			</p>
+		</div>
+	</details>
+
+	<!-- ------------------------------------------------------------------ -->
+	<h2 id="a-lot-of-steps" class="mt-8 text-2xl font-bold">"This looks like a lot of steps…"</h2>
+
+	<details class="guide__item">
 		<summary>Is all of this really necessary?</summary>
 		<div>
 			<p>
@@ -91,8 +122,8 @@
 					<em>Start new analysis</em> on the welcome screen to clear it and begin fresh.
 				</li>
 				<li>
-					<strong>Sign in</strong> (top-right, on the reactor's deployment only) is needed to upload to
-					the shared catalog — nothing else.
+					<strong>Sign in</strong> (top-right — only on the main deployment, the one with the shared catalog)
+					is needed to upload to the catalog — nothing else.
 				</li>
 				<li>
 					<strong>Light / Dark</strong> toggle and this <strong>Help</strong> link are top-right.
@@ -359,9 +390,9 @@
 		<summary>The catalog search boxes don't appear</summary>
 		<div>
 			<p>
-				The shared catalog is only available on the reactor's Azure deployment. On other builds
-				(including the public preview) there's no backend — you can still enter every isotope and
-				reference material by hand and run the full analysis.
+				The shared catalog is only available on the main (Azure) deployment. Other builds — the
+				public preview on GitHub Pages, and local copies — have no backend, so you enter every
+				isotope and reference material by hand and run the full analysis that way.
 			</p>
 		</div>
 	</details>

@@ -2840,9 +2840,9 @@
 									class="mt-2 space-y-3 rounded border border-primary-500 preset-tonal-primary p-3"
 								>
 									<p class="text-sm">
-										Saves this irradiation and its counting to the reactor's shared catalog. Any
-										covered isotope not in the catalog yet, and the reference datasheet, are added
-										for you as part of publishing.
+										Saves this irradiation and its counting to the shared catalog. Any covered
+										isotope not in the catalog yet, and the reference datasheet, are added for you
+										as part of publishing.
 									</p>
 
 									{#if autoSteps.length > 0}
