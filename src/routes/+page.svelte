@@ -32,7 +32,7 @@
 		createReferenceMaterial,
 		createUnknownMaterial,
 		findRoiIndices,
-		truncateToSigFigs
+		roundResult
 	} from '$lib/utils/naaUtils.js';
 	import {
 		getBaseMaterialErrors,
@@ -2526,12 +2526,9 @@
 			const row = [
 				escapeCSV(unknownLabel),
 				...isotopeInfo.flatMap((_, iIndex) => [
-					escapeCSV(truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)),
+					escapeCSV(roundResult(everythingComp[iIndex][uIndex].unknownConcentration)),
 					escapeCSV(
-						truncateToSigFigs(
-							everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute,
-							2
-						)
+						roundResult(everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute)
 					)
 				])
 			];
@@ -2540,9 +2537,7 @@
 			const detectionLimitRow = [
 				escapeCSV(`${unknownLabel} Conc Det Lim`),
 				...isotopeInfo.flatMap((_, iIndex) => [
-					escapeCSV(
-						truncateToSigFigs(everythingComp[iIndex][uIndex].concentrationDetectionLimit, 3)
-					),
+					escapeCSV(roundResult(everythingComp[iIndex][uIndex].concentrationDetectionLimit)),
 					escapeCSV('')
 				])
 			];
@@ -2651,7 +2646,10 @@
 				<input class="input w-50" type="text" bind:value={title} />
 			</label>
 			<br />
-			<p>This version is a developer preview. Please use with caution.</p>
+			<p>
+				This version is a beta release. Some things may not be perfect, but you should expect good
+				stability.
+			</p>
 			<br />
 			<p>Here is what is included in this software:</p>
 			<ul class="ml-6 list-outside list-disc">
@@ -2686,10 +2684,7 @@
 			<br />
 			<h2 class="text-2xl font-bold">Next planned releases</h2>
 			<ol class="ml-6 list-outside list-decimal">
-				<li>
-					Version 7.1: Minor updates and bug fixes, including significant figure handling and the
-					normal/compton selector for ROI files.
-				</li>
+				<li>Version 7.2: Fission Correction</li>
 				<li>Version 8.0: Interference</li>
 			</ol>
 			<br />
@@ -2697,7 +2692,7 @@
 				Future additions, not planned yet (note: can be implemented in any order):
 			</h2>
 			<ul class="list-inside list-disc">
-				<li>Edit/Delete operations to the catalog through the UI.</li>
+				<li>Delete operations to the catalog through the UI.</li>
 			</ul>
 			<br />
 			<div class="flex flex-wrap items-center gap-3">
@@ -3526,9 +3521,8 @@
 							</td>
 							{#each isotopeInfo as _, iIndex}
 								<td class="border border-surface-300-700 px-4 py-2">
-									{truncateToSigFigs(everythingComp[iIndex][uIndex].unknownConcentration, 3)} ± {truncateToSigFigs(
-										everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute,
-										2
+									{roundResult(everythingComp[iIndex][uIndex].unknownConcentration)} ± {roundResult(
+										everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute
 									)}
 								</td>
 							{/each}
@@ -3539,7 +3533,7 @@
 							</td>
 							{#each isotopeInfo as _, iIndex}
 								<td class="border border-surface-300-700 px-4 py-2">
-									{truncateToSigFigs(everythingComp[iIndex][uIndex].concentrationDetectionLimit, 3)}
+									{roundResult(everythingComp[iIndex][uIndex].concentrationDetectionLimit)}
 								</td>
 							{/each}
 						</tr>
