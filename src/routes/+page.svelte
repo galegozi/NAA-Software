@@ -75,6 +75,11 @@
 	import ReferenceDatasheetForm from '$lib/components/ReferenceDatasheetForm.svelte';
 	import IsotopeRelationshipForm from '$lib/components/IsotopeRelationshipForm.svelte';
 	import {
+		resolveProxyMeasured,
+		applyProxyMeasured,
+		describeProxyMeasured
+	} from '$lib/utils/proxyMeasurement.js';
+	import {
 		APP_VERSION,
 		REVIEW_STEP,
 		StepType,
@@ -1108,6 +1113,25 @@
 		return isotopeInfo.includes(iso) ? iso : ($state.snapshot(iso) as IsotopeInfoType);
 	}
 
+	/** Display name of the analysis isotope a local link is currently driving, or null. */
+	function analysisIsotopeNameForLink(link: LocalIsotopeLink): string | null {
+		const targetId = link.target.id?.trim();
+		const targetParsed = parseIsotopeName(link.target.isotopeName ?? '');
+		const index = isotopeInfo.findIndex((iso) => {
+			const isoId = iso.id?.trim();
+			if (targetId && isoId) {
+				return targetId === isoId;
+			}
+			const isoParsed = parseIsotopeName(iso.isotopeName ?? '');
+			return Boolean(
+				targetParsed &&
+				isoParsed &&
+				isotopeIdentityKey(targetParsed) === isotopeIdentityKey(isoParsed)
+			);
+		});
+		return index >= 0 ? getIsotopeDisplayName(isotopeInfo[index], index) : null;
+	}
+
 	function addRelationship() {
 		const selection = relationshipForm?.getSelection();
 		if (!selection) {
@@ -1383,15 +1407,33 @@
 	// isotope / material counts are derived from the working lists
 	let isotopeCount = $derived(isotopeInfo.length);
 	let referenceCount = $derived(materials.reference.length);
+	// Proxy measurements ("A measures B"): for each analysis isotope B, the
+	// measured isotope A (from a local or catalog relationship) whose half-life /
+	// gamma line the computation should use. `mathIsotopeInfo` is `isotopeInfo`
+	// with A's nuclear data substituted in for proxy rows — the result is still
+	// reported for B. Kept index-aligned with `isotopeInfo`.
+	let proxyByIsotope = $derived(
+		isotopeInfo.map((iso) =>
+			resolveProxyMeasured(iso, {
+				localLinks: localIsotopeLinks,
+				catalogLinks: isotopeMeasurementLinks,
+				catalogById: isotopeCatalogById
+			})
+		)
+	);
+	let mathIsotopeInfo = $derived(
+		isotopeInfo.map((iso, i) => applyProxyMeasured(iso, proxyByIsotope[i]))
+	);
+
 	// computed isotope information
-	let isoComp = $derived(isotopeInfo.map(isoGA));
+	let isoComp = $derived(mathIsotopeInfo.map(isoGA));
 
 	let matComp = $derived({
 		reference: materials.reference.map((ref) => matGA(ref)),
 		unknown: materials.unknown.map((unk) => matGA(unk))
 	});
 	let matIsoComp = $derived(
-		isotopeInfo.map((iso, index) => ({
+		mathIsotopeInfo.map((iso, index) => ({
 			reference: materials.reference.map((ref) => matIsoGA(ref, iso, index)),
 			unknown: materials.unknown.map((unk) => matIsoGA(unk, iso, index))
 		}))
@@ -1555,7 +1597,7 @@
 	let everythingComp = $derived(
 		materials.reference.length === 0
 			? isotopeInfo.map(() => [] as ReturnType<typeof EGA>[])
-			: isotopeInfo.map((iso, index) => {
+			: mathIsotopeInfo.map((iso, index) => {
 					const referenceIndex = getLinkedReferenceIndex(index);
 					const reference = materials.reference[referenceIndex] ?? materials.reference[0];
 					return materials.unknown.map((unk) => EGA(reference, unk, iso, index));
@@ -1608,7 +1650,7 @@
 
 	// Memoized function to prevent recreation on every render
 	let getRoiIndexFn = $derived((roiData: { centroid: number }[]) =>
-		findRoiIndices(isotopeInfo, roiData)
+		findRoiIndices(mathIsotopeInfo, roiData)
 	);
 
 	// Validation state
@@ -2145,12 +2187,14 @@
 
 		const energy = getFiniteEnergy(isotope.energy);
 		const energyLabel = energy !== null ? ` @ ${energy.toLocaleString()} keV` : '';
+		const proxy = proxyByIsotope[index];
+		const proxyLabel = proxy ? ` (via ${describeProxyMeasured(proxy)})` : '';
 
 		if (isotope.elementName && isotope.isotopeName) {
-			return `${isotope.elementName}-${isotope.isotopeName}${energyLabel}`;
+			return `${isotope.elementName}-${isotope.isotopeName}${energyLabel}${proxyLabel}`;
 		}
 
-		return `Isotope ${index + 1}${energyLabel}`;
+		return `Isotope ${index + 1}${energyLabel}${proxyLabel}`;
 	}
 
 	function expandIsotope(index: number) {
@@ -2336,10 +2380,10 @@
 		// Create CSV header row with concentration and uncertainty columns
 		const headers = [
 			'',
-			...isotopeInfo.flatMap((iso) => [
-				escapeCSV(iso.isotopeName),
-				escapeCSV(`${iso.isotopeName} Uncertainty`)
-			])
+			...isotopeInfo.flatMap((iso, index) => {
+				const name = getIsotopeDisplayName(iso, index);
+				return [escapeCSV(name), escapeCSV(`${name} Uncertainty`)];
+			})
 		];
 		const csvRows = [headers.join(',')];
 
@@ -2577,6 +2621,24 @@
 					>
 						<IsotopeInfo bind:this={isoRef[index]} bind:isotopeInfo={isotopeInfo[index]} />
 
+						{#if proxyByIsotope[index]}
+							{@const proxy = proxyByIsotope[index]}
+							<div
+								class="mt-3 space-y-1 rounded border border-primary-500 preset-tonal-primary p-3"
+							>
+								<p class="text-sm">
+									Measured via <strong>{describeProxyMeasured(proxy)}</strong>
+									({proxy.source === 'catalog'
+										? 'from the shared catalog'
+										: 'from your relationship'}).
+								</p>
+								<p class="text-sm">
+									Decay and dead-time corrections use its half-life; the concentration is reported
+									for {isotope.elementName || isotope.isotopeName || `isotope ${index + 1}`}.
+								</p>
+							</div>
+						{/if}
+
 						{#if isotopeElementMismatch(isotope)}
 							{@const mismatch = isotopeElementMismatch(isotope)}
 							<div
@@ -2780,6 +2842,11 @@
 												<strong>{isotopeLabel(link.measured)}</strong> measures
 												<strong>{isotopeLabel(link.target)}</strong>
 												{#if link.notes}<span> — {link.notes}</span>{/if}
+												{#if analysisIsotopeNameForLink(link)}
+													<span class="text-surface-600-400">
+														· applied to {analysisIsotopeNameForLink(link)}</span
+													>
+												{/if}
 											</span>
 											<span class="flex flex-wrap gap-2">
 												{#if link.published}
@@ -3308,7 +3375,7 @@
 						<th class="border border-surface-300-700 px-4 py-2"></th>
 						{#each isotopeInfo as iso, index}
 							<th class="border border-surface-300-700 px-4 py-2">
-								{iso.elementName}
+								{getIsotopeDisplayName(iso, index)}
 							</th>
 						{/each}
 					</tr>
