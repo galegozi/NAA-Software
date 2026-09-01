@@ -1442,6 +1442,33 @@
 		isotopeInfo.map((iso, i) => applyProxyMeasured(iso, proxyByIsotope[i]))
 	);
 
+	/**
+	 * Per-isotope "you may have made a mistake" prompts (name/label element
+	 * mismatch, or a well-known proxy nuclide reporting its own element), surfaced
+	 * as a summary at the top of Step 1 rather than buried under each card.
+	 */
+	let isotopeWarnings = $derived(
+		isotopeInfo
+			.map((isotope, index) => {
+				const mismatch = isotopeElementMismatch(isotope);
+				if (mismatch) {
+					return {
+						index,
+						text: `${isotope.isotopeName || `Isotope ${index + 1}`} looks like a ${mismatch.nameElement} isotope but is labelled ${mismatch.labelElement}. If it stands in for measuring a ${mismatch.labelElement} isotope, record that.`
+					};
+				}
+				const hint = proxyByIsotope[index] ? null : knownProxyHint(isotope);
+				if (hint) {
+					return {
+						index,
+						text: `${isotope.isotopeName} is usually detected to measure ${hint.targetElement} (${hint.note}). This entry will report a ${hint.proxyElement} concentration — if you meant ${hint.targetElement}, record that.`
+					};
+				}
+				return null;
+			})
+			.filter((w): w is { index: number; text: string } => w !== null)
+	);
+
 	// computed isotope information
 	let isoComp = $derived(mathIsotopeInfo.map(isoGA));
 
@@ -2730,6 +2757,26 @@
 			<p>Add the isotopes you want to analyze.</p>
 			<br />
 
+			{#if isotopeWarnings.length > 0}
+				<div class="mb-4 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
+					<p class="font-bold">⚠ Check these isotopes</p>
+					<ul class="space-y-2">
+						{#each isotopeWarnings as warning (warning.index)}
+							<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+								<span>{warning.text}</span>
+								<button
+									type="button"
+									class="btn shrink-0 preset-tonal-surface"
+									onclick={() => openRelationshipPanel(warning.index)}
+								>
+									Record how this is measured
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
+
 			{#if catalogAvailable}
 				<IsotopeViewer bind:selectedIsotopes={isotopeInfo} showSelectionList={false} />
 				<br />
@@ -2907,43 +2954,6 @@
 								Decay and dead-time corrections use its half-life; the concentration is reported for
 								{isotope.elementName || isotope.isotopeName || `isotope ${index + 1}`}.
 							</p>
-						</div>
-					{/if}
-
-					{#if isotopeElementMismatch(isotope)}
-						{@const mismatch = isotopeElementMismatch(isotope)}
-						<div class="space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
-							<p class="text-sm">
-								<strong>{isotope.isotopeName}</strong> looks like a
-								<strong>{mismatch?.nameElement}</strong> isotope, but this entry is labelled
-								<strong>{mismatch?.labelElement}</strong>. If it's a stand-in for measuring a
-								{mismatch?.labelElement} isotope, record that relationship.
-							</p>
-							<button
-								type="button"
-								class="btn preset-tonal-surface"
-								onclick={() => openRelationshipPanel(index)}
-							>
-								Record how this is measured
-							</button>
-						</div>
-					{:else if knownProxyHint(isotope) && !proxyByIsotope[index]}
-						{@const hint = knownProxyHint(isotope)}
-						<div class="space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
-							<p class="text-sm">
-								<strong>{isotope.isotopeName}</strong> is usually detected to measure
-								<strong>{hint?.targetElement}</strong>
-								({hint?.note}). This entry will report a
-								<strong>{hint?.proxyElement}</strong> concentration — if you meant to measure
-								{hint?.targetElement}, record that relationship.
-							</p>
-							<button
-								type="button"
-								class="btn preset-tonal-surface"
-								onclick={() => openRelationshipPanel(index)}
-							>
-								Record how this is measured
-							</button>
 						</div>
 					{/if}
 				{/each}
