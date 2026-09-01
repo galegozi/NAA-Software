@@ -15,7 +15,10 @@ Read more about creating a library [in the docs](https://svelte.dev/docs/kit/pac
 
 ## Developing
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Requires **Node 20.19+, 22.13+, or 24+** and **npm 10.9+** (Vite 8 / ESLint 10). A
+`.nvmrc` pins Node 22 — run `nvm use` (or `nvm install`) before `npm install`.
+
+Once you've installed dependencies with `npm install`, start a development server:
 
 ```sh
 npm run dev

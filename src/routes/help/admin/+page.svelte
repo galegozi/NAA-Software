@@ -76,6 +76,12 @@
 	<details class="guide__item">
 		<summary>Running it on your machine</summary>
 		<div>
+			<p>
+				<strong>Node 20.19+, 22.13+, or 24+</strong> is required (the build toolchain — Vite 8,
+				ESLint 10 — needs it). The repo has a <code>.nvmrc</code> pinned to Node 22, so
+				<code>nvm use</code> picks the right version. Older Node fails the build with an
+				<code>Unsupported engine</code> / syntax error before it starts.
+			</p>
 			<p>Frontend (repo root):</p>
 			<pre><code
 					>npm install
