@@ -80,27 +80,22 @@ function isMockCosmosEnabled() {
 	return value === '1' || value === 'true' || value === 'yes';
 }
 
-function isLocalDevelopmentEnvironment() {
-	const runtime = process.env.AZURE_FUNCTIONS_ENVIRONMENT?.trim().toLowerCase();
-	const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
-	return runtime === 'development' || nodeEnv === 'development';
-}
-
 function hasCosmosConfiguration() {
+	// Only endpoint + key are required — database and container names have
+	// defaults in cosmosClient.js.
 	const endpoint = process.env.COSMOSDB_ENDPOINT?.trim();
 	const key = process.env.COSMOSDB_KEY?.trim();
-	const database = process.env.COSMOSDB_DATABASE?.trim();
-	const container = process.env.COSMOSDB_REFERENCE_CONTAINER?.trim();
 
-	return Boolean(endpoint && key && database && container);
+	return Boolean(endpoint && key);
 }
 
+/**
+ * Sample data only when `MOCK_COSMOS` is set or no database is configured. A
+ * configured database is always used — no `NODE_ENV` / `AZURE_FUNCTIONS_ENVIRONMENT`
+ * guessing (Azure SWA managed functions default that to "Development").
+ */
 function shouldUseMockCatalog() {
-	if (isMockCosmosEnabled()) {
-		return true;
-	}
-
-	return isLocalDevelopmentEnvironment() && !hasCosmosConfiguration();
+	return isMockCosmosEnabled() || !hasCosmosConfiguration();
 }
 
 function clampLimit(rawValue) {
@@ -407,8 +402,7 @@ async function getReferenceMaterialsHandler(request, context) {
 		context.log('Returning mock reference material catalog results.', {
 			search,
 			count: mockItems.length,
-			mockCosmos: isMockCosmosEnabled(),
-			fallbackLocal: !isMockCosmosEnabled() && isLocalDevelopmentEnvironment()
+			reason: isMockCosmosEnabled() ? 'MOCK_COSMOS' : 'no COSMOSDB_* configured'
 		});
 
 		return {
@@ -452,37 +446,8 @@ async function getReferenceMaterialsHandler(request, context) {
 			}
 		};
 	} catch (error) {
-		// Only fall back to sample data when there is genuinely no database
-		// configured. A configured-DB query failure is a real error, not mocks.
-		if (isLocalDevelopmentEnvironment() && !hasCosmosConfiguration()) {
-			const url = new URL(request.url);
-			const search = url.searchParams.get('q') ?? '';
-			const limit = url.searchParams.get('limit');
-			const offset = url.searchParams.get('offset');
-			const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
-
-			context.warn(
-				'Cosmos query failed with no database configured. Falling back to mock reference material catalog.',
-				{
-					search,
-					count: mockItems.length,
-					error: error instanceof Error ? error.message : String(error)
-				}
-			);
-
-			return {
-				status: 200,
-				jsonBody: {
-					items: mockItems.map(mapReferenceMaterialItem),
-					count: mockItems.length,
-					search,
-					hasMore,
-					mocked: true,
-					fallback: 'local-cosmos-error'
-				}
-			};
-		}
-
+		// A database is configured (we would not be here otherwise) but the query
+		// failed — a real error. Surface it; never silently serve sample data.
 		context.error('Failed to load reference materials from Cosmos DB.', error);
 
 		return {

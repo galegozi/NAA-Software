@@ -46,27 +46,23 @@ function isMockCosmosEnabled() {
 	return value === '1' || value === 'true' || value === 'yes';
 }
 
-function isLocalDevelopmentEnvironment() {
-	const runtime = process.env.AZURE_FUNCTIONS_ENVIRONMENT?.trim().toLowerCase();
-	const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
-	return runtime === 'development' || nodeEnv === 'development';
-}
-
 function hasCosmosConfiguration() {
+	// Only endpoint + key are required — database and container names have
+	// defaults in cosmosClient.js.
 	const endpoint = process.env.COSMOSDB_ENDPOINT?.trim();
 	const key = process.env.COSMOSDB_KEY?.trim();
-	const database = process.env.COSMOSDB_DATABASE?.trim();
-	const container = process.env.COSMOSDB_CONTAINER?.trim();
 
-	return Boolean(endpoint && key && database && container);
+	return Boolean(endpoint && key);
 }
 
+/**
+ * Serve the built-in sample catalog only when `MOCK_COSMOS` is set, or when no
+ * database is configured at all. If a database IS configured it is always used —
+ * no guessing from `NODE_ENV` / `AZURE_FUNCTIONS_ENVIRONMENT` (Azure SWA managed
+ * functions default that to "Development", which previously masked prod).
+ */
 function shouldUseMockCatalog() {
-	if (isMockCosmosEnabled()) {
-		return true;
-	}
-
-	return isLocalDevelopmentEnvironment() && !hasCosmosConfiguration();
+	return isMockCosmosEnabled() || !hasCosmosConfiguration();
 }
 
 /** Page size. Paging is via Cosmos continuation tokens, not the query text. */
@@ -203,8 +199,7 @@ async function isotopesHandler(request, context) {
 		context.log('Returning mock isotope catalog results.', {
 			search,
 			count: mockItems.length,
-			mockCosmos: isMockCosmosEnabled(),
-			fallbackLocal: !isMockCosmosEnabled() && isLocalDevelopmentEnvironment()
+			reason: isMockCosmosEnabled() ? 'MOCK_COSMOS' : 'no COSMOSDB_* configured'
 		});
 
 		return {
@@ -242,39 +237,8 @@ async function isotopesHandler(request, context) {
 			}
 		};
 	} catch (error) {
-		// Only fall back to sample data when there is genuinely no database
-		// configured (pure local dev). If Cosmos IS configured and the query
-		// failed, that is a real error — surface it, never silently serve mocks.
-		if (isLocalDevelopmentEnvironment() && !hasCosmosConfiguration()) {
-			const { items: mockItems, continuation: nextToken } = getMockSearchResults(
-				search,
-				rawLimit,
-				continuation
-			);
-
-			context.warn(
-				'Cosmos query failed with no database configured. Falling back to mock isotope catalog.',
-				{
-					search,
-					count: mockItems.length,
-					error: error instanceof Error ? error.message : String(error)
-				}
-			);
-
-			return {
-				status: 200,
-				jsonBody: {
-					items: mockItems.map(mapIsotopeItem),
-					count: mockItems.length,
-					search,
-					continuation: nextToken,
-					hasMore: Boolean(nextToken),
-					mocked: true,
-					fallback: 'local-cosmos-error'
-				}
-			};
-		}
-
+		// A database is configured (we would not be here otherwise) but the query
+		// failed — a real error. Surface it; never silently serve sample data.
 		context.error('Failed to load isotopes from Cosmos DB.', error);
 
 		return {
@@ -415,4 +379,4 @@ app.http('isotopes', {
 	handler: isotopesHandler
 });
 
-export { isotopesHandler, buildSearchQuery };
+export { isotopesHandler, buildSearchQuery, shouldUseMockCatalog };
