@@ -1729,8 +1729,10 @@
 
 	// Pre-flight duplicate lookups: as identities change, ask the catalog whether
 	// the isotope / reference already exists so the panels can warn before upload.
+	// Read-only (GET /api/*?q=), so it runs whenever the catalog is reachable —
+	// no sign-in required.
 	$effect(() => {
-		if (!browser || !swaAuth.signedIn || !writerAccess) {
+		if (!browser || !catalogAvailable) {
 			return;
 		}
 

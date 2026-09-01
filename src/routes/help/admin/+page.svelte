@@ -179,10 +179,10 @@ npm start            # Azure Functions Core Tools (func start)</code
 			</ul>
 			<p>
 				<strong>Every <code>GET</code> is public</strong> — it's all shared catalog data. Only the
-				<code>POST</code>s need the writer role: isotopes and reference-materials via a
-				<code>staticwebapp.config.json</code> route rule + an in-function check;
-				reference-datasheets and isotope-measurements via an in-function check on the
-				<code>POST</code> path only (no route rule).
+				<code>POST</code>s need the writer role, and all four are guarded twice: a
+				<code>POST</code>-only route rule in <code>staticwebapp.config.json</code> plus an
+				in-function <code>x-ms-client-principal</code> check on the <code>POST</code> path. Only
+				<code>GET</code> and <code>POST</code> are registered — other methods 404.
 			</p>
 			<p>
 				<code>POST</code> payload shapes are documented in <code>README.md</code>. Update-in-place
@@ -205,9 +205,10 @@ npm start            # Azure Functions Core Tools (func start)</code
 			</p>
 			<ol class="ml-5 list-decimal space-y-1">
 				<li>
-					<code>staticwebapp.config.json</code> route rules restrict <code>POST /api/isotopes</code>
-					and <code>POST /api/reference-materials</code> to the <code>isotope_writer</code> role (with
-					<code>responseOverrides</code> for 401 → login and 403 → SPA).
+					<code>staticwebapp.config.json</code> has a <code>POST</code>-only route rule for
+					<strong>all four</strong> endpoints restricting them to the <code>isotope_writer</code> role
+					(with <code>responseOverrides</code> for 401 → login and 403 → SPA). <code>GET</code> matches
+					no rule.
 				</li>
 				<li>
 					Each handler independently re-validates the SWA-forwarded
@@ -217,10 +218,9 @@ npm start            # Azure Functions Core Tools (func start)</code
 				</li>
 			</ol>
 			<p class="guide__why">
-				<strong>Why both:</strong> for the two route-ruled endpoints, the in-function check is the backstop
-				against a config regression silently opening write access. <code>reference-datasheets</code> and
-				<code>isotope-measurements</code> have no route rule, so their in-function <code>POST</code> check
-				is the only guard — don't remove it.
+				<strong>Why both:</strong> the in-function check is the backstop against a config regression
+				silently opening write access. Only <code>GET</code> and <code>POST</code> are registered on any
+				function; other methods 404. Auth is required <em>only</em> to write.
 			</p>
 			<p>
 				The role name is <code>isotope_writer</code> unless overridden by

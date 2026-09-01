@@ -187,6 +187,14 @@ async function isotopesHandler(request, context) {
 		return createIsotopeHandler(request, context);
 	}
 
+	// GET is the only other registered method — anything else is a config change.
+	if (request.method !== 'GET') {
+		return {
+			status: 405,
+			jsonBody: { error: 'Method not allowed.' }
+		};
+	}
+
 	if (shouldUseMockCatalog()) {
 		const url = new URL(request.url);
 		const search = url.searchParams.get('q') ?? '';
@@ -401,3 +409,5 @@ app.http('isotopes', {
 	authLevel: 'anonymous',
 	handler: isotopesHandler
 });
+
+export { isotopesHandler };

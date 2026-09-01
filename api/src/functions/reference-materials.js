@@ -671,3 +671,5 @@ app.http('reference-materials', {
 	authLevel: 'anonymous',
 	handler: referenceMaterialsHandler
 });
+
+export { referenceMaterialsHandler };

@@ -68,14 +68,12 @@ Cosmos DB access goes through `api/src/lib/cosmosClient.js` (env-driven; see REA
 
 ### Access control (security-relevant)
 
-**Every `GET` is public** (shared catalog data). Only `POST`s are protected:
+**Every `GET` is public** (shared catalog data). Only `POST`s are protected, in **two independent layers** that must be kept in sync:
 
-1. `staticwebapp.config.json` route rules restrict `POST /api/isotopes` and `POST /api/reference-materials` to the `isotope_writer` role.
-2. Each function re-validates the SWA-forwarded `x-ms-client-principal` header via `api/src/lib/staticWebAppsAuth.js` (`canWriteIsotopes`) — **on the `POST` path only**, so `GET` is never gated.
+1. `staticwebapp.config.json` has a `{ methods: ["POST"], allowedRoles: ["isotope_writer"] }` route rule for **all four** endpoints (isotopes, reference-materials, reference-datasheets, isotope-measurements). `GET` matches no rule → anonymous.
+2. Each handler re-validates the SWA-forwarded `x-ms-client-principal` header via `api/src/lib/staticWebAppsAuth.js` (`canWriteIsotopes`) — **on the `POST` path only**, so `GET` is never gated.
 
-`reference-datasheets` and `isotope-measurements` have **no route rule** — their in-function `POST` check is the sole guard, so never remove it. `isotopes` / `reference-materials` are double-guarded (config + in-function) and both layers must be kept in sync.
-
-Functions stay at `authLevel: 'anonymous'` on purpose — Azure SWA is the authenticating layer.
+Handlers register `methods: ['GET', 'POST']` only; anything else 404s (and the handlers return an explicit 405). Don't remove the in-function `POST` check — it's the backstop against a config regression. Functions stay at `authLevel: 'anonymous'` on purpose — Azure SWA is the authenticating layer.
 
 ## Conventions
 
