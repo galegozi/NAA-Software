@@ -7,15 +7,16 @@
 		ReferenceMaterialCatalogCounting
 	} from '$lib/types.js';
 	import { getReferenceMaterialCatalogAccessMessage } from '$lib/utils/authEnvironment.js';
+	import { catalogStatus } from '$lib/utils/catalogStatus.svelte.js';
 
 	let {
 		isotopeIds = [] as string[],
 		selectedItemIds = [] as string[],
 		currentSelectionId = null as string | null,
-		onSelectItem = ((() => {}) as (
+		onSelectItem = (() => {}) as (
 			item: ReferenceMaterialCatalogItem,
 			counting: ReferenceMaterialCatalogCounting
-		) => void)
+		) => void
 	} = $props();
 
 	function getCountingSelectionId(
@@ -32,9 +33,10 @@
 		const measurementStart = material?.measurementStartTime?.trim?.() ?? '';
 		const irradiationEnd = material?.irradiationEnd?.trim?.() ?? '';
 		const irradiationType = material?.irradiationType?.trim?.() ?? '';
+		const countingMode = material?.countingMode?.trim?.() ?? '';
 		const countingLabel = counting.countingLabel?.trim() ?? 'counting';
 
-		return `${item.id}::${countingLabel}::${createdAt}::${measurementStart}::${irradiationEnd}::${irradiationType}`;
+		return `${item.id}::${countingLabel}::${createdAt}::${measurementStart}::${irradiationEnd}::${irradiationType}::${countingMode}`;
 	}
 
 	function formatDatetime(str: string | undefined): string {
@@ -45,13 +47,13 @@
 
 	function formatDuration(seconds: number | undefined): string {
 		if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '—';
-		
-        const days = Math.floor(seconds / (24 * 60 * 60));
+
+		const days = Math.floor(seconds / (24 * 60 * 60));
 		const h = Math.floor((seconds % (24 * 60 * 60)) / 3600);
 		const m = Math.floor((seconds % 3600) / 60);
 		const s = Math.round(seconds % 60);
 		const parts: string[] = [];
-        if (days > 0) parts.push(`${days}d`);
+		if (days > 0) parts.push(`${days}d`);
 		if (h > 0) parts.push(`${h}h`);
 		if (m > 0) parts.push(`${m}m`);
 		if (s > 0 || parts.length === 0) parts.push(`${s}s`);
@@ -83,6 +85,13 @@
 	let lastFetchSequence = 0;
 	let cachedItems: ReferenceMaterialCatalogItem[] = $state([]);
 
+	const CATALOG_BATCH_SIZE = 24;
+	let visibleCount = $state(CATALOG_BATCH_SIZE);
+	let hasMoreServerItems = $state(false);
+	let serverOffset = 0;
+	let catalogPane: HTMLDivElement | null = null;
+	let lastBatchResetSearch = '';
+
 	function normalizeItems(payload: unknown): ReferenceMaterialCatalogItem[] {
 		if (Array.isArray(payload)) {
 			return payload as ReferenceMaterialCatalogItem[];
@@ -100,12 +109,26 @@
 		return [];
 	}
 
+	function readHasMore(payload: unknown, fallback: boolean): boolean {
+		if (
+			typeof payload === 'object' &&
+			payload !== null &&
+			'hasMore' in payload &&
+			typeof (payload as { hasMore: unknown }).hasMore === 'boolean'
+		) {
+			return (payload as { hasMore: boolean }).hasMore;
+		}
+
+		return fallback;
+	}
+
 	function getSearchText(item: ReferenceMaterialCatalogItem): string {
-		const countingEntries = Array.isArray(item.countings) && item.countings.length > 0
-			? item.countings
-			: item.latestCounting
-				? [item.latestCounting]
-				: [];
+		const countingEntries =
+			Array.isArray(item.countings) && item.countings.length > 0
+				? item.countings
+				: item.latestCounting
+					? [item.latestCounting]
+					: [];
 
 		const countingText = countingEntries
 			.map((counting) => {
@@ -127,6 +150,7 @@
 					material?.measurementStartTime,
 					material?.irradiationType,
 					material?.dtType,
+					material?.countingMode,
 					material?.irradiationTime,
 					material?.decayTime,
 					material?.liveTime,
@@ -151,14 +175,7 @@
 			})
 			.join(' ');
 
-		return [
-			item.referenceKey,
-			item.notes,
-			countingText
-		]
-			.filter(Boolean)
-			.join(' ')
-			.toLowerCase();
+		return [item.referenceKey, item.notes, countingText].filter(Boolean).join(' ').toLowerCase();
 	}
 
 	function matchesSearch(item: ReferenceMaterialCatalogItem, query: string): boolean {
@@ -170,11 +187,15 @@
 		return getSearchText(item).includes(normalizedQuery);
 	}
 
-	async function loadItems(search: string) {
+	async function loadItems(search: string, offset = 0) {
 		const apiUrl = env.PUBLIC_REFERENCE_MATERIAL_API_URL?.trim() || '/api/reference-materials';
 		const requestUrl = new URL(apiUrl, window.location.origin);
 		const trimmedSearch = search.trim();
-		requestUrl.searchParams.set('limit', '1000');
+		const batchLimit = 100;
+		requestUrl.searchParams.set('limit', String(batchLimit));
+		if (offset > 0) {
+			requestUrl.searchParams.set('offset', String(offset));
+		}
 		if (trimmedSearch) {
 			requestUrl.searchParams.set('q', trimmedSearch);
 		}
@@ -199,17 +220,19 @@
 				throw new Error(`Request failed with status ${response.status}`);
 			}
 
-			const nextItems = normalizeItems(await response.json());
+			const payload: unknown = await response.json();
+			catalogStatus.noteResponse(payload);
+			const nextItems = normalizeItems(payload);
 			if (fetchSequence !== lastFetchSequence) {
 				return;
 			}
 
 			cachedItems = [
-				...cachedItems.filter(
-					(cachedItem) => !nextItems.some((item) => item.id === cachedItem.id)
-				),
+				...cachedItems.filter((cachedItem) => !nextItems.some((item) => item.id === cachedItem.id)),
 				...nextItems
 			];
+			serverOffset = offset + nextItems.length;
+			hasMoreServerItems = readHasMore(payload, nextItems.length === batchLimit);
 		} catch (error) {
 			if (fetchSequence !== lastFetchSequence) {
 				return;
@@ -249,14 +272,14 @@
 			return a.referenceKey.localeCompare(b.referenceKey);
 		})
 	);
-	let visibleItems = $derived(sortedItems.slice(0, 24));
-	let visibleCountings = $derived(
-		visibleItems.flatMap((item) => {
-			const countings = Array.isArray(item.countings) && item.countings.length > 0
-				? item.countings
-				: item.latestCounting
-					? [item.latestCounting]
-					: [];
+	let sortedCountings = $derived(
+		sortedItems.flatMap((item) => {
+			const countings =
+				Array.isArray(item.countings) && item.countings.length > 0
+					? item.countings
+					: item.latestCounting
+						? [item.latestCounting]
+						: [];
 
 			return countings.map((counting) => ({
 				item,
@@ -265,6 +288,7 @@
 			}));
 		})
 	);
+	let visibleCountings = $derived(sortedCountings.slice(0, visibleCount));
 
 	$effect(() => {
 		if (cachedItems.length > 0) {
@@ -272,6 +296,53 @@
 		}
 
 		void loadItems('');
+	});
+
+	$effect(() => {
+		if (searchTerm !== lastBatchResetSearch) {
+			lastBatchResetSearch = searchTerm;
+			visibleCount = CATALOG_BATCH_SIZE;
+			if (catalogPane) {
+				catalogPane.scrollTop = 0;
+			}
+		}
+	});
+
+	function showNextBatch() {
+		if (visibleCount < sortedCountings.length) {
+			visibleCount += CATALOG_BATCH_SIZE;
+			return;
+		}
+
+		if (hasMoreServerItems && !isLoading) {
+			visibleCount += CATALOG_BATCH_SIZE;
+			void loadItems('', serverOffset);
+		}
+	}
+
+	function handleCatalogScroll() {
+		if (!catalogPane) {
+			return;
+		}
+
+		const distanceFromBottom =
+			catalogPane.scrollHeight - catalogPane.scrollTop - catalogPane.clientHeight;
+		if (distanceFromBottom <= 48) {
+			showNextBatch();
+		}
+	}
+
+	// If the pane cannot scroll yet (short or heavily filtered list) the scroll
+	// event never fires, so keep loading batches until it can or nothing is left.
+	$effect(() => {
+		void sortedCountings.length;
+		void visibleCount;
+		void hasMoreServerItems;
+		if (isLoading) {
+			return;
+		}
+
+		handleCatalogScroll();
 	});
 </script>
 
@@ -289,7 +360,11 @@
 				/>
 			</label>
 
-			<div class="catalog-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2">
+			<div
+				bind:this={catalogPane}
+				onscroll={handleCatalogScroll}
+				class="catalog-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2"
+			>
 				{#if isLoading && cachedItems.length === 0}
 					<p class="p-2">Loading reference material catalog...</p>
 				{:else if errorMessage && cachedItems.length === 0}
@@ -298,12 +373,14 @@
 					{#each visibleCountings as entry (`${entry.item.id}:${entry.selectionId}`)}
 						{@const material = entry.counting.referenceMaterial}
 						{@const isUsedByAnotherReference =
-							selectedItemIds.includes(entry.selectionId) && entry.selectionId !== currentSelectionId}
+							selectedItemIds.includes(entry.selectionId) &&
+							entry.selectionId !== currentSelectionId}
 						<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
 							<div class="flex items-start justify-between gap-4">
 								<div class="space-y-1">
 									<div class="font-bold">
-										{material?.NETL_code || 'Unknown code'} ({material?.sampleName || 'Unknown sample'})
+										{material?.NETL_code || 'Unknown code'} ({material?.sampleName ||
+											'Unknown sample'})
 									</div>
 									{#if entry.counting.countingLabel}
 										<div class="text-sm">Counting: {entry.counting.countingLabel}</div>
@@ -311,18 +388,27 @@
 									{#if material?.irradiationType}
 										<div class="text-sm">Mode: {material.irradiationType}</div>
 									{/if}
-								{#if material?.irradiationEnd || material?.irradiationTime}
-									<div class="text-sm">Irradiation start: {getIrradiationStart(material)}</div>
-									<div class="text-sm">Irradiation end: {formatDatetime(material?.irradiationEnd)}</div>
-									<div class="text-sm">Irradiation Time: {formatDuration(material?.irradiationTime)}</div>
-								{/if}
+									{#if material?.irradiationEnd || material?.irradiationTime}
+										<div class="text-sm">Irradiation start: {getIrradiationStart(material)}</div>
+										<div class="text-sm">
+											Irradiation end: {formatDatetime(material?.irradiationEnd)}
+										</div>
+										<div class="text-sm">
+											Irradiation Time: {formatDuration(material?.irradiationTime)}
+										</div>
+									{/if}
 									<div class="text-sm">Decay Time: {formatDuration(material?.decayTime)}</div>
 									<div class="text-sm">Counting Time: {formatDuration(material?.liveTime)}</div>
 									<div class="text-sm">Sample Mass: {formatNumber(material?.mass)} g</div>
 									<div class="text-sm">Power: {formatNumber(material?.reactorPower)}</div>
-								{#if material?.dtType}
-									<div class="text-sm">Dead time correction: {material.dtType}</div>
-								{/if}
+									{#if material?.dtType}
+										<div class="text-sm">Dead time correction: {material.dtType}</div>
+									{/if}
+									<div class="text-sm">
+										Counting mode: {material?.countingMode === 'compton'
+											? 'Compton-suppressed'
+											: 'Normal (singles)'}
+									</div>
 									<div class="text-sm">Countings saved: {entry.item.countingCount}</div>
 									<div class="text-sm">Isotopes saved: {entry.item.isotopes.length}</div>
 								</div>
@@ -344,8 +430,8 @@
 				{/if}
 			</div>
 
-			{#if sortedItems.length > visibleItems.length}
-				<p>Showing the first {visibleCountings.length} counting entries. Keep typing to narrow the list.</p>
+			{#if sortedCountings.length > visibleCountings.length || hasMoreServerItems}
+				<p>Showing {visibleCountings.length} counting entries. Scroll the list to load more.</p>
 			{/if}
 		</div>
 	</div>

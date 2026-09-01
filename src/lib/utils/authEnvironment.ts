@@ -22,7 +22,7 @@ export function getIsotopeCatalogAccessMessage(hostname: string): string {
 		return 'The isotope catalog is not available in this environment.';
 	}
 
-	return 'Sign in with an account that has been assigned the Static Web Apps role required to view isotope data.';
+	return 'Could not load the isotope catalog. If this deployment is access-restricted, sign in and try again.';
 }
 
 export function getReferenceMaterialCatalogAccessMessage(hostname: string): string {
@@ -30,5 +30,5 @@ export function getReferenceMaterialCatalogAccessMessage(hostname: string): stri
 		return 'The reference material catalog is not available in this environment.';
 	}
 
-	return 'Sign in with an account that has been assigned the Static Web Apps role required to view reference material data.';
+	return 'Could not load the reference material catalog. If this deployment is access-restricted, sign in and try again.';
 }

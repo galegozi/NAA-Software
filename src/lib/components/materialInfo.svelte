@@ -4,6 +4,7 @@
 
 	import type { MaestroParsedData, MaestroRoiEntry } from '$lib/NAAMath/types.js';
 	import MaestroUpload from './maestroUpload.svelte';
+	import { getBaseMaterialErrors } from '$lib/utils/materialValidation.js';
 
 	let {
 		isotopeCount,
@@ -29,7 +30,7 @@
 			})),
 			irradiationType: 'total',
 			dtType: undefined,
-
+			countingMode: 'normal'
 		}),
 		getRoiIndex,
 		isotopeInfo = $bindable([]),
@@ -375,45 +376,7 @@
 	}
 
 	export function getValidationErrors(): string[] {
-		const errors: string[] = [];
-
-		if (!materialInfo.NETL_code?.trim()) {
-			errors.push('NETL Code is required');
-		}
-
-		if (!materialInfo.sampleName?.trim()) {
-			errors.push('Sample Name is required');
-		}
-
-		if (materialInfo.mass <= 0) {
-			errors.push('Mass must be greater than 0');
-		}
-
-		if (!Number.isFinite(materialInfo.reactorPower)) {
-			errors.push('Reactor Power must be a valid number');
-		}
-
-		if (materialInfo.irradiationTime <= 0) {
-			errors.push('Irradiation time must be greater than 0');
-		}
-
-		if (materialInfo.decayTime < 0) {
-			errors.push('Decay Time cannot be negative');
-		}
-
-		if (materialInfo.liveTime <= 0) {
-			errors.push('Live Time must be greater than 0');
-		}
-
-		if (materialInfo.realTime <= 0) {
-			errors.push('Real Time must be greater than 0');
-		}
-
-		if (materialInfo.fluence <= 0) {
-			errors.push('Fluence must be greater than 0');
-		}
-
-		return errors;
+		return getBaseMaterialErrors(materialInfo);
 	}
 
 	let showErrors = $state(false);
@@ -607,6 +570,18 @@
 		<option value="Deprecated" disabled>Deprecated Options</option>
 		<option value="mixed">Mixed (deprecated): Short Lived in presence of Long Lived</option>
 		<!--(net counts)/(1-e^(-decay constant * live time))-->
+	</select>
+</label>
+
+<label class="label">
+	<span>Counting Mode</span>
+	<select
+		class="select input w-50 bg-surface-50-950 text-surface-950-50"
+		bind:value={materialInfo.countingMode}
+		required
+	>
+		<option value="normal">Normal (singles)</option>
+		<option value="compton">Compton-suppressed</option>
 	</select>
 </label>
 

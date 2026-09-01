@@ -85,9 +85,7 @@ function normalizeHalfLife(payload) {
 	const unit = toTrimmedString(payload.unit).toLowerCase() || 'seconds';
 	const unitMultiplier = HALF_LIFE_UNIT_TO_SECONDS[unit];
 	if (!unitMultiplier) {
-		throw new Error(
-			"'halfLife.unit' must be one of: seconds, minutes, hours, days, weeks, years."
-		);
+		throw new Error("'halfLife.unit' must be one of: seconds, minutes, hours, days, weeks, years.");
 	}
 
 	return {
@@ -108,19 +106,40 @@ function mergeEnergies(existingEnergies, incomingEnergies) {
 	);
 }
 
-export function mergeIsotopeWrite(existingItem, incomingItem, principal) {
+/**
+ * Combine an incoming isotope write with the existing catalog record.
+ *
+ * `mode: 'append'` (default) keeps every existing field and only unions in new
+ * energies — safe for casual "found another energy line" writes.
+ *
+ * `mode: 'replace'` treats the incoming document as authoritative: element name,
+ * half-life and the full energy list overwrite what is stored. The isotope
+ * identity (shortName/massNumber/suffix) and audit-creation fields are always
+ * preserved. Used by the wizard's "Update existing" action, which first asks the
+ * user to confirm the complete energy list.
+ */
+export function mergeIsotopeWrite(existingItem, incomingItem, principal, { mode = 'append' } = {}) {
 	const updatedAt = new Date().toISOString();
+	const replace = mode === 'replace';
 
 	return {
 		...existingItem,
-		elementName: existingItem.elementName || incomingItem.elementName,
+		elementName: replace
+			? incomingItem.elementName || existingItem.elementName
+			: existingItem.elementName || incomingItem.elementName,
 		shortName: existingItem.shortName || incomingItem.shortName,
 		massNumber: existingItem.massNumber ?? incomingItem.massNumber,
 		suffix: existingItem.suffix ?? incomingItem.suffix,
-		halfLife: existingItem.halfLife ?? incomingItem.halfLife,
-		halfLifeUnit: existingItem.halfLifeUnit || incomingItem.halfLifeUnit,
-		halfLifeSeconds: existingItem.halfLifeSeconds ?? incomingItem.halfLifeSeconds,
-		energies: mergeEnergies(existingItem.energies, incomingItem.energies),
+		halfLife: replace ? incomingItem.halfLife : (existingItem.halfLife ?? incomingItem.halfLife),
+		halfLifeUnit: replace
+			? incomingItem.halfLifeUnit || existingItem.halfLifeUnit
+			: existingItem.halfLifeUnit || incomingItem.halfLifeUnit,
+		halfLifeSeconds: replace
+			? incomingItem.halfLifeSeconds
+			: (existingItem.halfLifeSeconds ?? incomingItem.halfLifeSeconds),
+		energies: replace
+			? mergeEnergies([], incomingItem.energies)
+			: mergeEnergies(existingItem.energies, incomingItem.energies),
 		updatedAt,
 		updatedBy: principal?.userId || principal?.userDetails || 'unknown',
 		updatedByDetails: principal?.userDetails || '',
@@ -135,7 +154,8 @@ export function normalizeIsotopeWritePayload(payload, principal) {
 
 	const shortName = normalizeElementSymbol(requireString(payload.shortName, 'shortName', 32));
 	const elementName =
-		normalizeOptionalString(payload.elementName, 'elementName', 120) || lookupElementName(shortName);
+		normalizeOptionalString(payload.elementName, 'elementName', 120) ||
+		lookupElementName(shortName);
 	if (!elementName) {
 		throw new Error("'elementName' is required unless it can be inferred from 'shortName'.");
 	}

@@ -25,7 +25,10 @@ test('normalizeIsotopeWritePayload normalizes a valid isotope document', () => {
 		principal
 	);
 
-	assert.match(document.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+	assert.match(
+		document.id,
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+	);
 	assert.deepEqual(document.energies, [1173.2, 1332.5]);
 	assert.equal(document.halfLifeUnit, 'years');
 	assert.equal(document.createdBy, 'writer-123');
@@ -101,5 +104,44 @@ test('mergeIsotopeWrite appends unique energies to an existing isotope', () => {
 	assert.equal(merged.id, 'existing-guid');
 	assert.deepEqual(merged.energies, [1173.2, 1332.5]);
 	assert.equal(merged.updatedBy, 'writer-123');
+	assert.ok(merged.updatedAt);
+});
+
+test('mergeIsotopeWrite with mode "replace" overwrites half-life, element and energy list', () => {
+	const merged = mergeIsotopeWrite(
+		{
+			id: 'existing-guid',
+			elementName: 'Cobalt',
+			shortName: 'Co',
+			massNumber: 60,
+			suffix: 'm',
+			energies: [1173.2, 1332.5, 2000],
+			halfLife: 5.2714,
+			halfLifeUnit: 'years',
+			halfLifeSeconds: 166315280.64,
+			createdAt: '2026-01-01T00:00:00.000Z',
+			createdBy: 'writer-123'
+		},
+		{
+			elementName: 'Cobalt corrected',
+			shortName: 'Co',
+			massNumber: 60,
+			suffix: 'm',
+			energies: [58.6],
+			halfLife: 10.467,
+			halfLifeUnit: 'minutes',
+			halfLifeSeconds: 628.02
+		},
+		principal,
+		{ mode: 'replace' }
+	);
+
+	assert.equal(merged.id, 'existing-guid');
+	assert.equal(merged.createdBy, 'writer-123');
+	assert.equal(merged.elementName, 'Cobalt corrected');
+	assert.equal(merged.halfLife, 10.467);
+	assert.equal(merged.halfLifeUnit, 'minutes');
+	assert.equal(merged.halfLifeSeconds, 628.02);
+	assert.deepEqual(merged.energies, [58.6]);
 	assert.ok(merged.updatedAt);
 });

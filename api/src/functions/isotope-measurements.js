@@ -89,14 +89,8 @@ async function isotopeMeasurementsHandler(request, context) {
 		};
 	}
 
-	const authorization = canWriteIsotopes(request);
-	if (!authorization.authorized) {
-		return {
-			status: authorization.status,
-			jsonBody: { error: authorization.message }
-		};
-	}
-
+	// Reads are public — proxy relationships are catalog reference data, like the
+	// isotope catalog itself. Only writes require the `isotope_writer` role.
 	if (request.method === 'GET') {
 		if (isMockCosmosEnabled()) {
 			return {
@@ -121,6 +115,14 @@ async function isotopeMeasurementsHandler(request, context) {
 		}
 	}
 
+	const authorization = canWriteIsotopes(request);
+	if (!authorization.authorized) {
+		return {
+			status: authorization.status,
+			jsonBody: { error: authorization.message }
+		};
+	}
+
 	let body;
 	try {
 		body = await request.json();
@@ -137,7 +139,9 @@ async function isotopeMeasurementsHandler(request, context) {
 	} catch (error) {
 		return {
 			status: 400,
-			jsonBody: { error: error instanceof Error ? error.message : 'Invalid isotope mapping payload.' }
+			jsonBody: {
+				error: error instanceof Error ? error.message : 'Invalid isotope mapping payload.'
+			}
 		};
 	}
 
@@ -156,7 +160,8 @@ async function isotopeMeasurementsHandler(request, context) {
 				...existing,
 				notes: item.notes || existing.notes || '',
 				updatedAt: new Date().toISOString(),
-				updatedBy: authorization.principal?.userDetails || authorization.principal?.userId || 'unknown'
+				updatedBy:
+					authorization.principal?.userDetails || authorization.principal?.userId || 'unknown'
 			};
 			const response = await container.items.upsert(merged);
 			return {
@@ -185,3 +190,5 @@ app.http('isotope-measurements', {
 	route: 'isotope-measurements',
 	handler: isotopeMeasurementsHandler
 });
+
+export { isotopeMeasurementsHandler };

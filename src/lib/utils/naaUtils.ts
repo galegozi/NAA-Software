@@ -58,6 +58,7 @@ export function createReferenceMaterial(isotopeCount: number): ReferenceMaterial
 		counts: createCountDataArray(isotopeCount),
 		irradiationType: 'total',
 		dtType: undefined,
+		countingMode: 'normal',
 		concentrationUnits: Array.from({ length: isotopeCount }, () => undefined),
 		knownConcentration: Array.from({ length: isotopeCount }, () => 0),
 		knownUncertainty: Array.from({ length: isotopeCount }, () => 0)
@@ -82,7 +83,8 @@ export function createUnknownMaterial(isotopeCount: number): UnknownMaterial {
 		fluence: 0,
 		counts: createCountDataArray(isotopeCount),
 		irradiationType: 'total',
-		dtType: undefined
+		dtType: undefined,
+		countingMode: 'normal'
 	};
 }
 
@@ -109,14 +111,26 @@ export function findRoiIndices(
 	});
 }
 
-export function truncateToSigFigs(value: number, sigFigs: number = 3): number {
-	if (value === 0) {
-		return 0;
-	} else if (Math.abs(value) >= Math.pow(10, sigFigs - 1)) {
-		return Math.round(value);
-	} else {
-		const bitShift = Math.ceil(Math.log10(Math.abs(value)));
-		const factor = Math.pow(10, sigFigs - bitShift);
-		return Math.round(value * factor) / factor;
+/**
+ * Rounding applied to the final computed results (concentration, uncertainty,
+ * detection limit) for display and CSV export:
+ *
+ *  - |x| < 1   → 2 decimal places
+ *  - |x| < 20  → 1 decimal place
+ *  - otherwise → nearest integer
+ *
+ * Always rounds (never truncates). Non-finite values pass through unchanged.
+ */
+export function roundResult(value: number): number {
+	if (!Number.isFinite(value)) {
+		return value;
 	}
+	const magnitude = Math.abs(value);
+	if (magnitude < 1) {
+		return Number(value.toFixed(2));
+	}
+	if (magnitude < 20) {
+		return Number(value.toFixed(1));
+	}
+	return Math.round(value);
 }

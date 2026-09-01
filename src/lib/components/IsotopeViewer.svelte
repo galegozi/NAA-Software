@@ -3,11 +3,13 @@
 	import { env } from '$env/dynamic/public';
 	import type { IsotopeCatalogItem, IsotopeInfo } from '$lib/types.js';
 	import { getIsotopeCatalogAccessMessage } from '$lib/utils/authEnvironment.js';
+	import { catalogStatus } from '$lib/utils/catalogStatus.svelte.js';
 
 	let {
 		selectedIsotopes = $bindable<IsotopeInfo[]>([]),
 		singleEntryPerIsotope = false,
-		allowedElementNames = [] as string[]
+		allowedElementNames = [] as string[],
+		showSelectionList = true
 	} = $props();
 
 	let isLoading = $state(false);
@@ -16,6 +18,13 @@
 	let lastFetchedSearch = '';
 	let lastFetchSequence = 0;
 	let cachedItems: IsotopeCatalogItem[] = $state([]);
+
+	const CATALOG_BATCH_SIZE = 24;
+	let visibleCount = $state(CATALOG_BATCH_SIZE);
+	let hasMoreServerItems = $state(false);
+	let serverOffset = 0;
+	let catalogPane: HTMLDivElement | null = null;
+	let lastBatchResetSearch = '';
 
 	type EnergyResultRow = {
 		id: string;
@@ -82,6 +91,19 @@
 		return [];
 	}
 
+	function readHasMore(payload: unknown, fallback: boolean): boolean {
+		if (
+			typeof payload === 'object' &&
+			payload !== null &&
+			'hasMore' in payload &&
+			typeof (payload as { hasMore: unknown }).hasMore === 'boolean'
+		) {
+			return (payload as { hasMore: boolean }).hasMore;
+		}
+
+		return fallback;
+	}
+
 	function getIsotopeName(item: IsotopeCatalogItem): string {
 		return `${item.shortName}-${item.massNumber}${item.suffix}`;
 	}
@@ -138,12 +160,16 @@
 		return selectedIsotopeKeys.has(getSelectionKey(item, energy));
 	}
 
-	async function loadItems(search: string) {
+	async function loadItems(search: string, offset = 0) {
 		const apiUrl = env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
 		const requestUrl = new URL(apiUrl, window.location.origin);
 		const trimmedSearch = search.trim();
-		requestUrl.searchParams.set('limit', trimmedSearch ? '25' : '100');
-		if (search.trim()) {
+		const batchLimit = trimmedSearch ? 25 : 100;
+		requestUrl.searchParams.set('limit', String(batchLimit));
+		if (offset > 0) {
+			requestUrl.searchParams.set('offset', String(offset));
+		}
+		if (trimmedSearch) {
 			requestUrl.searchParams.set('q', trimmedSearch);
 		}
 
@@ -167,18 +193,20 @@
 				throw new Error(`Request failed with status ${response.status}`);
 			}
 
-			const nextItems = normalizeItems(await response.json());
+			const payload: unknown = await response.json();
+			catalogStatus.noteResponse(payload);
+			const nextItems = normalizeItems(payload);
 			if (fetchSequence !== lastFetchSequence) {
 				return;
 			}
 
 			cachedItems = [
-				...cachedItems.filter(
-					(cachedItem) => !nextItems.some((item) => item.id === cachedItem.id)
-				),
+				...cachedItems.filter((cachedItem) => !nextItems.some((item) => item.id === cachedItem.id)),
 				...nextItems
 			];
 			lastFetchedSearch = trimmedSearch;
+			serverOffset = offset + nextItems.length;
+			hasMoreServerItems = readHasMore(payload, nextItems.length === batchLimit);
 		} catch (error) {
 			if (fetchSequence !== lastFetchSequence) {
 				return;
@@ -250,7 +278,7 @@
 			return a.energy - b.energy;
 		})
 	);
-	let visibleRows = $derived(sortedRows.slice(0, 24));
+	let visibleRows = $derived(sortedRows.slice(0, visibleCount));
 	let selectedIsotopeKeys = $derived(new Set(selectedIsotopes.map(getIsotopeSelectionKey)));
 	let selectedIsotopeIdKeys = $derived(new Set(selectedIsotopes.map(getSelectedIsotopeIdKey)));
 
@@ -281,6 +309,53 @@
 		};
 	});
 
+	$effect(() => {
+		if (searchTerm !== lastBatchResetSearch) {
+			lastBatchResetSearch = searchTerm;
+			visibleCount = CATALOG_BATCH_SIZE;
+			if (catalogPane) {
+				catalogPane.scrollTop = 0;
+			}
+		}
+	});
+
+	function showNextBatch() {
+		if (visibleCount < sortedRows.length) {
+			visibleCount += CATALOG_BATCH_SIZE;
+			return;
+		}
+
+		if (hasMoreServerItems && !isLoading) {
+			visibleCount += CATALOG_BATCH_SIZE;
+			void loadItems(lastFetchedSearch, serverOffset);
+		}
+	}
+
+	function handleCatalogScroll() {
+		if (!catalogPane) {
+			return;
+		}
+
+		const distanceFromBottom =
+			catalogPane.scrollHeight - catalogPane.scrollTop - catalogPane.clientHeight;
+		if (distanceFromBottom <= 48) {
+			showNextBatch();
+		}
+	}
+
+	// If the pane cannot scroll yet (short or heavily filtered list) the scroll
+	// event never fires, so keep loading batches until it can or nothing is left.
+	$effect(() => {
+		void sortedRows.length;
+		void visibleCount;
+		void hasMoreServerItems;
+		if (isLoading) {
+			return;
+		}
+
+		handleCatalogScroll();
+	});
+
 	function addSelectedIsotope(item: IsotopeCatalogItem, energy: number) {
 		if (isExactIsotopeSelected(item, energy)) {
 			return;
@@ -292,7 +367,6 @@
 	function removeSelectedIsotope(index: number) {
 		selectedIsotopes = selectedIsotopes.filter((_, isotopeIndex) => isotopeIndex !== index);
 	}
-
 </script>
 
 <div class="space-y-4">
@@ -309,28 +383,37 @@
 				/>
 			</label>
 
-			<div class="isotope-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2">
+			<div
+				bind:this={catalogPane}
+				onscroll={handleCatalogScroll}
+				class="isotope-grid max-h-80 overflow-y-auto rounded border border-gray-300 p-2"
+			>
 				{#if isLoading && cachedItems.length === 0}
 					<p class="p-2">Loading isotope catalog...</p>
 				{:else if errorMessage && cachedItems.length === 0}
 					<p class="p-2">Unable to load isotope catalog: {errorMessage}</p>
 				{:else if visibleRows.length > 0}
 					{#each visibleRows as row (row.id)}
-					{@const isAlreadySelected = selectedIsotopeKeys.has(getSelectionKey(row.item, row.energy))}
-					<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
-						<div class="flex items-start justify-between gap-4">
-							<div class="space-y-1">
-								<div class="font-bold">{row.item.elementName} ({getIsotopeName(row.item)})</div>
-								<div class="text-sm">Energy: {row.energy} keV</div>
-								<div class="text-sm">Half-life: {row.item.halfLife.number || row.item.halfLifeSeconds} {row.item.halfLife.unit}</div>
-							</div>
-							<button
-								class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
-								type="button"
-								onclick={() => addSelectedIsotope(row.item, row.energy)}
-								disabled={isAlreadySelected}
-							>
-								{isAlreadySelected ? 'Added' : 'Add'}
+						{@const isAlreadySelected = selectedIsotopeKeys.has(
+							getSelectionKey(row.item, row.energy)
+						)}
+						<div class="rounded border border-gray-200 p-3 transition hover:border-gray-400">
+							<div class="flex items-start justify-between gap-4">
+								<div class="space-y-1">
+									<div class="font-bold">{row.item.elementName} ({getIsotopeName(row.item)})</div>
+									<div class="text-sm">Energy: {row.energy} keV</div>
+									<div class="text-sm">
+										Half-life: {row.item.halfLife.number || row.item.halfLifeSeconds}
+										{row.item.halfLife.unit}
+									</div>
+								</div>
+								<button
+									class="rounded border border-gray-300 px-3 py-2 text-sm font-bold transition hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
+									type="button"
+									onclick={() => addSelectedIsotope(row.item, row.energy)}
+									disabled={isAlreadySelected}
+								>
+									{isAlreadySelected ? 'Added' : 'Add'}
 								</button>
 							</div>
 						</div>
@@ -342,8 +425,8 @@
 				{/if}
 			</div>
 
-			{#if sortedRows.length > visibleRows.length}
-				<p>Showing the first {visibleRows.length} matches. Keep typing to narrow the list.</p>
+			{#if sortedRows.length > visibleRows.length || hasMoreServerItems}
+				<p>Showing {visibleRows.length} matches. Scroll the list to load more.</p>
 			{/if}
 
 			{#if isLoading && cachedItems.length > 0}
@@ -356,6 +439,7 @@
 		</div>
 	</div>
 
+	{#if showSelectionList}
 		<div class="space-y-3">
 			<h3 class="text-xl font-bold">Selected isotopes</h3>
 			{#if selectedIsotopes.length === 0}
@@ -377,6 +461,7 @@
 				</div>
 			{/if}
 		</div>
+	{/if}
 </div>
 
 <style>

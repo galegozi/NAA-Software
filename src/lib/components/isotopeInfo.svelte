@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { IsotopeInfo } from '$lib/types.js';
+	import { getIsotopeErrors } from '$lib/utils/materialValidation.js';
 
 	let {
 		isotopeInfo = $bindable<IsotopeInfo>({
@@ -10,24 +11,14 @@
 			linkedReference: 0,
 			unit: 'seconds'
 		})
-	} = $props();
+	}: { isotopeInfo?: IsotopeInfo } = $props();
 
 	export function validateIsotopeInfo(): boolean {
-		return (
-			isotopeInfo.elementName !== '' &&
-			isotopeInfo.isotopeName !== '' &&
-			isotopeInfo.energy > 0 &&
-			isotopeInfo.halfLife > 0
-		);
+		return getValidationErrors().length === 0;
 	}
 
 	export function getValidationErrors(): string[] {
-		const errors: string[] = [];
-		if (!isotopeInfo.elementName) errors.push('Element name is required');
-		if (!isotopeInfo.isotopeName) errors.push('Isotope name is required');
-		if (isotopeInfo.energy <= 0) errors.push('Energy must be greater than 0');
-		if (isotopeInfo.halfLife <= 0) errors.push('Half-life must be greater than 0');
-		return errors;
+		return getIsotopeErrors(isotopeInfo);
 	}
 
 	let showErrors = $state(false);

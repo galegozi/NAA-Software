@@ -8,7 +8,12 @@ import {
 } from '../lib/cosmosClient.js';
 import { mapIsotopeItem } from '../lib/isotopeMapper.js';
 import { enrichReferenceMaterialCatalogItems } from '../lib/referenceMaterialCatalogEnrichment.js';
-import { mergeReferenceMaterialWrite, normalizeReferenceMaterialWritePayload } from '../lib/referenceMaterialWritePayload.js';
+import {
+	mergeReferenceMaterialWrite,
+	normalizeReferenceMaterialWritePayload,
+	referenceMaterialHasCounting,
+	replaceCountingInReferenceMaterial
+} from '../lib/referenceMaterialWritePayload.js';
 import { canWriteIsotopes } from '../lib/staticWebAppsAuth.js';
 
 const MOCK_REFERENCE_MATERIALS = [
@@ -107,24 +112,39 @@ function clampLimit(rawValue) {
 	return Math.min(Math.max(parsed, 1), 100);
 }
 
-function buildSearchQuery(rawSearch, rawLimit) {
+function clampOffset(rawValue) {
+	const parsed = Number.parseInt(rawValue ?? '0', 10);
+	if (!Number.isFinite(parsed)) {
+		return 0;
+	}
+
+	return Math.max(parsed, 0);
+}
+
+function buildSearchQuery(rawSearch, rawLimit, rawOffset) {
 	const limit = clampLimit(rawLimit);
+	const offset = clampOffset(rawOffset);
 	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
+	const pagingParameters = [
+		{ name: '@offset', value: offset },
+		{ name: '@limit', value: limit }
+	];
 
 	if (!normalizedSearch) {
 		return {
 			query: `
-				SELECT TOP ${limit} * FROM c
+				SELECT * FROM c
 				WHERE c.docType = @docType
 				ORDER BY c._ts DESC
+				OFFSET @offset LIMIT @limit
 			`,
-			parameters: [{ name: '@docType', value: 'reference-material' }]
+			parameters: [{ name: '@docType', value: 'reference-material' }, ...pagingParameters]
 		};
 	}
 
 	return {
 		query: `
-			SELECT TOP ${limit} * FROM c
+			SELECT * FROM c
 			WHERE c.docType = @docType
 				AND (
 					(IS_DEFINED(c.referenceKey) AND IS_STRING(c.referenceKey) AND CONTAINS(LOWER(c.referenceKey), @search))
@@ -185,10 +205,12 @@ function buildSearchQuery(rawSearch, rawLimit) {
 					)
 				)
 			ORDER BY c._ts DESC
+			OFFSET @offset LIMIT @limit
 		`,
 		parameters: [
 			{ name: '@docType', value: 'reference-material' },
-			{ name: '@search', value: normalizedSearch }
+			{ name: '@search', value: normalizedSearch },
+			...pagingParameters
 		]
 	};
 }
@@ -251,11 +273,18 @@ function matchesMockSearch(item, normalizedSearch) {
 	return haystack.includes(normalizedSearch);
 }
 
-function getMockSearchResults(rawSearch, rawLimit) {
+function getMockSearchResults(rawSearch, rawLimit, rawOffset) {
 	const normalizedSearch = rawSearch?.trim().toLowerCase() ?? '';
 	const limit = clampLimit(rawLimit);
+	const offset = clampOffset(rawOffset);
+	const matches = MOCK_REFERENCE_MATERIALS.filter((item) =>
+		matchesMockSearch(item, normalizedSearch)
+	);
 
-	return MOCK_REFERENCE_MATERIALS.filter((item) => matchesMockSearch(item, normalizedSearch)).slice(0, limit);
+	return {
+		items: matches.slice(offset, offset + limit),
+		hasMore: offset + limit < matches.length
+	};
 }
 
 async function fetchItemsByIds(container, ids) {
@@ -304,7 +333,8 @@ async function buildReferenceMaterialEnrichmentLookups(items) {
 			}
 		}
 
-		const latestDatasheetId = item?.latestCounting?.referenceMaterial?.referenceDatasheetId?.trim?.();
+		const latestDatasheetId =
+			item?.latestCounting?.referenceMaterial?.referenceDatasheetId?.trim?.();
 		if (latestDatasheetId) {
 			datasheetIds.push(latestDatasheetId);
 		}
@@ -371,7 +401,8 @@ async function getReferenceMaterialsHandler(request, context) {
 		const url = new URL(request.url);
 		const search = url.searchParams.get('q') ?? '';
 		const limit = url.searchParams.get('limit');
-		const mockItems = getMockSearchResults(search, limit);
+		const offset = url.searchParams.get('offset');
+		const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
 
 		context.log('Returning mock reference material catalog results.', {
 			search,
@@ -386,6 +417,7 @@ async function getReferenceMaterialsHandler(request, context) {
 				items: mockItems.map(mapReferenceMaterialItem),
 				count: mockItems.length,
 				search,
+				hasMore,
 				mocked: true
 			}
 		};
@@ -395,7 +427,8 @@ async function getReferenceMaterialsHandler(request, context) {
 		const url = new URL(request.url);
 		const search = url.searchParams.get('q') ?? '';
 		const limit = url.searchParams.get('limit');
-		const queryText = buildSearchQuery(search, limit);
+		const offset = url.searchParams.get('offset');
+		const queryText = buildSearchQuery(search, limit, offset);
 		const container = getReferenceMaterialsContainer();
 		const query = container.items.query(queryText);
 		const { resources } = await query.fetchAll();
@@ -414,7 +447,8 @@ async function getReferenceMaterialsHandler(request, context) {
 			jsonBody: {
 				items: enrichedItems,
 				count: resources.length,
-				search
+				search,
+				hasMore: resources.length === clampLimit(limit)
 			}
 		};
 	} catch (error) {
@@ -422,7 +456,8 @@ async function getReferenceMaterialsHandler(request, context) {
 			const url = new URL(request.url);
 			const search = url.searchParams.get('q') ?? '';
 			const limit = url.searchParams.get('limit');
-			const mockItems = getMockSearchResults(search, limit);
+			const offset = url.searchParams.get('offset');
+			const { items: mockItems, hasMore } = getMockSearchResults(search, limit, offset);
 
 			context.warn(
 				'Cosmos query failed in local development. Falling back to mock reference material catalog.',
@@ -439,6 +474,7 @@ async function getReferenceMaterialsHandler(request, context) {
 					items: mockItems.map(mapReferenceMaterialItem),
 					count: mockItems.length,
 					search,
+					hasMore,
 					mocked: true,
 					fallback: 'local-cosmos-error'
 				}
@@ -457,7 +493,6 @@ async function getReferenceMaterialsHandler(request, context) {
 }
 
 async function createReferenceMaterialHandler(request, context) {
-
 	const authorization = canWriteIsotopes(request);
 	if (!authorization.authorized) {
 		return {
@@ -492,6 +527,17 @@ async function createReferenceMaterialHandler(request, context) {
 		};
 	}
 
+	// "Update existing": overwrite one counting on a known document by id, rather
+	// than matching on the metadata fingerprint (which forks on any edit).
+	const replaceTarget =
+		body?.mode === 'replace-counting' &&
+		typeof body.targetItemId === 'string' &&
+		body.targetItemId.trim() &&
+		typeof body.targetCountingId === 'string' &&
+		body.targetCountingId.trim()
+			? { itemId: body.targetItemId.trim(), countingId: body.targetCountingId.trim() }
+			: null;
+
 	if (isMockCosmosEnabled()) {
 		context.log('MOCK_COSMOS enabled: mock-saving reference material payload.', {
 			referenceKey: item.referenceKey,
@@ -500,11 +546,13 @@ async function createReferenceMaterialHandler(request, context) {
 		});
 
 		return {
-			status: 201,
+			status: replaceTarget ? 200 : 201,
 			jsonBody: {
 				item,
-				created: true,
-				appendedCountings: item.countings.length,
+				created: !replaceTarget,
+				...(replaceTarget
+					? { replacedCounting: true }
+					: { appendedCountings: item.countings.length }),
 				totalCountings: item.countings.length,
 				mocked: true
 			}
@@ -513,10 +561,42 @@ async function createReferenceMaterialHandler(request, context) {
 
 	try {
 		const container = getReferenceMaterialsContainer();
+
+		if (replaceTarget) {
+			const targetItem = await findReferenceMaterialById(container, replaceTarget.itemId);
+			if (!targetItem) {
+				return {
+					status: 404,
+					jsonBody: { error: 'The reference material to update no longer exists in the catalog.' }
+				};
+			}
+
+			const replacedCounting = referenceMaterialHasCounting(targetItem, replaceTarget.countingId);
+			const updatedItem = replaceCountingInReferenceMaterial(
+				targetItem,
+				item,
+				replaceTarget.countingId,
+				authorization.principal
+			);
+			const response = await container.items.upsert(updatedItem);
+
+			return {
+				status: 200,
+				jsonBody: {
+					item: response.resource ?? updatedItem,
+					created: false,
+					replacedCounting,
+					totalCountings: updatedItem.countings.length
+				}
+			};
+		}
+
 		const existingItem = await findExistingReferenceMaterial(container, item.referenceKey);
 
 		if (existingItem) {
-			const previousCount = Array.isArray(existingItem.countings) ? existingItem.countings.length : 0;
+			const previousCount = Array.isArray(existingItem.countings)
+				? existingItem.countings.length
+				: 0;
 			const mergedItem = mergeReferenceMaterialWrite(existingItem, item, authorization.principal);
 			const response = await container.items.upsert(mergedItem);
 			const nextCount = Array.isArray(mergedItem.countings) ? mergedItem.countings.length : 0;
@@ -572,9 +652,24 @@ async function findExistingReferenceMaterial(container, referenceKey) {
 	return resources[0] ?? null;
 }
 
+async function findReferenceMaterialById(container, id) {
+	const query = container.items.query({
+		query: 'SELECT TOP 1 * FROM c WHERE c.docType = @docType AND c.id = @id',
+		parameters: [
+			{ name: '@docType', value: 'reference-material' },
+			{ name: '@id', value: id }
+		]
+	});
+
+	const { resources } = await query.fetchAll();
+	return resources[0] ?? null;
+}
+
 app.http('reference-materials', {
 	route: 'reference-materials',
 	methods: ['GET', 'POST'],
 	authLevel: 'anonymous',
 	handler: referenceMaterialsHandler
 });
+
+export { referenceMaterialsHandler };

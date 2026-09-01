@@ -12,7 +12,12 @@
 		},
 		{
 			"route": "/api/isotope-measurements",
-			"methods": ["GET", "POST"],
+			"methods": ["POST"],
+			"allowedRoles": ["isotope_writer"]
+		},
+		{
+			"route": "/api/reference-datasheets",
+			"methods": ["POST"],
 			"allowedRoles": ["isotope_writer"]
 		}
 	],

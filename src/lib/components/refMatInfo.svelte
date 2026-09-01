@@ -2,6 +2,7 @@
 
 <script lang="ts">
 	import MaterialInfo from './materialInfo.svelte';
+	import { getReferenceMaterialErrors } from '$lib/utils/materialValidation.js';
 	let {
 		isotopeCount,
 		refMatInfo = $bindable({
@@ -27,6 +28,7 @@
 			})),
 			irradiationType: 'total',
 			dtType: undefined,
+			countingMode: 'normal',
 
 			// specific to Reference Material
 			// concentration units (in percentage or ppm) for each isotope
@@ -128,29 +130,13 @@
 	}
 
 	export function getValidationErrors(): string[] {
-		const errors: string[] = [];
-
-		// Validate base material info using the MaterialInfo component's validation
-		if (matInfoRef && typeof matInfoRef.validateMaterialInfo === 'function') {
-			if (!matInfoRef.validateMaterialInfo()) {
-				errors.push(...matInfoRef.getValidationErrors());
-			}
-		}
-
-		// Validate known concentration and uncertainty
+		const enabledIsotopeIndices: number[] = [];
 		for (let i = 0; i < isotopeCount; i++) {
-			if (!isIsotopeEnabled(i)) {
-				continue;
-			}
-			if (refMatInfo.knownConcentration[i] <= 0) {
-				errors.push(`${getIsotopeLabel(i)}: Known Concentration must be greater than 0`);
-			}
-			if (refMatInfo.knownUncertainty[i] < 0) {
-				errors.push(`${getIsotopeLabel(i)}: Known Uncertainty cannot be negative`);
+			if (isIsotopeEnabled(i)) {
+				enabledIsotopeIndices.push(i);
 			}
 		}
-
-		return errors;
+		return getReferenceMaterialErrors(refMatInfo, enabledIsotopeIndices, getIsotopeLabel);
 	}
 
 	let showErrors = $state(false);
