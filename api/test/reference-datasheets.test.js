@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.MOCK_COSMOS = 'true';
 
-const { referenceDatasheetsHandler } = await import('./reference-datasheets.js');
+const { referenceDatasheetsHandler } = await import('../src/functions/reference-datasheets.js');
 
 function request(method, { principal, body } = {}) {
 	const headers = new Headers();

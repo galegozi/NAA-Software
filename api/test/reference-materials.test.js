@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.MOCK_COSMOS = 'true';
 
-const { referenceMaterialsHandler } = await import('./reference-materials.js');
+const { referenceMaterialsHandler } = await import('../src/functions/reference-materials.js');
 
 function request(method, { principal, body, url = 'https://x/api/reference-materials' } = {}) {
 	const headers = new Headers();

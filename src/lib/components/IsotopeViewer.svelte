@@ -22,7 +22,7 @@
 	const CATALOG_BATCH_SIZE = 24;
 	let visibleCount = $state(CATALOG_BATCH_SIZE);
 	let hasMoreServerItems = $state(false);
-	let serverOffset = 0;
+	let serverContinuation: string | null = null;
 	let catalogPane: HTMLDivElement | null = null;
 	let lastBatchResetSearch = '';
 
@@ -91,17 +91,12 @@
 		return [];
 	}
 
-	function readHasMore(payload: unknown, fallback: boolean): boolean {
-		if (
-			typeof payload === 'object' &&
-			payload !== null &&
-			'hasMore' in payload &&
-			typeof (payload as { hasMore: unknown }).hasMore === 'boolean'
-		) {
-			return (payload as { hasMore: boolean }).hasMore;
+	function readContinuation(payload: unknown): string | null {
+		if (typeof payload === 'object' && payload !== null && 'continuation' in payload) {
+			const token = (payload as { continuation: unknown }).continuation;
+			return typeof token === 'string' && token.length > 0 ? token : null;
 		}
-
-		return fallback;
+		return null;
 	}
 
 	function getIsotopeName(item: IsotopeCatalogItem): string {
@@ -160,15 +155,13 @@
 		return selectedIsotopeKeys.has(getSelectionKey(item, energy));
 	}
 
-	async function loadItems(search: string, offset = 0) {
+	async function loadItems(search: string, continuation: string | null = null) {
 		const apiUrl = env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
 		const requestUrl = new URL(apiUrl, window.location.origin);
 		const trimmedSearch = search.trim();
-		// The isotopes endpoint has no server-side paging; pull the whole catalog.
-		const batchLimit = trimmedSearch ? 100 : 1000;
-		requestUrl.searchParams.set('limit', String(batchLimit));
-		if (offset > 0) {
-			requestUrl.searchParams.set('offset', String(offset));
+		requestUrl.searchParams.set('limit', '100');
+		if (continuation) {
+			requestUrl.searchParams.set('continuation', continuation);
 		}
 		if (trimmedSearch) {
 			requestUrl.searchParams.set('q', trimmedSearch);
@@ -206,8 +199,8 @@
 				...nextItems
 			];
 			lastFetchedSearch = trimmedSearch;
-			serverOffset = offset + nextItems.length;
-			hasMoreServerItems = readHasMore(payload, nextItems.length === batchLimit);
+			serverContinuation = readContinuation(payload);
+			hasMoreServerItems = serverContinuation !== null;
 		} catch (error) {
 			if (fetchSequence !== lastFetchSequence) {
 				return;
@@ -326,9 +319,9 @@
 			return;
 		}
 
-		if (hasMoreServerItems && !isLoading) {
+		if (hasMoreServerItems && !isLoading && serverContinuation) {
 			visibleCount += CATALOG_BATCH_SIZE;
-			void loadItems(lastFetchedSearch, serverOffset);
+			void loadItems(lastFetchedSearch, serverContinuation);
 		}
 	}
 

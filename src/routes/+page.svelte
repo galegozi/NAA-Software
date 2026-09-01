@@ -1851,21 +1851,32 @@
 		const apiUrl = import.meta.env.PUBLIC_ISOTOPE_API_URL?.trim() || '/api/isotopes';
 
 		try {
-			const response = await fetch(`${apiUrl}?limit=1000`, {
-				headers: {
-					accept: 'application/json'
+			// Page through the whole catalog (needed for reference/proxy matching).
+			const all: IsotopeCatalogItem[] = [];
+			let continuation: string | null = null;
+			for (let guard = 0; guard < 50; guard++) {
+				const url = new URL(apiUrl, window.location.origin);
+				url.searchParams.set('limit', '200');
+				if (continuation) {
+					url.searchParams.set('continuation', continuation);
 				}
-			});
-
-			const body = await response.json().catch(() => null);
-			if (!response.ok) {
-				return;
+				const response = await fetch(url, { headers: { accept: 'application/json' } });
+				const body = await response.json().catch(() => null);
+				if (!response.ok) {
+					return;
+				}
+				catalogStatus.noteResponse(body);
+				if (Array.isArray(body?.items)) {
+					all.push(...(body.items as IsotopeCatalogItem[]));
+				}
+				continuation = typeof body?.continuation === 'string' ? body.continuation : null;
+				if (!continuation) {
+					break;
+				}
 			}
-			catalogStatus.noteResponse(body);
 
-			const items = Array.isArray(body?.items) ? body.items : [];
 			isotopeCatalogById = Object.fromEntries(
-				(items as IsotopeCatalogItem[])
+				all
 					.filter((item) => typeof item?.id === 'string' && item.id.trim().length > 0)
 					.map((item) => [item.id, item])
 			);

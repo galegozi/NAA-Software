@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.MOCK_COSMOS = 'true';
 
-const { isotopeMeasurementsHandler } = await import('./isotope-measurements.js');
+const { isotopeMeasurementsHandler } = await import('../src/functions/isotope-measurements.js');
 
 function request(method, { principal, body } = {}) {
 	const headers = new Headers();
