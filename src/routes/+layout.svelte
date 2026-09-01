@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { resolve } from '$app/paths';
 	import { theme } from '$lib/utils/theme.svelte.js';
 	import { analysisMeta } from '$lib/utils/analysisMeta.svelte.js';
 	import { swaAuth, redirectToSignIn, signOut } from '$lib/utils/swaAuth.svelte.js';
@@ -32,6 +33,14 @@
 		</button>
 
 		<div class="top-nav__right">
+			<a
+				class="top-nav__link"
+				class:active={$page.url.pathname.startsWith('/help')}
+				href={resolve('/help')}
+			>
+				Help
+			</a>
+
 			{#if swaAuth.signInAvailable}
 				{#if swaAuth.signedIn}
 					<span class="top-nav__auth">
