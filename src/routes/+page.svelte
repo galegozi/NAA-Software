@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { tick, untrack } from 'svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import IsotopeInfo from '$lib/components/isotopeInfo.svelte';
 	import MaterialInfo from '$lib/components/materialInfo.svelte';
 	import RefMatInfo from '$lib/components/refMatInfo.svelte';
@@ -18,6 +18,8 @@
 	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
 
 	import type {
+		ConcUnitType,
+		CountData as CountDataType,
 		IsotopeCatalogItem,
 		IsotopeInfo as IsotopeInfoType,
 		ReferenceMaterialCatalogCounting,
@@ -375,6 +377,7 @@
 		matRefs = { reference: [], unknown: [] };
 		referenceIsotopeSelections = [];
 		referenceCatalogItemIds = [];
+		catalogReferenceSources.clear();
 		isotopeReferenceMap = [];
 		validationErrors = [];
 		referenceCatalogMessage = '';
@@ -1358,6 +1361,18 @@
 	});
 	let referenceIsotopeSelections = $state<Set<string>[]>([]);
 	let referenceCatalogItemIds = $state<(string | null)[]>([]);
+	/**
+	 * The catalog item + counting each catalog-sourced reference was built from,
+	 * keyed by its `referenceCatalogItemIds` selection id. Kept so coverage can be
+	 * recomputed when a proxy relationship is recorded *after* the reference was
+	 * added (see `reconcileCatalogReferenceCoverage`). Not persisted — after a
+	 * reload the reference's data is already materialised; a re-pick is only needed
+	 * to pick up a newly-recorded relationship on an old draft.
+	 */
+	const catalogReferenceSources = new SvelteMap<
+		string,
+		{ item: ReferenceMaterialCatalogItem; counting: ReferenceMaterialCatalogCounting }
+	>();
 	let referenceCatalogMessage = $state('');
 	let referenceCatalogError = $state('');
 	let referenceCatalogWarning = $state('');
@@ -1912,7 +1927,7 @@
 		}
 
 		const sourceMaterial = sourceCounting?.referenceMaterial;
-		if (!sourceMaterial) {
+		if (!sourceCounting || !sourceMaterial) {
 			referenceCatalogError = 'Selected catalog entry does not contain a saved counting.';
 			return;
 		}
@@ -1934,6 +1949,54 @@
 		nextReference.countingMode = sourceMaterial.countingMode === 'compton' ? 'compton' : 'normal';
 		nextReference.referenceDatasheetId = sourceMaterial.referenceDatasheetId;
 
+		const { matched, proxyWarnings } = matchCatalogCounting(item, sourceMaterial);
+
+		if (matched.length === 0) {
+			referenceCatalogError =
+				'This reference irradiation does not cover any currently selected isotopes.';
+			return;
+		}
+
+		const matchedSelection = new SvelteSet<string>();
+		for (const { index, data } of matched) {
+			matchedSelection.add(getIsotopeSelectionKey(index));
+			nextReference.counts[index] = data.count;
+			nextReference.knownConcentration[index] = data.concentration;
+			nextReference.knownUncertainty[index] = data.uncertainty;
+			nextReference.concentrationUnits[index] = data.unit;
+		}
+
+		materials = {
+			...materials,
+			reference: [...materials.reference, nextReference]
+		};
+		referenceIsotopeSelections = [...referenceIsotopeSelections, matchedSelection];
+		referenceCatalogItemIds = [...referenceCatalogItemIds, selectionId];
+		catalogReferenceSources.set(selectionId, { item, counting: sourceCounting });
+		matRefs.reference = [...matRefs.reference, undefined];
+		updateIsotopeReferenceMap(isotopeCount, materials.reference.length);
+
+		referenceCatalogMessage = `Added ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName})${sourceMaterial.irradiationType ? ` [${sourceMaterial.irradiationType}]` : ''}. Covers ${matchedSelection.size} isotope row(s).`;
+		referenceCatalogWarning = proxyWarnings.join(' ');
+	}
+
+	type CatalogCoverageData = {
+		count: CountDataType;
+		concentration: number;
+		uncertainty: number;
+		unit: ConcUnitType;
+	};
+
+	/**
+	 * Match a catalog counting's isotopes against the current analysis isotopes
+	 * (relationship-aware, via `findCatalogIsotopeMatch` →
+	 * `getCatalogMatchCandidateIds`). Returns the per-analysis-isotope data to
+	 * copy plus any "selected X but measured Y" proxy warnings.
+	 */
+	function matchCatalogCounting(
+		item: ReferenceMaterialCatalogItem,
+		sourceMaterial: ReferenceMaterial
+	): { matched: Array<{ index: number; data: CatalogCoverageData }>; proxyWarnings: string[] } {
 		const sourceCounts = Array.isArray(sourceMaterial.counts) ? sourceMaterial.counts : [];
 		const sourceConcentrations = Array.isArray(sourceMaterial.knownConcentration)
 			? sourceMaterial.knownConcentration
@@ -1945,8 +2008,8 @@
 			? sourceMaterial.concentrationUnits
 			: [];
 
-		const usedIndices = new Set<number>();
-		const matchedSelection = new Set<string>();
+		const usedIndices = new SvelteSet<number>();
+		const matched: Array<{ index: number; data: CatalogCoverageData }> = [];
 		const proxyWarnings: string[] = [];
 
 		for (let index = 0; index < isotopeCount; index++) {
@@ -1955,9 +2018,7 @@
 			if (sourceIndex < 0) {
 				continue;
 			}
-
 			usedIndices.add(sourceIndex);
-			matchedSelection.add(getIsotopeSelectionKey(index));
 
 			const targetId = isotopeInfo[index]?.id?.trim();
 			if (targetId && match.matchedIsotopeId && match.matchedIsotopeId !== targetId) {
@@ -1967,41 +2028,97 @@
 				}
 			}
 
-			nextReference.counts[index] = {
-				grossCounts: sourceCounts[sourceIndex]?.grossCounts ?? 0,
-				netCounts: sourceCounts[sourceIndex]?.netCounts ?? 0,
-				uncertainty: sourceCounts[sourceIndex]?.uncertainty ?? 0,
-				grossCountsPositionalCorrectionFactor:
-					sourceCounts[sourceIndex]?.grossCountsPositionalCorrectionFactor ?? 1,
-				netCountsPositionalCorrectionFactor:
-					sourceCounts[sourceIndex]?.netCountsPositionalCorrectionFactor ?? 1,
-				uncertaintyPositionalCorrectionFactor:
-					sourceCounts[sourceIndex]?.uncertaintyPositionalCorrectionFactor ?? 1
-			};
-
-			nextReference.knownConcentration[index] = sourceConcentrations[sourceIndex] ?? 0;
-			nextReference.knownUncertainty[index] = sourceUncertainties[sourceIndex] ?? 0;
-			nextReference.concentrationUnits[index] = sourceUnits[sourceIndex];
+			matched.push({
+				index,
+				data: {
+					count: {
+						grossCounts: sourceCounts[sourceIndex]?.grossCounts ?? 0,
+						netCounts: sourceCounts[sourceIndex]?.netCounts ?? 0,
+						uncertainty: sourceCounts[sourceIndex]?.uncertainty ?? 0,
+						grossCountsPositionalCorrectionFactor:
+							sourceCounts[sourceIndex]?.grossCountsPositionalCorrectionFactor ?? 1,
+						netCountsPositionalCorrectionFactor:
+							sourceCounts[sourceIndex]?.netCountsPositionalCorrectionFactor ?? 1,
+						uncertaintyPositionalCorrectionFactor:
+							sourceCounts[sourceIndex]?.uncertaintyPositionalCorrectionFactor ?? 1
+					},
+					concentration: sourceConcentrations[sourceIndex] ?? 0,
+					uncertainty: sourceUncertainties[sourceIndex] ?? 0,
+					unit: sourceUnits[sourceIndex]
+				}
+			});
 		}
 
-		if (matchedSelection.size === 0) {
-			referenceCatalogError =
-				'This reference irradiation does not cover any currently selected isotopes.';
+		return { matched, proxyWarnings };
+	}
+
+	/**
+	 * Re-match every catalog-sourced reference against its stored counting and
+	 * fold in any isotope rows that are *newly* covered — e.g. after the user
+	 * records an "A measures B" relationship that lets a reference which counted A
+	 * cover the analysis's B. Only ever adds coverage (and copies data for the
+	 * added rows); existing rows, including any the user edited, are left alone.
+	 */
+	function reconcileCatalogReferenceCoverage() {
+		if (catalogReferenceSources.size === 0) {
 			return;
 		}
+		const nextReferences = [...materials.reference];
+		const nextSelections = [...referenceIsotopeSelections];
+		let mutated = false;
 
-		materials = {
-			...materials,
-			reference: [...materials.reference, nextReference]
-		};
-		referenceIsotopeSelections = [...referenceIsotopeSelections, matchedSelection];
-		referenceCatalogItemIds = [...referenceCatalogItemIds, selectionId];
-		matRefs.reference = [...matRefs.reference, undefined];
-		updateIsotopeReferenceMap(isotopeCount, materials.reference.length);
+		for (let i = 0; i < nextReferences.length; i++) {
+			const selectionId = referenceCatalogItemIds[i];
+			if (typeof selectionId !== 'string') {
+				continue;
+			}
+			const source = catalogReferenceSources.get(selectionId);
+			const sourceMaterial = source?.counting?.referenceMaterial;
+			if (!source || !sourceMaterial) {
+				continue;
+			}
 
-		referenceCatalogMessage = `Added ${sourceMaterial.NETL_code} (${sourceMaterial.sampleName})${sourceMaterial.irradiationType ? ` [${sourceMaterial.irradiationType}]` : ''}. Covers ${matchedSelection.size} isotope row(s).`;
-		referenceCatalogWarning = proxyWarnings.join(' ');
+			const current = nextSelections[i] ?? new SvelteSet<string>();
+			const { matched } = matchCatalogCounting(source.item, sourceMaterial);
+			const added = matched.filter(({ index }) => !current.has(getIsotopeSelectionKey(index)));
+			if (added.length === 0) {
+				continue;
+			}
+
+			const ref = nextReferences[i];
+			const updated: ReferenceMaterial = {
+				...ref,
+				counts: [...ref.counts],
+				knownConcentration: [...ref.knownConcentration],
+				knownUncertainty: [...ref.knownUncertainty],
+				concentrationUnits: [...ref.concentrationUnits]
+			};
+			const nextSelection = new SvelteSet(current);
+			for (const { index, data } of added) {
+				updated.counts[index] = data.count;
+				updated.knownConcentration[index] = data.concentration;
+				updated.knownUncertainty[index] = data.uncertainty;
+				updated.concentrationUnits[index] = data.unit;
+				nextSelection.add(getIsotopeSelectionKey(index));
+			}
+			nextReferences[i] = updated;
+			nextSelections[i] = nextSelection;
+			mutated = true;
+		}
+
+		if (mutated) {
+			materials = { ...materials, reference: nextReferences };
+			referenceIsotopeSelections = nextSelections;
+			updateIsotopeReferenceMap(isotopeCount, nextReferences.length);
+		}
 	}
+
+	$effect(() => {
+		void allMeasurementLinks;
+		void isotopeInfo.length;
+		void isotopeCatalogById;
+		untrack(() => reconcileCatalogReferenceCoverage());
+	});
 
 	function addCustomIsotope() {
 		isotopeInfo = [...isotopeInfo, createIsotopeInfo()];
@@ -2100,6 +2217,11 @@
 		referenceCatalogError = '';
 		referenceCatalogWarning = '';
 		customReferenceNotice = '';
+
+		const removedSelectionId = referenceCatalogItemIds[referenceIndex];
+		if (typeof removedSelectionId === 'string') {
+			catalogReferenceSources.delete(removedSelectionId);
+		}
 
 		materials = {
 			...materials,
