@@ -4,8 +4,10 @@ import {
 	describeFissionChoice,
 	describeFissionRow,
 	findFissionChoice,
+	fissileParentSymbol,
 	fissionIsotopeKey,
 	isKnownFissionProduct,
+	isotopeIsElement,
 	matchingFissionRows,
 	pruneFissionChoices,
 	upsertFissionChoice,
@@ -104,6 +106,21 @@ describe('choice helpers', () => {
 		expect(
 			pruneFissionChoices(choices, [{ elementName: 'Lanthanum', isotopeName: 'La-140' }])
 		).toEqual([choiceLa]);
+	});
+});
+
+describe('fissile parent helpers', () => {
+	it('resolves an element symbol from a nuclide or element name', () => {
+		expect(fissileParentSymbol('U-235')).toBe('U');
+		expect(fissileParentSymbol('Uranium')).toBe('U');
+		expect(fissileParentSymbol('Pu-239')).toBe('Pu');
+		expect(fissileParentSymbol('')).toBe('');
+	});
+
+	it('matches an analysis isotope to an element', () => {
+		expect(isotopeIsElement({ elementName: 'Uranium', isotopeName: 'U-238' }, 'U')).toBe(true);
+		expect(isotopeIsElement({ elementName: 'U', isotopeName: '235' }, 'U')).toBe(true);
+		expect(isotopeIsElement({ elementName: 'Cerium', isotopeName: 'Ce-141' }, 'U')).toBe(false);
 	});
 });
 

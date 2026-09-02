@@ -54,6 +54,7 @@
 		type FissionCorrectionRecord
 	} from '$lib/utils/fissionCorrections.js';
 	import {
+		FISSILE_NUCLIDES,
 		describeFissionChoice,
 		describeFissionRow,
 		findFissionChoice,
@@ -64,6 +65,7 @@
 		upsertFissionChoice,
 		type FissionChoice
 	} from '$lib/utils/fissionInterference.js';
+	import { computeFissionResults } from '$lib/utils/fissionResults.js';
 	import { swaAuth, redirectToSignIn } from '$lib/utils/swaAuth.svelte.js';
 	import { catalogStatus } from '$lib/utils/catalogStatus.svelte.js';
 	import { analysisMeta } from '$lib/utils/analysisMeta.svelte.js';
@@ -419,6 +421,7 @@
 		fissionChoices = [];
 		fissionDraftFactor = {};
 		fissionDraftUncertainty = {};
+		fissionDraftParent = {};
 		relationshipFeedback = '';
 		relationshipConfirm = null;
 		relationshipPanelOpen = false;
@@ -505,6 +508,7 @@
 	// index. `bind:value` on a number input yields `number | null`.
 	let fissionDraftFactor = $state<Record<number, number | null>>({});
 	let fissionDraftUncertainty = $state<Record<number, number | null>>({});
+	let fissionDraftParent = $state<Record<number, string>>({});
 
 	/**
 	 * A pending upload the user must confirm first. `steps` are shown verbatim;
@@ -1189,7 +1193,8 @@
 			isotopeKey: key,
 			factor,
 			uncertainty,
-			mode: factor === 0 ? 'none' : 'manual'
+			mode: factor === 0 ? 'none' : 'manual',
+			fissileNuclide: factor === 0 ? undefined : (fissionDraftParent[index] ?? FISSILE_NUCLIDES[0])
 		});
 	}
 
@@ -1201,6 +1206,7 @@
 		);
 		delete fissionDraftFactor[index];
 		delete fissionDraftUncertainty[index];
+		delete fissionDraftParent[index];
 	}
 
 	// ---- Proxy-measurement relationships ("A measures B") ------------------
@@ -1812,6 +1818,30 @@
 				})
 	);
 
+	/**
+	 * Fission-interference correction per (interfering isotope, unknown), keyed
+	 * `"<isotopeIndex>:<unknownIndex>"`. Built from the Step 1 `fissionChoices`
+	 * plus the computed results — no separate approval state. `applied: false`
+	 * with a `note` means the inputs to the formula could not be resolved.
+	 */
+	let fissionResults = $derived(
+		computeFissionResults({
+			candidates: fissionCandidates.map((c) => ({ index: c.index, choice: c.choice })),
+			isotopeInfo,
+			references: materials.reference,
+			unknowns: materials.unknown,
+			everythingComp,
+			linkedReferenceIndex: getLinkedReferenceIndex
+		})
+	);
+
+	let appliedFissionResults = $derived(
+		[...fissionResults.values()].filter((result) => result.applied)
+	);
+	let blockedFissionResults = $derived(
+		[...fissionResults.values()].filter((result) => !result.applied && result.note !== '')
+	);
+
 	/** (unknown, linked-reference) pairs counted in different modes — surfaced on the Review step. */
 	let countingModeMismatches = $derived.by(() => {
 		const modeOf = (m?: { countingMode?: string }) =>
@@ -1985,6 +2015,18 @@
 			const pruned = pruneFissionChoices(fissionChoices, isotopeInfo);
 			if (pruned.length !== fissionChoices.length) {
 				fissionChoices = pruned;
+			}
+		});
+	});
+
+	// Give the inline "fissile parent" select a concrete starting value.
+	$effect(() => {
+		const indices = fissionCandidates.map((candidate) => candidate.index);
+		untrack(() => {
+			for (const index of indices) {
+				fissionDraftParent[index] ??=
+					fissionChoices.find((c) => c.isotopeKey === fissionIsotopeKey(isotopeInfo[index]))
+						?.fissileNuclide ?? FISSILE_NUCLIDES[0];
 			}
 		});
 	});
@@ -2816,19 +2858,20 @@
 		];
 		csvRows.push(unitsRow.join(','));
 
-		// Add data rows for each unknown material
+		// Add data rows for each unknown material (fission-corrected where applied)
 		materials.unknown.forEach((unk, uIndex) => {
 			const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`;
 			const row = [
 				escapeCSV(unknownLabel),
 				...isotopeInfo.flatMap((_, iIndex) => {
 					const comp = everythingComp[iIndex][uIndex];
-					return [
-						escapeCSV(roundResult(comp.unknownConcentration)),
-						escapeCSV(
-							roundToMatch(comp.unknownConcentrationUncertaintyAbsolute, comp.unknownConcentration)
-						)
-					];
+					const fission = fissionResults.get(`${iIndex}:${uIndex}`);
+					const applied = Boolean(fission && fission.applied);
+					const shown = applied ? fission!.corrected : comp.unknownConcentration;
+					const shownUnc = applied
+						? fission!.correctedUncertaintyAbsolute
+						: comp.unknownConcentrationUncertaintyAbsolute;
+					return [escapeCSV(roundResult(shown)), escapeCSV(roundToMatch(shownUnc, shown))];
 				})
 			];
 			csvRows.push(row.join(','));
@@ -2842,6 +2885,51 @@
 			];
 			csvRows.push(detectionLimitRow.join(','));
 		});
+
+		// Fission-interference correction breakdown
+		const appliedFission = [...fissionResults.values()].filter((r) => r.applied);
+		if (appliedFission.length > 0) {
+			csvRows.push('');
+			csvRows.push('Fission interference corrections');
+			csvRows.push(
+				[
+					'Isotope',
+					'Unknown',
+					'Fissile parent',
+					'f',
+					'k',
+					'C_target^S',
+					'C_fissile^S',
+					'C_fissile^U',
+					'Uncorrected',
+					'Uncorrected uncertainty',
+					'Corrected',
+					'Corrected uncertainty'
+				]
+					.map(escapeCSV)
+					.join(',')
+			);
+			for (const r of appliedFission) {
+				csvRows.push(
+					[
+						getResultColumnName(isotopeInfo[r.isotopeIndex], r.isotopeIndex),
+						materials.unknown[r.unknownIndex]?.NETL_code || `Unknown ${r.unknownIndex + 1}`,
+						r.fissileElementLabel,
+						r.f,
+						r.k.toPrecision(4),
+						roundResult(r.cTargetStandard),
+						roundResult(r.cFissileStandard),
+						roundResult(r.cFissileUnknown),
+						roundResult(r.uncorrected),
+						roundToMatch(r.uncorrectedUncertaintyAbsolute, r.uncorrected),
+						roundResult(r.corrected),
+						roundToMatch(r.correctedUncertaintyAbsolute, r.corrected)
+					]
+						.map(escapeCSV)
+						.join(',')
+				);
+			}
+		}
 
 		// Create CSV string
 		const csvContent = csvRows.join('\n');
@@ -3301,6 +3389,14 @@
 								{/if}
 
 								<div class="flex flex-wrap items-end gap-2">
+									<label class="label text-sm">
+										<span class="block font-semibold">Fissile parent</span>
+										<select class="select input" bind:value={fissionDraftParent[index]}>
+											{#each FISSILE_NUCLIDES as nuclide (nuclide)}
+												<option value={nuclide}>{nuclide}</option>
+											{/each}
+										</select>
+									</label>
 									<label class="label text-sm">
 										<span class="block font-semibold">Correction factor</span>
 										<input
@@ -3943,38 +4039,54 @@
 					</ul>
 				</div>
 			{/if}
-			{#if fissionCandidates.length > 0}
+			{#if unreviewedFissionCount > 0}
+				<div
+					class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded border border-warning-500 preset-tonal-warning p-3 text-sm"
+				>
+					<span>
+						⚠ {unreviewedFissionCount}
+						{unreviewedFissionCount === 1 ? 'isotope has' : 'isotopes have'} unreviewed fission-interference
+						potential — set a factor (or 0) in Step 1.
+					</span>
+					<button
+						type="button"
+						class="btn shrink-0 preset-tonal-surface"
+						onclick={() => goToStep(STEP.SELECT_ISOTOPES)}
+					>
+						Go to Select Isotopes
+					</button>
+				</div>
+			{/if}
+			{#if blockedFissionResults.length > 0}
 				<div class="mb-4 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3">
-					<p class="font-bold">⚠ Fission interference</p>
-					<p class="text-sm">
-						The results below do <strong>not</strong> yet subtract any fission-interference contribution
-						— that math is not implemented. This is the current state per isotope:
-					</p>
+					<p class="font-bold">⚠ Fission correction not applied</p>
 					<ul class="ml-4 list-disc text-sm">
-						{#each fissionCandidates as candidate (candidate.index)}
+						{#each blockedFissionResults as result (result.isotopeIndex + ':' + result.unknownIndex)}
 							<li>
-								<strong>{getIsotopeDisplayName(candidate.isotope, candidate.index)}</strong>
-								—
-								{#if !candidate.choice}
-									no correction factor set; the result may include an unquantified fission
-									contribution.
-								{:else if candidate.choice.mode === 'none'}
-									marked "no fission interference".
-								{:else}
-									factor {candidate.choice.factor} recorded but not yet applied.
-								{/if}
+								<strong
+									>{getResultColumnName(
+										isotopeInfo[result.isotopeIndex],
+										result.isotopeIndex
+									)}</strong
+								>
+								in
+								<strong
+									>{materials.unknown[result.unknownIndex]?.NETL_code ||
+										`Unknown ${result.unknownIndex + 1}`}</strong
+								>
+								— {result.note}
 							</li>
 						{/each}
 					</ul>
-					{#if unreviewedFissionCount > 0}
-						<button
-							type="button"
-							class="btn preset-tonal-surface"
-							onclick={() => goToStep(STEP.SELECT_ISOTOPES)}
-						>
-							Review in Step 1
-						</button>
-					{/if}
+				</div>
+			{/if}
+			{#if appliedFissionResults.length > 0}
+				<div class="mb-4 rounded border border-primary-500 preset-tonal-primary p-3 text-sm">
+					Fission-interference corrections applied to {appliedFissionResults.length} result{appliedFissionResults.length ===
+					1
+						? ''
+						: 's'} (marked <sup>†</sup> below). The uncorrected values are in the collapsed table beneath,
+					and the worked calculation is in “Fission interference corrections”.
 				</div>
 			{/if}
 			<!--Display table & header with unit-->
@@ -4015,11 +4127,16 @@
 							</td>
 							{#each isotopeInfo as _, iIndex}
 								{@const comp = everythingComp[iIndex][uIndex]}
+								{@const fission = fissionResults.get(`${iIndex}:${uIndex}`)}
+								{@const applied = Boolean(fission && fission.applied)}
+								{@const shown = applied ? fission!.corrected : comp.unknownConcentration}
+								{@const shownUnc = applied
+									? fission!.correctedUncertaintyAbsolute
+									: comp.unknownConcentrationUncertaintyAbsolute}
 								<td class="border border-surface-300-700 px-4 py-2 text-center">
-									{roundResult(comp.unknownConcentration)} ± {roundToMatch(
-										comp.unknownConcentrationUncertaintyAbsolute,
-										comp.unknownConcentration
-									)}
+									{roundResult(shown)}{#if applied}<sup title="Fission-interference corrected"
+											>†</sup
+										>{/if} ± {roundToMatch(shownUnc, shown)}
 								</td>
 							{/each}
 						</tr>
@@ -4036,7 +4153,116 @@
 					{/each}
 				</tbody>
 			</table>
+			{#if appliedFissionResults.length > 0}
+				<p class="mt-1 text-sm"><sup>†</sup> fission-interference corrected — see below.</p>
+			{/if}
 			<br />
+
+			{#if appliedFissionResults.length > 0 || blockedFissionResults.length > 0}
+				<h3 class="text-xl font-bold">Fission interference corrections</h3>
+				<p class="mt-1 mb-2 text-sm">
+					C<sub>target</sub><sup>U</sup> = k · (C<sub>target</sub><sup>S</sup> + f · C<sub
+						>fissile</sub
+					><sup>S</sup>) − f · C<sub>fissile</sub><sup>U</sup>. Concentrations shown in the target
+					isotope’s unit; f is the Step 1 factor; k is the combined correction factor.
+				</p>
+				<div class="overflow-x-auto">
+					<table class="table-auto border-collapse border border-surface-300-700 text-sm">
+						<thead>
+							<tr>
+								{#each ['Isotope', 'Unknown', 'Fissile parent', 'f', 'k', 'C_target^S', 'C_fissile^S', 'C_fissile^U', 'Uncorrected', 'Corrected'] as heading (heading)}
+									<th class="border border-surface-300-700 px-3 py-1 text-center">{heading}</th>
+								{/each}
+							</tr>
+						</thead>
+						<tbody>
+							{#each [...fissionResults.values()] as result (result.isotopeIndex + ':' + result.unknownIndex)}
+								<tr>
+									<td class="border border-surface-300-700 px-3 py-1">
+										{getResultColumnName(isotopeInfo[result.isotopeIndex], result.isotopeIndex)}
+									</td>
+									<td class="border border-surface-300-700 px-3 py-1">
+										{materials.unknown[result.unknownIndex]?.NETL_code ||
+											`Unknown ${result.unknownIndex + 1}`}
+									</td>
+									<td class="border border-surface-300-700 px-3 py-1"
+										>{result.fissileElementLabel}</td
+									>
+									<td class="border border-surface-300-700 px-3 py-1 text-right">{result.f}</td>
+									{#if result.applied}
+										<td class="border border-surface-300-700 px-3 py-1 text-right"
+											>{result.k.toPrecision(4)}</td
+										>
+										<td class="border border-surface-300-700 px-3 py-1 text-right"
+											>{roundResult(result.cTargetStandard)}</td
+										>
+										<td class="border border-surface-300-700 px-3 py-1 text-right"
+											>{roundResult(result.cFissileStandard)}</td
+										>
+										<td class="border border-surface-300-700 px-3 py-1 text-right"
+											>{roundResult(result.cFissileUnknown)}</td
+										>
+										<td class="border border-surface-300-700 px-3 py-1 text-right"
+											>{roundResult(result.uncorrected)} ± {roundToMatch(
+												result.uncorrectedUncertaintyAbsolute,
+												result.uncorrected
+											)}</td
+										>
+										<td class="border border-surface-300-700 px-3 py-1 text-right font-bold"
+											>{roundResult(result.corrected)} ± {roundToMatch(
+												result.correctedUncertaintyAbsolute,
+												result.corrected
+											)}</td
+										>
+									{:else}
+										<td class="border border-surface-300-700 px-3 py-1 text-center" colspan="6"
+											>{result.note}</td
+										>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+				<br />
+
+				<details class="rounded border border-surface-300-700 p-3">
+					<summary class="cursor-pointer font-semibold">Uncorrected concentrations</summary>
+					<div class="mt-3 overflow-x-auto">
+						<table class="table-auto border-collapse border border-surface-300-700">
+							<thead>
+								<tr>
+									<th class="border border-surface-300-700 px-4 py-2"></th>
+									{#each isotopeInfo as iso, index}
+										<th class="border border-surface-300-700 px-4 py-2 text-center"
+											>{getResultColumnName(iso, index)}</th
+										>
+									{/each}
+								</tr>
+							</thead>
+							<tbody>
+								{#each materials.unknown as unk, uIndex}
+									{@const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`}
+									<tr>
+										<td class="border border-surface-300-700 px-4 py-2 font-bold">{unknownLabel}</td
+										>
+										{#each isotopeInfo as _, iIndex}
+											{@const comp = everythingComp[iIndex][uIndex]}
+											<td class="border border-surface-300-700 px-4 py-2 text-center">
+												{roundResult(comp.unknownConcentration)} ± {roundToMatch(
+													comp.unknownConcentrationUncertaintyAbsolute,
+													comp.unknownConcentration
+												)}
+											</td>
+										{/each}
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				</details>
+				<br />
+			{/if}
 			<button
 				type="button"
 				class="btn preset-filled-primary-500 text-xl"

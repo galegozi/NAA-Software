@@ -15,7 +15,7 @@
  */
 import type { IsotopeInfo } from '$lib/types.js';
 import { parseIsotopeName, isotopeIdentityKey } from '$lib/utils/catalogWrite.js';
-import { lookupElementSymbol } from '$lib/utils/elementNames.js';
+import { lookupElementSymbol, normalizeElementSymbol } from '$lib/utils/elementNames.js';
 import type { FissionCorrectionRecord, IrradiationType } from '$lib/utils/fissionCorrections.js';
 
 /** How the user answered the fission-interference prompt for one isotope. */
@@ -184,6 +184,31 @@ export function upsertFissionChoice(
 ): FissionChoice[] {
 	const rest = choices.filter((existing) => existing.isotopeKey !== isotopeKey);
 	return choice ? [...rest, choice] : rest;
+}
+
+/** Common fissile parents offered for a hand-entered factor. */
+export const FISSILE_NUCLIDES = ['U-235', 'U-238', 'Pu-239', 'Pu-241', 'Th-232'] as const;
+
+/**
+ * Element symbol of a fissile nuclide string ("U-235" → "U", "Uranium" → "U").
+ * Returns "" when unrecognized.
+ */
+export function fissileParentSymbol(nuclide: string | null | undefined): string {
+	const raw = (nuclide ?? '').trim();
+	if (!raw) {
+		return '';
+	}
+	const parsed = parseIsotopeName(raw);
+	return parsed ? normalizeElementSymbol(parsed.shortName) : lookupElementSymbol(raw);
+}
+
+/** True when an analysis isotope belongs to the given element symbol. */
+export function isotopeIsElement(isotope: IsotopeIdentity, symbol: string): boolean {
+	const target = normalizeElementSymbol(symbol);
+	if (!target) {
+		return false;
+	}
+	return lookupElementSymbol(isotope.elementName ?? '') === target;
 }
 
 /** Drop choices whose isotope is no longer in the analysis. */
