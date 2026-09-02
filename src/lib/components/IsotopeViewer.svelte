@@ -448,7 +448,13 @@
 									<div>Energy: {isotope.energy} keV</div>
 									<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
 								</div>
-								<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
+								<button
+									type="button"
+									class="btn preset-tonal-surface"
+									onclick={() => removeSelectedIsotope(index)}
+								>
+									Remove
+								</button>
 							</div>
 						</div>
 					{/each}

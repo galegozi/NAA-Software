@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { afterNavigate, pushState, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
 	import { tick, untrack } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import IsotopeInfo from '$lib/components/isotopeInfo.svelte';
@@ -32,7 +34,8 @@
 		createReferenceMaterial,
 		createUnknownMaterial,
 		findRoiIndices,
-		roundResult
+		roundResult,
+		roundToMatch
 	} from '$lib/utils/naaUtils.js';
 	import {
 		getBaseMaterialErrors,
@@ -371,7 +374,7 @@
 			return;
 		}
 		clearDraft();
-		step = 0;
+		goToStep(0, { replace: true });
 		title = 'NAA Analysis';
 		isotopeInfo = [];
 		isoRef = [];
@@ -1346,6 +1349,24 @@
 
 	let step = $state(0);
 
+	// Shallow-routing (pushState/replaceState) can only be used once SvelteKit's
+	// router is initialized — afterNavigate fires right after the initial load.
+	let routerReady = false;
+	let draftHydrated = false;
+
+	// Seed the first history entry with the current step (once both the router is
+	// ready and the draft has been restored) so browser back/forward has a target.
+	function seedStepHistory() {
+		if (browser && routerReady && draftHydrated && page.state.wizardStep === undefined) {
+			replaceState('', { ...page.state, wizardStep: step });
+		}
+	}
+
+	afterNavigate(() => {
+		routerReady = true;
+		seedStepHistory();
+	});
+
 	let title = $state('NAA Analysis');
 
 	// array of isotope information
@@ -1700,8 +1721,6 @@
 	// Validation state
 	let validationErrors: string[] = $state([]);
 
-	let draftHydrated = false;
-
 	$effect(() => {
 		if (!browser) {
 			return;
@@ -1712,8 +1731,9 @@
 		untrack(() => {
 			restoreDraft();
 			draftHydrated = true;
+			seedStepHistory();
 			analysisMeta.registerWelcomeHandler(() => {
-				step = 0;
+				goToStep(0);
 				window.scrollTo({ top: 0, behavior: 'smooth' });
 			});
 		});
@@ -1742,6 +1762,23 @@
 	// Surface the experiment title in the layout header.
 	$effect(() => {
 		analysisMeta.title = title;
+	});
+
+	// Follow the browser back/forward buttons: SvelteKit restores page.state for
+	// the history entry being navigated to, so mirror its wizardStep back onto
+	// `step`. Our own goToStep() pushes matching state, so this is a no-op then.
+	$effect(() => {
+		const historyStep = page.state.wizardStep;
+		if (!browser || typeof historyStep !== 'number') {
+			return;
+		}
+		untrack(() => {
+			const clamped = Math.min(Math.max(Math.trunc(historyStep), 0), totalSteps);
+			if (clamped !== step) {
+				step = clamped;
+				window.scrollTo({ top: 0, behavior: 'smooth' });
+			}
+		});
 	});
 
 	// Continuously autosave the whole wizard to localStorage. Only "Start new
@@ -2362,6 +2399,24 @@
 		return `Isotope ${index + 1}${energyLabel}${proxyLabel}`;
 	}
 
+	/**
+	 * Column label for the results table / CSV. An element measured by a single
+	 * isotope row is shown just as the element ("Uranium"); when the same element
+	 * is analysed more than once — two isotopes, or two energies of one isotope —
+	 * every row for it falls back to the full isotope/energy name so they can be
+	 * told apart.
+	 */
+	function getResultColumnName(isotope: IsotopeInfoType | undefined, index: number): string {
+		const element = isotope?.elementName?.trim();
+		if (!element) {
+			return getIsotopeDisplayName(isotope, index);
+		}
+		const sameElementCount = isotopeInfo.filter(
+			(other) => other?.elementName?.trim() === element
+		).length;
+		return sameElementCount > 1 ? getIsotopeDisplayName(isotope, index) : element;
+	}
+
 	function expandIsotope(index: number) {
 		expandedIsotopes.add(index);
 	}
@@ -2499,6 +2554,26 @@
 		}
 	}
 
+	/**
+	 * Move the wizard to `target`, keeping the browser history in sync so the
+	 * back/forward buttons walk through visited steps. `replace` swaps the current
+	 * history entry instead of adding one (used for restore / reset, not for
+	 * ordinary navigation).
+	 */
+	function goToStep(target: number, { replace = false }: { replace?: boolean } = {}) {
+		const clamped = Math.min(Math.max(Math.trunc(target), 0), totalSteps);
+		step = clamped;
+		if (!browser || !routerReady) {
+			return;
+		}
+		const nextState = { ...page.state, wizardStep: clamped };
+		if (replace || page.state.wizardStep === undefined) {
+			replaceState('', nextState);
+		} else if (page.state.wizardStep !== clamped) {
+			pushState('', nextState);
+		}
+	}
+
 	const next = async () => {
 		// Prevent navigating beyond the final review step
 		if (step >= totalSteps) return;
@@ -2520,11 +2595,11 @@
 			}
 		}
 
-		step = Math.min(step + 1, totalSteps);
+		goToStep(step + 1);
 	};
 	const prev = () => {
 		if (step <= 0) return;
-		step = Math.max(step - 1, 0);
+		goToStep(step - 1);
 	};
 
 	function downloadTableAsCSV() {
@@ -2546,7 +2621,7 @@
 		const headers = [
 			'',
 			...isotopeInfo.flatMap((iso, index) => {
-				const name = getIsotopeDisplayName(iso, index);
+				const name = getResultColumnName(iso, index);
 				return [escapeCSV(name), escapeCSV(`${name} Uncertainty`)];
 			})
 		];
@@ -2568,12 +2643,15 @@
 			const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`;
 			const row = [
 				escapeCSV(unknownLabel),
-				...isotopeInfo.flatMap((_, iIndex) => [
-					escapeCSV(roundResult(everythingComp[iIndex][uIndex].unknownConcentration)),
-					escapeCSV(
-						roundResult(everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute)
-					)
-				])
+				...isotopeInfo.flatMap((_, iIndex) => {
+					const comp = everythingComp[iIndex][uIndex];
+					return [
+						escapeCSV(roundResult(comp.unknownConcentration)),
+						escapeCSV(
+							roundToMatch(comp.unknownConcentrationUncertaintyAbsolute, comp.unknownConcentration)
+						)
+					];
+				})
 			];
 			csvRows.push(row.join(','));
 
@@ -2739,7 +2817,9 @@
 			</ul>
 			<br />
 			<div class="flex flex-wrap items-center gap-3">
-				<button type="button" onclick={next}>Get Started</button>
+				<button type="button" class="btn preset-filled-primary-500 text-xl" onclick={next}>
+					Get Started
+				</button>
 				{#if isotopeInfo.length || materials.reference.length || materials.unknown.length}
 					<button type="button" class="btn preset-tonal-surface" onclick={startNewAnalysis}>
 						Start new analysis
@@ -2960,7 +3040,9 @@
 				{/each}
 			</div>
 			<br />
-			<button type="button" onclick={addCustomIsotope}>Add custom isotope</button>
+			<button type="button" class="btn preset-filled-primary-500" onclick={addCustomIsotope}>
+				Add custom isotope
+			</button>
 
 			<div id="isotope-relationships" class="mt-8 scroll-mt-24">
 				<button
@@ -3505,7 +3587,9 @@
 				{/each}
 			</div>
 			<br />
-			<button type="button" onclick={addUnknown}>Add unknown material</button>
+			<button type="button" class="btn preset-filled-primary-500" onclick={addUnknown}>
+				Add unknown material
+			</button>
 		{:else if stepType === StepType.REVIEW}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Review your inputs and the computed results below.</p>
@@ -3536,8 +3620,8 @@
 					<tr>
 						<th class="border border-surface-300-700 px-4 py-2"></th>
 						{#each isotopeInfo as iso, index}
-							<th class="border border-surface-300-700 px-4 py-2">
-								{getIsotopeDisplayName(iso, index)}
+							<th class="border border-surface-300-700 px-4 py-2 text-center">
+								{getResultColumnName(iso, index)}
 							</th>
 						{/each}
 					</tr>
@@ -3546,7 +3630,7 @@
 					<tr>
 						<td class="border border-surface-300-700 px-4 py-2 font-bold"> Units </td>
 						{#each isotopeInfo as _, index}
-							<td class="border border-surface-300-700 px-4 py-2">
+							<td class="border border-surface-300-700 px-4 py-2 text-center">
 								{(() => {
 									const referenceIndex = getLinkedReferenceIndex(index);
 									const unit =
@@ -3565,9 +3649,11 @@
 								{unknownLabel}
 							</td>
 							{#each isotopeInfo as _, iIndex}
-								<td class="border border-surface-300-700 px-4 py-2">
-									{roundResult(everythingComp[iIndex][uIndex].unknownConcentration)} ± {roundResult(
-										everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute
+								{@const comp = everythingComp[iIndex][uIndex]}
+								<td class="border border-surface-300-700 px-4 py-2 text-center">
+									{roundResult(comp.unknownConcentration)} ± {roundToMatch(
+										comp.unknownConcentrationUncertaintyAbsolute,
+										comp.unknownConcentration
 									)}
 								</td>
 							{/each}
@@ -3577,7 +3663,7 @@
 								{unknownLabel} Conc Det Lim
 							</td>
 							{#each isotopeInfo as _, iIndex}
-								<td class="border border-surface-300-700 px-4 py-2">
+								<td class="border border-surface-300-700 px-4 py-2 text-center">
 									{roundResult(everythingComp[iIndex][uIndex].concentrationDetectionLimit)}
 								</td>
 							{/each}
@@ -3586,7 +3672,11 @@
 				</tbody>
 			</table>
 			<br />
-			<button type="button" class="variant-filled-primary btn" onclick={downloadTableAsCSV}>
+			<button
+				type="button"
+				class="btn preset-filled-primary-500 text-xl"
+				onclick={downloadTableAsCSV}
+			>
 				Download Table as CSV
 			</button>
 			<br /><br />
@@ -3660,9 +3750,13 @@
 
 		{#if stepType !== StepType.WELCOME}
 			<div class="mt-6 flex flex-wrap gap-4">
-				<button type="button" onclick={prev}>{backButtonText}</button>
+				<button type="button" class="btn preset-tonal-surface text-xl" onclick={prev}>
+					{backButtonText}
+				</button>
 				{#if stepType !== StepType.REVIEW}
-					<button type="button" onclick={next}>{nextButtonText}</button>
+					<button type="button" class="btn preset-filled-primary-500 text-xl" onclick={next}>
+						{nextButtonText}
+					</button>
 				{/if}
 			</div>
 		{/if}
