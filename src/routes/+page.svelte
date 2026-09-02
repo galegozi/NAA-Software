@@ -3423,7 +3423,6 @@
 									sample contains a fissile nuclide (U, Th, Pu), part of its signal comes from fission
 									and must be subtracted. Choose a correction factor, or set it to 0 if this does not
 									apply.
-									<em>(The correction is recorded now; the math is applied in a later release.)</em>
 								</p>
 
 								{#if candidate.choice}
