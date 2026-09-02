@@ -43,6 +43,7 @@ function makeDraft(overrides: Partial<AnalysisDraft> = {}): AnalysisDraft {
 		expandedReferences: [],
 		expandedUnknowns: [],
 		localIsotopeLinks: [],
+		fissionChoices: [],
 		...overrides
 	};
 }
@@ -80,6 +81,34 @@ describe('analysisDraft', () => {
 		});
 		saveDraft(draft);
 		expect(loadDraft()?.localIsotopeLinks).toEqual(draft.localIsotopeLinks);
+	});
+
+	it('round-trips fission-interference choices', () => {
+		const draft = makeDraft({
+			fissionChoices: [
+				{
+					isotopeKey: 'la|140|',
+					factor: 0.0123,
+					uncertainty: 0.0004,
+					mode: 'table',
+					fissileNuclide: 'U-235',
+					gammaEnergyKev: 1596.2,
+					irradiationPosition: '',
+					irradiationType: 'thermal',
+					sourceRowId: 'row-1'
+				},
+				{ isotopeKey: 'mo|99|', factor: 0, uncertainty: 0, mode: 'none' }
+			]
+		});
+		saveDraft(draft);
+		expect(loadDraft()?.fissionChoices).toEqual(draft.fissionChoices);
+	});
+
+	it('defaults fissionChoices to [] for drafts written before the field existed', () => {
+		const legacy: Record<string, unknown> = { ...makeDraft() };
+		delete legacy.fissionChoices;
+		window.localStorage.setItem(DRAFT_KEY, JSON.stringify(legacy));
+		expect(loadDraft()?.fissionChoices).toEqual([]);
 	});
 
 	it('clearDraft removes the stored draft', () => {

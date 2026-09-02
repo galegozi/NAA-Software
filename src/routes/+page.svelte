@@ -49,6 +49,21 @@
 		type AnalysisDraft,
 		type LocalIsotopeLink
 	} from '$lib/utils/analysisDraft.js';
+	import {
+		listFissionCorrections,
+		type FissionCorrectionRecord
+	} from '$lib/utils/fissionCorrections.js';
+	import {
+		describeFissionChoice,
+		describeFissionRow,
+		findFissionChoice,
+		fissionIsotopeKey,
+		isKnownFissionProduct,
+		matchingFissionRows,
+		pruneFissionChoices,
+		upsertFissionChoice,
+		type FissionChoice
+	} from '$lib/utils/fissionInterference.js';
 	import { swaAuth, redirectToSignIn } from '$lib/utils/swaAuth.svelte.js';
 	import { catalogStatus } from '$lib/utils/catalogStatus.svelte.js';
 	import { analysisMeta } from '$lib/utils/analysisMeta.svelte.js';
@@ -89,6 +104,7 @@
 	import {
 		APP_VERSION,
 		REVIEW_STEP,
+		STEP,
 		StepType,
 		getBackButtonText,
 		getNextButtonText,
@@ -287,7 +303,8 @@
 			expandedIsotopes: Array.from(expandedIsotopes),
 			expandedReferences: Array.from(expandedReferences),
 			expandedUnknowns: Array.from(expandedUnknowns),
-			localIsotopeLinks
+			localIsotopeLinks,
+			fissionChoices
 		};
 	}
 
@@ -356,6 +373,7 @@
 		);
 		isotopeReferenceMap = Array.isArray(saved.isotopeReferenceMap) ? saved.isotopeReferenceMap : [];
 		localIsotopeLinks = Array.isArray(saved.localIsotopeLinks) ? saved.localIsotopeLinks : [];
+		fissionChoices = Array.isArray(saved.fissionChoices) ? saved.fissionChoices : [];
 
 		hydrateExpandedSet(expandedIsotopes, saved.expandedIsotopes ?? []);
 		hydrateExpandedSet(expandedReferences, saved.expandedReferences ?? []);
@@ -398,6 +416,9 @@
 		isotopeDup = {};
 		referenceDup = {};
 		localIsotopeLinks = [];
+		fissionChoices = [];
+		fissionDraftFactor = {};
+		fissionDraftUncertainty = {};
 		relationshipFeedback = '';
 		relationshipConfirm = null;
 		relationshipPanelOpen = false;
@@ -472,6 +493,18 @@
 	let relationshipFeedback = $state('');
 	let relationshipForm = $state<IsotopeRelationshipForm>();
 	let relationshipBusy = $state(false);
+
+	// Fission-interference correction (7.2 WIP): per-isotope choice of a
+	// correction factor (from the `fission-corrections` catalog table or entered
+	// by hand), or an explicit 0 for "no fission interference". The subtraction
+	// math is not wired up yet — this only records the decision.
+	let fissionChoices = $state<FissionChoice[]>([]);
+	let fissionRows = $state<FissionCorrectionRecord[]>([]);
+	let hasRequestedFissionRows = $state(false);
+	// Draft form values for the inline "set correction" control, keyed by isotope
+	// index. `bind:value` on a number input yields `number | null`.
+	let fissionDraftFactor = $state<Record<number, number | null>>({});
+	let fissionDraftUncertainty = $state<Record<number, number | null>>({});
 
 	/**
 	 * A pending upload the user must confirm first. `steps` are shown verbatim;
@@ -1098,6 +1131,78 @@
 		}
 	}
 
+	// ---- Fission-interference correction ----------------------------------
+
+	function fissionAnchorId(index: number): string {
+		return `fission-correction-${index}`;
+	}
+
+	/** Jump to an isotope's fission-correction control (from a summary/other step). */
+	async function reviewFissionCorrection(index: number) {
+		if (step !== STEP.SELECT_ISOTOPES) {
+			goToStep(STEP.SELECT_ISOTOPES);
+		}
+		expandedIsotopes.add(index);
+		await tick();
+		if (browser) {
+			requestAnimationFrame(() => {
+				document
+					.getElementById(fissionAnchorId(index))
+					?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			});
+		}
+	}
+
+	function applyFissionRow(index: number, row: FissionCorrectionRecord) {
+		fissionChoices = upsertFissionChoice(fissionChoices, fissionIsotopeKey(isotopeInfo[index]), {
+			isotopeKey: fissionIsotopeKey(isotopeInfo[index]),
+			factor: row.correctionFactor,
+			uncertainty: row.uncertainty ?? 0,
+			mode: 'table',
+			fissileNuclide: row.fissileNuclide,
+			gammaEnergyKev: row.gammaEnergyKev,
+			irradiationPosition: row.irradiationPosition,
+			irradiationType: row.irradiationType,
+			sourceRowId: row.id
+		});
+	}
+
+	function dismissFissionCorrection(index: number) {
+		const key = fissionIsotopeKey(isotopeInfo[index]);
+		fissionChoices = upsertFissionChoice(fissionChoices, key, {
+			isotopeKey: key,
+			factor: 0,
+			uncertainty: 0,
+			mode: 'none'
+		});
+	}
+
+	function applyManualFissionFactor(index: number) {
+		const factor = fissionDraftFactor[index];
+		if (factor === null || factor === undefined || !Number.isFinite(factor)) {
+			return;
+		}
+		const rawUnc = fissionDraftUncertainty[index];
+		const uncertainty = rawUnc != null && Number.isFinite(rawUnc) && rawUnc >= 0 ? rawUnc : 0;
+		const key = fissionIsotopeKey(isotopeInfo[index]);
+		fissionChoices = upsertFissionChoice(fissionChoices, key, {
+			isotopeKey: key,
+			factor,
+			uncertainty,
+			mode: factor === 0 ? 'none' : 'manual'
+		});
+	}
+
+	function clearFissionCorrection(index: number) {
+		fissionChoices = upsertFissionChoice(
+			fissionChoices,
+			fissionIsotopeKey(isotopeInfo[index]),
+			null
+		);
+		delete fissionDraftFactor[index];
+		delete fissionDraftUncertainty[index];
+	}
+
 	// ---- Proxy-measurement relationships ("A measures B") ------------------
 
 	async function openRelationshipPanel(measuredAnalysisIndex?: number) {
@@ -1494,6 +1599,40 @@
 			.filter((w): w is { index: number; text: string } => w !== null)
 	);
 
+	/**
+	 * Selected isotopes that can carry a fission-interference contribution —
+	 * either the `fission-corrections` catalog has a matching row, or the isotope
+	 * is a well-known fission product. Each carries the matching catalog rows and
+	 * the user's current choice (if any).
+	 */
+	let fissionCandidates = $derived(
+		isotopeInfo
+			.map((isotope, index) => {
+				const rows = matchingFissionRows(isotope, fissionRows);
+				if (rows.length === 0 && !isKnownFissionProduct(isotope)) {
+					return null;
+				}
+				return {
+					index,
+					isotope,
+					rows,
+					choice: findFissionChoice(fissionChoices, isotope)
+				};
+			})
+			.filter(
+				(
+					c
+				): c is {
+					index: number;
+					isotope: IsotopeInfoType;
+					rows: FissionCorrectionRecord[];
+					choice: FissionChoice | null;
+				} => c !== null
+			)
+	);
+	let unreviewedFissionCount = $derived(fissionCandidates.filter((c) => c.choice === null).length);
+	let fissionCandidateByIndex = $derived(new Map(fissionCandidates.map((c) => [c.index, c])));
+
 	// computed isotope information
 	let isoComp = $derived(mathIsotopeInfo.map(isoGA));
 
@@ -1838,6 +1977,18 @@
 		untrack(reconcileIsotopeDependentState);
 	});
 
+	// Drop fission-interference choices whose isotope has been removed / renamed.
+	$effect(() => {
+		const identities = isotopeInfo.map((iso) => `${iso.elementName}|${iso.isotopeName}`).join(',');
+		void identities;
+		untrack(() => {
+			const pruned = pruneFissionChoices(fissionChoices, isotopeInfo);
+			if (pruned.length !== fissionChoices.length) {
+				fissionChoices = pruned;
+			}
+		});
+	});
+
 	$effect(() => {
 		if (!browser || !catalogAvailable) {
 			return;
@@ -1851,6 +2002,11 @@
 		if (!hasRequestedIsotopeMeasurementLinks) {
 			hasRequestedIsotopeMeasurementLinks = true;
 			void loadIsotopeMeasurementLinks();
+		}
+
+		if (!hasRequestedFissionRows) {
+			hasRequestedFissionRows = true;
+			void loadFissionRows();
 		}
 	});
 
@@ -1970,6 +2126,16 @@
 			isotopeMeasurementLinks = Array.isArray(body?.items) ? body.items : [];
 		} catch {
 			// Best effort only. Direct isotope matching still works without proxy links.
+		}
+	}
+
+	async function loadFissionRows() {
+		try {
+			fissionRows = await listFissionCorrections();
+		} catch {
+			// Best effort only — the known-fission-product list still raises the
+			// prompt, and the user can enter a factor by hand.
+			fissionRows = [];
 		}
 	}
 
@@ -2745,6 +2911,27 @@
 	{/if}
 {/snippet}
 
+{#snippet unreviewedFissionNotice()}
+	{#if unreviewedFissionCount > 0}
+		<div
+			class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded border border-warning-500 preset-tonal-warning p-3 text-sm"
+		>
+			<span>
+				⚠ {unreviewedFissionCount}
+				{unreviewedFissionCount === 1 ? 'isotope has' : 'isotopes have'} unreviewed fission-interference
+				potential. Set a correction factor (or 0) in Step 1.
+			</span>
+			<button
+				type="button"
+				class="btn shrink-0 preset-tonal-surface"
+				onclick={() => goToStep(STEP.SELECT_ISOTOPES)}
+			>
+				Go to Select Isotopes
+			</button>
+		</div>
+	{/if}
+{/snippet}
+
 <div style="padding: 5%">
 	<h1 class="text-3xl font-bold">NAA Analysis Software - Version {APP_VERSION}</h1>
 	<br />
@@ -2869,6 +3056,41 @@
 									onclick={() => openRelationshipPanel(warning.index)}
 								>
 									Record how this is measured
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
+
+			{#if fissionCandidates.length > 0}
+				<div class="mt-2 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
+					<p class="font-bold">⚠ Possible fission interference</p>
+					<p class="text-sm">
+						{fissionCandidates.length}
+						{fissionCandidates.length === 1 ? 'isotope is' : 'isotopes are'} also produced by the in-pile
+						fission of uranium / thorium / plutonium. If your sample contains a fissile nuclide, their
+						counts include a contribution that must be subtracted. Pick a correction factor for each,
+						or set it to 0 if fission interference does not apply.
+					</p>
+					<ul class="space-y-2">
+						{#each fissionCandidates as candidate (candidate.index)}
+							<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+								<span>
+									<strong>{getIsotopeDisplayName(candidate.isotope, candidate.index)}</strong>
+									—
+									{#if candidate.choice}
+										{describeFissionChoice(candidate.choice)}
+									{:else}
+										<span class="text-warning-700-300">not reviewed</span>
+									{/if}
+								</span>
+								<button
+									type="button"
+									class="btn shrink-0 preset-tonal-surface"
+									onclick={() => reviewFissionCorrection(candidate.index)}
+								>
+									{candidate.choice ? 'Change' : 'Set correction'}
 								</button>
 							</li>
 						{/each}
@@ -3025,6 +3247,99 @@
 							</div>
 						{/if}
 
+						{#if fissionCandidateByIndex.has(index)}
+							{@const candidate = fissionCandidateByIndex.get(index)!}
+							<div
+								id={fissionAnchorId(index)}
+								class="mt-3 scroll-mt-24 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3"
+							>
+								<p class="font-bold">⚠ Possible fission interference</p>
+								<p class="text-sm">
+									{getIsotopeDisplayName(isotope, index)} is also produced by nuclear fission. If the
+									sample contains a fissile nuclide (U, Th, Pu), part of its signal comes from fission
+									and must be subtracted. Choose a correction factor, or set it to 0 if this does not
+									apply.
+									<em>(The correction is recorded now; the math is applied in a later release.)</em>
+								</p>
+
+								{#if candidate.choice}
+									<p class="text-sm">
+										Current: <strong>{describeFissionChoice(candidate.choice)}</strong>
+										<button
+											type="button"
+											class="ml-2 btn preset-tonal-surface"
+											onclick={() => clearFissionCorrection(index)}
+										>
+											Clear
+										</button>
+									</p>
+								{/if}
+
+								{#if candidate.rows.length > 0}
+									<p class="text-sm font-semibold">From the catalog table:</p>
+									<ul class="space-y-1">
+										{#each candidate.rows as row (row.id)}
+											<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+												<span>{describeFissionRow(row)}</span>
+												<button
+													type="button"
+													class="btn shrink-0 preset-tonal-surface"
+													onclick={() => applyFissionRow(index, row)}
+												>
+													Use this
+												</button>
+											</li>
+										{/each}
+									</ul>
+								{:else}
+									<p class="text-sm">
+										No matching row in the fission-correction table{catalogAvailable
+											? ''
+											: ' (sign in to a deployment with the shared catalog to load it)'}. Enter a
+										factor by hand.
+									</p>
+								{/if}
+
+								<div class="flex flex-wrap items-end gap-2">
+									<label class="label text-sm">
+										<span class="block font-semibold">Correction factor</span>
+										<input
+											class="input"
+											type="number"
+											step="any"
+											placeholder="e.g. 0.0123"
+											bind:value={fissionDraftFactor[index]}
+										/>
+									</label>
+									<label class="label text-sm">
+										<span class="block font-semibold">Uncertainty</span>
+										<input
+											class="input"
+											type="number"
+											step="any"
+											min="0"
+											placeholder="optional"
+											bind:value={fissionDraftUncertainty[index]}
+										/>
+									</label>
+									<button
+										type="button"
+										class="btn preset-tonal-surface"
+										onclick={() => applyManualFissionFactor(index)}
+									>
+										Apply factor
+									</button>
+									<button
+										type="button"
+										class="btn preset-tonal-surface"
+										onclick={() => dismissFissionCorrection(index)}
+									>
+										No fission interference (0)
+									</button>
+								</div>
+							</div>
+						{/if}
+
 						<details class="mt-3">
 							<summary class="cursor-pointer text-sm">Debug information</summary>
 							<ComputedDisplay
@@ -3141,6 +3456,8 @@
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Add reference materials, then assign one to each isotope.</p>
 			<br />
+
+			{@render unreviewedFissionNotice()}
 
 			<section class="rounded-lg border-2 border-primary-500 preset-tonal-primary p-5">
 				<h3 class="text-2xl font-bold">Add your own reference material</h3>
@@ -3565,6 +3882,8 @@
 			<p>Add the unknown materials you want to analyze.</p>
 			<br />
 
+			{@render unreviewedFissionNotice()}
+
 			<h3 class="text-xl font-bold">Unknown materials ({materials.unknown.length})</h3>
 			{#if materials.unknown.length === 0}
 				<p>No unknown materials yet. Add one to continue.</p>
@@ -3622,6 +3941,40 @@
 							</li>
 						{/each}
 					</ul>
+				</div>
+			{/if}
+			{#if fissionCandidates.length > 0}
+				<div class="mb-4 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3">
+					<p class="font-bold">⚠ Fission interference</p>
+					<p class="text-sm">
+						The results below do <strong>not</strong> yet subtract any fission-interference contribution
+						— that math is not implemented. This is the current state per isotope:
+					</p>
+					<ul class="ml-4 list-disc text-sm">
+						{#each fissionCandidates as candidate (candidate.index)}
+							<li>
+								<strong>{getIsotopeDisplayName(candidate.isotope, candidate.index)}</strong>
+								—
+								{#if !candidate.choice}
+									no correction factor set; the result may include an unquantified fission
+									contribution.
+								{:else if candidate.choice.mode === 'none'}
+									marked "no fission interference".
+								{:else}
+									factor {candidate.choice.factor} recorded but not yet applied.
+								{/if}
+							</li>
+						{/each}
+					</ul>
+					{#if unreviewedFissionCount > 0}
+						<button
+							type="button"
+							class="btn preset-tonal-surface"
+							onclick={() => goToStep(STEP.SELECT_ISOTOPES)}
+						>
+							Review in Step 1
+						</button>
+					{/if}
 				</div>
 			{/if}
 			<!--Display table & header with unit-->

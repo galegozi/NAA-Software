@@ -1,0 +1,196 @@
+/**
+ * Fission-interference correction — matching a selected ("interfering") isotope
+ * to the `fission-corrections` catalog table and holding the user's per-isotope
+ * choice with the analysis draft.
+ *
+ * An isotope such as La-140 can also be produced by the in-pile fission of a
+ * fissile nuclide (U-235, U-238, Pu-239, Th-232…) present in the sample, so its
+ * detector counts carry a contribution that has to be subtracted. The catalog
+ * table (populated through `/admin/fission-corrections`) gives an empirical
+ * factor per (fissile nuclide, interfering isotope, gamma energy, irradiation
+ * position, irradiation type).
+ *
+ * This module only wires up the *choice* (which factor, or an explicit 0 for
+ * "no interference"). The subtraction math is not implemented yet.
+ */
+import type { IsotopeInfo } from '$lib/types.js';
+import { parseIsotopeName, isotopeIdentityKey } from '$lib/utils/catalogWrite.js';
+import { lookupElementSymbol } from '$lib/utils/elementNames.js';
+import type { FissionCorrectionRecord, IrradiationType } from '$lib/utils/fissionCorrections.js';
+
+/** How the user answered the fission-interference prompt for one isotope. */
+export type FissionChoiceMode = 'table' | 'manual' | 'none';
+
+export type FissionChoice = {
+	/** Normalized isotope identity — see {@link fissionIsotopeKey}. */
+	isotopeKey: string;
+	/** Chosen correction factor. `0` with mode `'none'` means "no fission interference". */
+	factor: number;
+	uncertainty: number;
+	mode: FissionChoiceMode;
+	/** Provenance, when `mode === 'table'`. */
+	fissileNuclide?: string;
+	gammaEnergyKev?: number | null;
+	irradiationPosition?: string;
+	irradiationType?: IrradiationType;
+	/** Catalog row id the factor came from, when available. */
+	sourceRowId?: string;
+};
+
+type IsotopeIdentity = Pick<IsotopeInfo, 'elementName' | 'isotopeName'>;
+
+/**
+ * Normalized identity for an analysis isotope, used both to match catalog rows
+ * and to key the stored choice. Handles catalog names ("La-140", "Ag-110m") and
+ * a bare mass number paired with an element name or symbol ("Lanthanum" + "140").
+ * Falls back to a lowercased `element-name` string when nothing parses.
+ */
+export function fissionIsotopeKey(isotope: IsotopeIdentity): string {
+	const raw = (isotope.isotopeName ?? '').trim();
+	const symbol = lookupElementSymbol(isotope.elementName ?? '');
+	const parsed = parseIsotopeName(raw) ?? (symbol ? parseIsotopeName(`${symbol}-${raw}`) : null);
+	if (parsed) {
+		return isotopeIdentityKey(parsed);
+	}
+	return `raw:${(isotope.elementName ?? '').trim().toLowerCase()}-${raw.toLowerCase()}`;
+}
+
+/**
+ * Well-known high-yield fission products that are also common activation
+ * products — used to raise the "possible fission interference" prompt even
+ * before (or without) a matching row in the `fission-corrections` catalog.
+ * Not exhaustive; the catalog table is the authority once populated.
+ */
+const KNOWN_FISSION_PRODUCT_KEYS: ReadonlySet<string> = new Set(
+	[
+		'Sr-89',
+		'Sr-91',
+		'Sr-92',
+		'Y-91',
+		'Y-92',
+		'Y-93',
+		'Zr-95',
+		'Zr-97',
+		'Nb-95',
+		'Nb-97',
+		'Mo-99',
+		'Tc-99m',
+		'Ru-103',
+		'Ru-105',
+		'Ru-106',
+		'Rh-105',
+		'Sb-127',
+		'Sb-129',
+		'Te-132',
+		'I-131',
+		'I-133',
+		'I-135',
+		'Xe-133',
+		'Xe-135',
+		'Cs-136',
+		'Cs-137',
+		'Cs-138',
+		'Ba-139',
+		'Ba-140',
+		'La-140',
+		'La-141',
+		'La-142',
+		'Ce-141',
+		'Ce-143',
+		'Ce-144',
+		'Pr-143',
+		'Nd-147',
+		'Pm-147',
+		'Pm-149',
+		'Pm-151',
+		'Sm-153',
+		'Eu-155',
+		'Eu-156'
+	].map((name) => {
+		const parsed = parseIsotopeName(name);
+		return parsed ? isotopeIdentityKey(parsed) : `raw:-${name.toLowerCase()}`;
+	})
+);
+
+/** True when the isotope is a well-known fission product (see the note above). */
+export function isKnownFissionProduct(isotope: IsotopeIdentity): boolean {
+	return KNOWN_FISSION_PRODUCT_KEYS.has(fissionIsotopeKey(isotope));
+}
+
+/** The same normalized key for a catalog row's `interferingIsotope` string. */
+export function fissionRowKey(record: Pick<FissionCorrectionRecord, 'interferingIsotope'>): string {
+	const name = (record.interferingIsotope ?? '').trim();
+	const parsed = parseIsotopeName(name);
+	return parsed ? isotopeIdentityKey(parsed) : `raw:-${name.toLowerCase()}`;
+}
+
+/** Catalog rows whose interfering isotope matches this analysis isotope. */
+export function matchingFissionRows(
+	isotope: IsotopeIdentity,
+	rows: FissionCorrectionRecord[]
+): FissionCorrectionRecord[] {
+	const key = fissionIsotopeKey(isotope);
+	return rows
+		.filter((row) => fissionRowKey(row) === key)
+		.slice()
+		.sort(
+			(a, b) =>
+				a.fissileNuclide.localeCompare(b.fissileNuclide) ||
+				(a.gammaEnergyKev ?? 0) - (b.gammaEnergyKev ?? 0) ||
+				a.irradiationType.localeCompare(b.irradiationType)
+		);
+}
+
+/** Short human summary of a catalog row, for a selectable list. */
+export function describeFissionRow(row: FissionCorrectionRecord): string {
+	const parts: string[] = [row.fissileNuclide];
+	if (row.gammaEnergyKev != null) {
+		parts.push(`${row.gammaEnergyKev} keV`);
+	}
+	if (row.irradiationPosition) {
+		parts.push(row.irradiationPosition);
+	}
+	parts.push(row.irradiationType);
+	const unc = row.uncertainty ? ` ± ${row.uncertainty}` : '';
+	return `${parts.join(' · ')} → factor ${row.correctionFactor}${unc}`;
+}
+
+/** One-line summary of a saved choice, for the warning-box status column. */
+export function describeFissionChoice(choice: FissionChoice): string {
+	if (choice.mode === 'none') {
+		return 'No fission interference (0)';
+	}
+	const unc = choice.uncertainty ? ` ± ${choice.uncertainty}` : '';
+	if (choice.mode === 'table') {
+		const from = [choice.fissileNuclide, choice.irradiationType].filter(Boolean).join(', ');
+		return `Factor ${choice.factor}${unc}${from ? ` (${from})` : ''}`;
+	}
+	return `Factor ${choice.factor}${unc} (custom)`;
+}
+
+export function findFissionChoice(
+	choices: FissionChoice[],
+	isotope: IsotopeIdentity
+): FissionChoice | null {
+	const key = fissionIsotopeKey(isotope);
+	return choices.find((choice) => choice.isotopeKey === key) ?? null;
+}
+
+/** Add or replace the choice for one isotope; a `null` choice removes it. */
+export function upsertFissionChoice(
+	choices: FissionChoice[],
+	isotopeKey: string,
+	choice: FissionChoice | null
+): FissionChoice[] {
+	const rest = choices.filter((existing) => existing.isotopeKey !== isotopeKey);
+	return choice ? [...rest, choice] : rest;
+}
+
+/** Drop choices whose isotope is no longer in the analysis. */
+export function pruneFissionChoices(
+	choices: FissionChoice[],
+	isotopes: IsotopeIdentity[]
+): FissionChoice[] {
+	const live = new Set(isotopes.map((iso) => fissionIsotopeKey(iso)));
+	return choices.filter((choice) => live.has(choice.isotopeKey));
+}
