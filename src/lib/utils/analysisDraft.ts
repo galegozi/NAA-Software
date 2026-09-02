@@ -6,7 +6,7 @@
  * draft is only cleared explicitly ("Start new analysis").
  */
 import type { IsotopeInfo, ReferenceMaterial, UnknownMaterial } from '$lib/types.js';
-import type { FissionChoice } from '$lib/utils/fissionInterference.js';
+import type { FissionChoice, FissionManualEntry } from '$lib/utils/fissionInterference.js';
 
 export const DRAFT_KEY = 'naa-analysis-draft';
 export const DRAFT_VERSION = 3;
@@ -47,6 +47,8 @@ export type AnalysisDraft = {
 	localIsotopeLinks: LocalIsotopeLink[];
 	/** Per-isotope fission-interference correction choices (7.2 WIP). */
 	fissionChoices: FissionChoice[];
+	/** Hand-entered fissile concentrations, when the fissile element isn't analysed. */
+	fissionManualFissile: FissionManualEntry[];
 };
 
 function hasLocalStorage(): boolean {
@@ -110,7 +112,10 @@ function parseDraft(raw: string | null, expectedVersion: number): AnalysisDraft 
 			expandedReferences: Array.isArray(parsed.expandedReferences) ? parsed.expandedReferences : [],
 			expandedUnknowns: Array.isArray(parsed.expandedUnknowns) ? parsed.expandedUnknowns : [],
 			localIsotopeLinks: Array.isArray(parsed.localIsotopeLinks) ? parsed.localIsotopeLinks : [],
-			fissionChoices: Array.isArray(parsed.fissionChoices) ? parsed.fissionChoices : []
+			fissionChoices: Array.isArray(parsed.fissionChoices) ? parsed.fissionChoices : [],
+			fissionManualFissile: Array.isArray(parsed.fissionManualFissile)
+				? parsed.fissionManualFissile
+				: []
 		};
 	} catch {
 		return null;

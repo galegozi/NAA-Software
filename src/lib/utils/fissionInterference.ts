@@ -13,10 +13,12 @@
  * This module only wires up the *choice* (which factor, or an explicit 0 for
  * "no interference"). The subtraction math is not implemented yet.
  */
-import type { IsotopeInfo } from '$lib/types.js';
+import type { ConcUnitType, IsotopeInfo } from '$lib/types.js';
 import { parseIsotopeName, isotopeIdentityKey } from '$lib/utils/catalogWrite.js';
 import { lookupElementSymbol, normalizeElementSymbol } from '$lib/utils/elementNames.js';
 import type { FissionCorrectionRecord, IrradiationType } from '$lib/utils/fissionCorrections.js';
+
+type IsotopeIdentity = Pick<IsotopeInfo, 'elementName' | 'isotopeName'>;
 
 /** How the user answered the fission-interference prompt for one isotope. */
 export type FissionChoiceMode = 'table' | 'manual' | 'none';
@@ -37,7 +39,47 @@ export type FissionChoice = {
 	sourceRowId?: string;
 };
 
-type IsotopeIdentity = Pick<IsotopeInfo, 'elementName' | 'isotopeName'>;
+/**
+ * Hand-entered fissile-element concentrations for the fission correction, used
+ * when the fissile element is not one of the analysed isotopes (so the standard
+ * value and the per-unknown value cannot be pulled from the analysis). Held with
+ * the draft, keyed by the target (interfering) isotope.
+ */
+export type FissionManualFissileValue = { value: number | null; uncertainty: number | null };
+
+export type FissionManualEntry = {
+	isotopeKey: string;
+	/** Unit the concentrations below are entered in (the target isotope's unit). */
+	unit: ConcUnitType;
+	/** Fissile-element concentration in the standard, `C_fissile^S`. */
+	inStandard: number | null;
+	/** Fissile-element concentration per unknown material, by index, `C_fissile^U`. */
+	inUnknown: FissionManualFissileValue[];
+};
+
+export function findManualFissile(
+	entries: FissionManualEntry[],
+	isotopeKey: string
+): FissionManualEntry | null {
+	return entries.find((entry) => entry.isotopeKey === isotopeKey) ?? null;
+}
+
+/** Add or replace the manual entry for one target isotope. */
+export function upsertManualFissile(
+	entries: FissionManualEntry[],
+	entry: FissionManualEntry
+): FissionManualEntry[] {
+	return [...entries.filter((e) => e.isotopeKey !== entry.isotopeKey), entry];
+}
+
+/** Drop manual entries whose target isotope is no longer in the analysis. */
+export function pruneManualFissile(
+	entries: FissionManualEntry[],
+	isotopes: IsotopeIdentity[]
+): FissionManualEntry[] {
+	const live = new Set(isotopes.map((iso) => fissionIsotopeKey(iso)));
+	return entries.filter((entry) => live.has(entry.isotopeKey));
+}
 
 /**
  * Normalized identity for an analysis isotope, used both to match catalog rows

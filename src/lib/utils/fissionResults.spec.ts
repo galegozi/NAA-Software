@@ -50,6 +50,7 @@ function baseContext(overrides: Partial<FissionResultsContext> = {}): FissionRes
 			[comp(0.9, 30)] // U:  C_U^U = 30
 		],
 		linkedReferenceIndex: () => 0,
+		manualFissile: [],
 		...overrides
 	};
 }
@@ -134,15 +135,40 @@ describe('computeFissionResults', () => {
 		expect(result?.note).toMatch(/fissile parent/i);
 	});
 
-	it('blocks when the fissile element is not an analysed isotope', () => {
+	it('prompts for hand-entered concentrations when the fissile element is not analysed', () => {
 		const result = computeFissionResults(
 			baseContext({ isotopeInfo: [iso('Cerium', 'Ce-141')], everythingComp: [[comp(1.25, 50)]] })
 		).get('0:0');
 		expect(result?.applied).toBe(false);
-		expect(result?.note).toMatch(/not an analysed isotope/i);
+		expect(result?.needsFissileInput).toBe(true);
+		expect(result?.note).toMatch(/isn't one of your analysed isotopes/i);
 	});
 
-	it('blocks when the reference has no known fissile concentration', () => {
+	it('applies the correction from hand-entered concentrations (no uranium isotope)', () => {
+		const result = computeFissionResults(
+			baseContext({
+				isotopeInfo: [iso('Cerium', 'Ce-141')],
+				everythingComp: [[comp(1.25, 50)]],
+				manualFissile: [
+					{
+						isotopeKey: 'ce|141|',
+						unit: 'ppm',
+						inStandard: 5,
+						inUnknown: [{ value: 30, uncertainty: 1.5 }]
+					}
+				]
+			})
+		).get('0:0');
+		expect(result?.applied).toBe(true);
+		expect(result?.needsFissileInput).toBe(false);
+		expect(result?.cFissileStandard).toBeCloseTo(5, 8);
+		expect(result?.cFissileUnknown).toBeCloseTo(30, 8);
+		expect(result?.corrected).toBeCloseTo(48.1, 8);
+		// relFissile = 1.5/30 = 5%, no factor uncertainty, target 0% → 5%
+		expect(result?.correctedUncertaintyPercent).toBeCloseTo(5, 6);
+	});
+
+	it('prompts (needsFissileInput) when the reference has no known fissile concentration', () => {
 		const result = computeFissionResults(
 			baseContext({
 				references: [
@@ -154,6 +180,6 @@ describe('computeFissionResults', () => {
 			})
 		).get('0:0');
 		expect(result?.applied).toBe(false);
-		expect(result?.note).toMatch(/no known .*concentration/i);
+		expect(result?.needsFissileInput).toBe(true);
 	});
 });

@@ -87,6 +87,58 @@ test('fission-interference correction is applied and shown on Review', async ({ 
 	expect(pageErrors).toEqual([]);
 });
 
+/**
+ * Uranium is NOT analysed: the Review step must prompt for the fissile
+ * concentrations and apply the correction once they are entered.
+ *   C_Ce^S = 4, C_U^S = 5 (hand-entered), C_U^U = 30 (hand-entered), k = 1.25
+ *   corrected = 1.25·(4 + 0.08·5) − 0.08·30 = 3.1 ppm
+ */
+test('prompts for fissile concentrations when uranium is not analysed', async ({ page }) => {
+	const pageErrors: string[] = [];
+	page.on('pageerror', (e) => pageErrors.push(e.message));
+
+	await page.goto('/');
+	await page.getByRole('button', { name: 'Get Started' }).click();
+
+	await page.getByRole('button', { name: 'Add custom isotope' }).click();
+	await page.getByLabel('Element Name').fill('Cerium');
+	await page.getByLabel('Isotope', { exact: true }).fill('Ce-141');
+	await page.getByLabel('Energy (in KeV)').fill('145');
+	await page.getByLabel('Half Life', { exact: true }).fill('3000');
+
+	await page.locator('select').filter({ hasText: 'U-235' }).first().selectOption('U-235');
+	await page.getByLabel('Correction factor').fill('0.08');
+	await page.getByRole('button', { name: 'Apply factor' }).click();
+	await page.getByRole('button', { name: /^Next:/ }).click();
+
+	await page.getByRole('button', { name: '+ Add custom reference material' }).click();
+	await fillMaterial(page, { netl: 'REF-A', sample: 'Standard A' });
+	await setCounts(page, 0, 1000);
+	await page.getByLabel('Known Concentration').fill('4');
+	await page.getByLabel('Reference Material Concentration Units').selectOption('ppm');
+	await page.getByRole('button', { name: /^Next:/ }).click();
+
+	await page.getByRole('button', { name: 'Add unknown material' }).click();
+	await fillMaterial(page, { netl: 'UNK-1', sample: 'Unknown 1' });
+	await setCounts(page, 0, 1250);
+	await page.getByRole('button', { name: /^Next:/ }).click();
+
+	// Review: the prompt appears because uranium isn't analysed.
+	await expect(page.getByText(/Uranium concentration needed/i)).toBeVisible();
+	await expect(page.getByText(/isn't one of your analysed isotopes/i)).toBeVisible();
+
+	await page.getByLabel(/Uranium in the standard/i).fill('5');
+	await page.getByLabel(/Uranium in UNK-1/i).fill('30');
+
+	// Correction now applies.
+	await expect(
+		page.getByText('Fission-interference corrections applied to 1 result')
+	).toBeVisible();
+	await expect(page.getByRole('cell', { name: /^3\.1† ± / })).toBeVisible();
+
+	expect(pageErrors).toEqual([]);
+});
+
 async function fillMaterial(
 	page: import('@playwright/test').Page,
 	{ netl, sample }: { netl: string; sample: string }

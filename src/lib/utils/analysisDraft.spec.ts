@@ -44,6 +44,7 @@ function makeDraft(overrides: Partial<AnalysisDraft> = {}): AnalysisDraft {
 		expandedUnknowns: [],
 		localIsotopeLinks: [],
 		fissionChoices: [],
+		fissionManualFissile: [],
 		...overrides
 	};
 }
@@ -104,11 +105,31 @@ describe('analysisDraft', () => {
 		expect(loadDraft()?.fissionChoices).toEqual(draft.fissionChoices);
 	});
 
-	it('defaults fissionChoices to [] for drafts written before the field existed', () => {
+	it('round-trips hand-entered fissile concentrations', () => {
+		const draft = makeDraft({
+			fissionManualFissile: [
+				{
+					isotopeKey: 'ce|141|',
+					unit: 'ppm',
+					inStandard: 5,
+					inUnknown: [
+						{ value: 30, uncertainty: 1.5 },
+						{ value: null, uncertainty: null }
+					]
+				}
+			]
+		});
+		saveDraft(draft);
+		expect(loadDraft()?.fissionManualFissile).toEqual(draft.fissionManualFissile);
+	});
+
+	it('defaults new fission fields to [] for drafts written before they existed', () => {
 		const legacy: Record<string, unknown> = { ...makeDraft() };
 		delete legacy.fissionChoices;
+		delete legacy.fissionManualFissile;
 		window.localStorage.setItem(DRAFT_KEY, JSON.stringify(legacy));
 		expect(loadDraft()?.fissionChoices).toEqual([]);
+		expect(loadDraft()?.fissionManualFissile).toEqual([]);
 	});
 
 	it('clearDraft removes the stored draft', () => {

@@ -22,8 +22,11 @@ import {
 import { lookupElementName } from '$lib/utils/elementNames.js';
 import {
 	fissileParentSymbol,
+	findManualFissile,
+	fissionIsotopeKey,
 	isotopeIsElement,
-	type FissionChoice
+	type FissionChoice,
+	type FissionManualEntry
 } from './fissionInterference.js';
 
 export type FissionResult = {
@@ -52,6 +55,11 @@ export type FissionResult = {
 	 */
 	correctedUncertaintyAbsolute: number;
 	correctedUncertaintyPercent: number;
+	/**
+	 * True when the correction is blocked only for a missing fissile-element
+	 * concentration the user can supply by hand (the Review step renders inputs).
+	 */
+	needsFissileInput: boolean;
 	note: string;
 };
 
@@ -65,7 +73,13 @@ export type FissionResultsContext = {
 	everythingComp: EverythingComputed[][];
 	/** Reference index linked to an isotope (must return a valid index). */
 	linkedReferenceIndex: (isotopeIndex: number) => number;
+	/** Hand-entered fissile concentrations (fallback when the element isn't analysed). */
+	manualFissile: FissionManualEntry[];
 };
+
+function nonNegativeOrNull(value: number | null | undefined): number | null {
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
 
 function numberOr(value: number | undefined | null, fallback = 0): number {
 	return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -115,6 +129,7 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 		const fissileSymbol = fissileParentSymbol(choice.fissileNuclide);
 		const fissileElementLabel =
 			lookupElementName(fissileSymbol) || fissileSymbol || 'the fissile parent';
+		const manual = findManualFissile(ctx.manualFissile, fissionIsotopeKey(ctx.isotopeInfo[ti]));
 
 		for (let ui = 0; ui < ctx.unknowns.length; ui++) {
 			const comp = ctx.everythingComp[ti]?.[ui];
@@ -148,6 +163,7 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 				uncorrectedUncertaintyAbsolute,
 				correctedUncertaintyAbsolute: uncorrectedUncertaintyAbsolute,
 				correctedUncertaintyPercent: numberOr(comp.unknownConcentrationUncertainty),
+				needsFissileInput: false,
 				note: ''
 			};
 
@@ -157,39 +173,56 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 			}
 
 			const fi = resolveFissileIsotopeIndex(ctx, fissileSymbol, refIndex);
-			if (fi === null) {
-				out.set(key, {
-					...base,
-					note: `${fissileElementLabel} is not an analysed isotope — its concentration in the standard and the unknown is needed for the correction.`
-				});
-				continue;
-			}
 			base.fissileIsotopeIndex = fi;
+			const analysed = fi !== null;
 
-			const cFissileStandard = numberOr(ref.knownConcentration?.[fi]);
-			if (!(cFissileStandard > 0)) {
-				out.set(key, {
-					...base,
-					note: `The linked reference has no known ${fissileElementLabel} concentration.`
-				});
-				continue;
+			// C_fissile^S — the target's linked reference, else hand-entered.
+			let mfFissileS: number | null = null;
+			const refFissileStandard =
+				fi !== null ? nonNegativeOrNull(ref.knownConcentration?.[fi]) : null;
+			if (fi !== null && refFissileStandard !== null && refFissileStandard > 0) {
+				mfFissileS = concentrationToMassFraction(refFissileStandard, ref.concentrationUnits?.[fi]);
+			} else if (manual && nonNegativeOrNull(manual.inStandard) !== null) {
+				mfFissileS = concentrationToMassFraction(manual.inStandard as number, manual.unit);
 			}
 
-			const fissileStdUnit = ref.concentrationUnits?.[fi];
-			const fissileCompUnit =
-				ctx.references[ctx.linkedReferenceIndex(fi)]?.concentrationUnits?.[fi];
-			const cFissileUnknownRaw = ctx.everythingComp[fi]?.[ui]?.unknownConcentration;
-			if (cFissileUnknownRaw === undefined || !Number.isFinite(cFissileUnknownRaw)) {
+			// C_fissile^U — the fissile isotope's computed result, else hand-entered.
+			let mfFissileU: number | null = null;
+			let relFissile = 0;
+			const fissileComp = fi !== null ? ctx.everythingComp[fi]?.[ui] : undefined;
+			if (fi !== null && fissileComp && Number.isFinite(fissileComp.unknownConcentration)) {
+				mfFissileU = concentrationToMassFraction(
+					fissileComp.unknownConcentration,
+					ctx.references[ctx.linkedReferenceIndex(fi)]?.concentrationUnits?.[fi]
+				);
+				relFissile = numberOr(fissileComp.unknownConcentrationUncertainty) / 100;
+			} else {
+				const entry = manual?.inUnknown?.[ui];
+				const value = nonNegativeOrNull(entry?.value);
+				if (value !== null) {
+					mfFissileU = concentrationToMassFraction(value, manual!.unit);
+					if (value > 0 && nonNegativeOrNull(entry?.uncertainty) !== null) {
+						relFissile = (entry!.uncertainty as number) / value;
+					}
+				}
+			}
+
+			if (mfFissileS === null || mfFissileU === null) {
+				const missing: string[] = [];
+				if (mfFissileS === null) missing.push('in the standard');
+				if (mfFissileU === null) missing.push('in this unknown');
+				const need = `the ${fissileElementLabel} concentration ${missing.join(' and ')}`;
 				out.set(key, {
 					...base,
-					note: `No computed ${fissileElementLabel} result for this unknown yet.`
+					needsFissileInput: true,
+					note: analysed
+						? `The fission correction needs ${need} — enter ${missing.length > 1 ? 'them' : 'it'} below.`
+						: `${fissileElementLabel} isn't one of your analysed isotopes. The fission correction needs ${need} — enter ${missing.length > 1 ? 'them' : 'it'} below.`
 				});
 				continue;
 			}
 
 			const mfTargetS = concentrationToMassFraction(base.cTargetStandard, unit);
-			const mfFissileS = concentrationToMassFraction(cFissileStandard, fissileStdUnit);
-			const mfFissileU = concentrationToMassFraction(cFissileUnknownRaw, fissileCompUnit);
 			const correctedMassFraction = fissionCorrectedMassFraction({
 				k,
 				f: choice.factor,
@@ -202,8 +235,6 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 			// Pythagorean norm of the relative uncertainties: predicted target,
 			// predicted fissile, and the fission factor.
 			const relTarget = numberOr(comp.unknownConcentrationUncertainty) / 100;
-			const relFissile =
-				numberOr(ctx.everythingComp[fi]?.[ui]?.unknownConcentrationUncertainty) / 100;
 			const relFactor =
 				choice.uncertainty > 0 && choice.factor !== 0
 					? choice.uncertainty / Math.abs(choice.factor)

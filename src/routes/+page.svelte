@@ -62,8 +62,11 @@
 		isKnownFissionProduct,
 		matchingFissionRows,
 		pruneFissionChoices,
+		pruneManualFissile,
 		upsertFissionChoice,
-		type FissionChoice
+		upsertManualFissile,
+		type FissionChoice,
+		type FissionManualEntry
 	} from '$lib/utils/fissionInterference.js';
 	import { computeFissionResults } from '$lib/utils/fissionResults.js';
 	import { swaAuth, redirectToSignIn } from '$lib/utils/swaAuth.svelte.js';
@@ -306,7 +309,8 @@
 			expandedReferences: Array.from(expandedReferences),
 			expandedUnknowns: Array.from(expandedUnknowns),
 			localIsotopeLinks,
-			fissionChoices
+			fissionChoices,
+			fissionManualFissile
 		};
 	}
 
@@ -376,6 +380,9 @@
 		isotopeReferenceMap = Array.isArray(saved.isotopeReferenceMap) ? saved.isotopeReferenceMap : [];
 		localIsotopeLinks = Array.isArray(saved.localIsotopeLinks) ? saved.localIsotopeLinks : [];
 		fissionChoices = Array.isArray(saved.fissionChoices) ? saved.fissionChoices : [];
+		fissionManualFissile = Array.isArray(saved.fissionManualFissile)
+			? saved.fissionManualFissile
+			: [];
 
 		hydrateExpandedSet(expandedIsotopes, saved.expandedIsotopes ?? []);
 		hydrateExpandedSet(expandedReferences, saved.expandedReferences ?? []);
@@ -419,6 +426,7 @@
 		referenceDup = {};
 		localIsotopeLinks = [];
 		fissionChoices = [];
+		fissionManualFissile = [];
 		fissionDraftFactor = {};
 		fissionDraftUncertainty = {};
 		fissionDraftParent = {};
@@ -502,6 +510,8 @@
 	// by hand), or an explicit 0 for "no fission interference". The subtraction
 	// math is not wired up yet — this only records the decision.
 	let fissionChoices = $state<FissionChoice[]>([]);
+	// Hand-entered fissile concentrations, when the fissile element isn't analysed.
+	let fissionManualFissile = $state<FissionManualEntry[]>([]);
 	let fissionRows = $state<FissionCorrectionRecord[]>([]);
 	let hasRequestedFissionRows = $state(false);
 	// Draft form values for the inline "set correction" control, keyed by isotope
@@ -1207,6 +1217,15 @@
 		delete fissionDraftFactor[index];
 		delete fissionDraftUncertainty[index];
 		delete fissionDraftParent[index];
+		fissionManualFissile = fissionManualFissile.filter(
+			(entry) => entry.isotopeKey !== fissionIsotopeKey(isotopeInfo[index])
+		);
+	}
+
+	/** The hand-entered fissile-concentration record for a target isotope, if any. */
+	function fissionManualEntryFor(isotopeIndex: number): FissionManualEntry | undefined {
+		const key = fissionIsotopeKey(isotopeInfo[isotopeIndex]);
+		return fissionManualFissile.find((entry) => entry.isotopeKey === key);
 	}
 
 	// ---- Proxy-measurement relationships ("A measures B") ------------------
@@ -1831,7 +1850,8 @@
 			references: materials.reference,
 			unknowns: materials.unknown,
 			everythingComp,
-			linkedReferenceIndex: getLinkedReferenceIndex
+			linkedReferenceIndex: getLinkedReferenceIndex,
+			manualFissile: fissionManualFissile
 		})
 	);
 
@@ -1841,6 +1861,24 @@
 	let blockedFissionResults = $derived(
 		[...fissionResults.values()].filter((result) => !result.applied && result.note !== '')
 	);
+	/** Blocked results grouped by target isotope, for the "enter concentrations" prompt. */
+	let fissionFissileInputGroups = $derived.by(() => {
+		const groups = new Map<
+			number,
+			{ isotopeIndex: number; unit: ConcUnitType; fissileElementLabel: string; note: string }
+		>();
+		for (const result of fissionResults.values()) {
+			if (result.needsFissileInput && !groups.has(result.isotopeIndex)) {
+				groups.set(result.isotopeIndex, {
+					isotopeIndex: result.isotopeIndex,
+					unit: result.unit,
+					fissileElementLabel: result.fissileElementLabel,
+					note: result.note
+				});
+			}
+		}
+		return [...groups.values()];
+	});
 
 	/** (unknown, linked-reference) pairs counted in different modes — surfaced on the Review step. */
 	let countingModeMismatches = $derived.by(() => {
@@ -2007,7 +2045,7 @@
 		untrack(reconcileIsotopeDependentState);
 	});
 
-	// Drop fission-interference choices whose isotope has been removed / renamed.
+	// Drop fission-interference choices / manual inputs whose isotope is gone.
 	$effect(() => {
 		const identities = isotopeInfo.map((iso) => `${iso.elementName}|${iso.isotopeName}`).join(',');
 		void identities;
@@ -2015,6 +2053,44 @@
 			const pruned = pruneFissionChoices(fissionChoices, isotopeInfo);
 			if (pruned.length !== fissionChoices.length) {
 				fissionChoices = pruned;
+			}
+			const prunedManual = pruneManualFissile(fissionManualFissile, isotopeInfo);
+			if (prunedManual.length !== fissionManualFissile.length) {
+				fissionManualFissile = prunedManual;
+			}
+		});
+	});
+
+	// Create a backing manual-input entry for every target isotope that needs one.
+	$effect(() => {
+		const needed = fissionFissileInputGroups.map((group) => ({
+			index: group.isotopeIndex,
+			unit: group.unit
+		}));
+		const unknownCount = materials.unknown.length;
+		untrack(() => {
+			for (const { index, unit } of needed) {
+				const key = fissionIsotopeKey(isotopeInfo[index]);
+				const existing = fissionManualFissile.find((entry) => entry.isotopeKey === key);
+				if (!existing) {
+					fissionManualFissile = upsertManualFissile(fissionManualFissile, {
+						isotopeKey: key,
+						unit,
+						inStandard: null,
+						inUnknown: Array.from({ length: unknownCount }, () => ({
+							value: null,
+							uncertainty: null
+						}))
+					});
+				} else if (existing.inUnknown.length < unknownCount) {
+					existing.inUnknown = [
+						...existing.inUnknown,
+						...Array.from({ length: unknownCount - existing.inUnknown.length }, () => ({
+							value: null,
+							uncertainty: null
+						}))
+					];
+				}
 			}
 		});
 	});
@@ -4057,11 +4133,73 @@
 					</button>
 				</div>
 			{/if}
-			{#if blockedFissionResults.length > 0}
+			{#each fissionFissileInputGroups as group (group.isotopeIndex)}
+				{@const entry = fissionManualEntryFor(group.isotopeIndex)}
+				{@const unitLabel =
+					group.unit === 'ppm' ? 'µg/g' : group.unit === 'percentage' ? '%' : (group.unit ?? '')}
+				<div class="mb-4 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
+					<p class="font-bold">
+						⚠ {group.fissileElementLabel} concentration needed —
+						<strong
+							>{getResultColumnName(isotopeInfo[group.isotopeIndex], group.isotopeIndex)}</strong
+						>
+					</p>
+					<p class="text-sm">{group.note}</p>
+					{#if entry}
+						<div class="flex flex-wrap items-end gap-2">
+							<label class="label text-sm">
+								<span class="block font-semibold"
+									>{group.fissileElementLabel} in the standard ({unitLabel})</span
+								>
+								<input
+									class="input"
+									type="number"
+									step="any"
+									min="0"
+									placeholder="C_fissile^S"
+									bind:value={entry.inStandard}
+								/>
+							</label>
+						</div>
+						<div class="mt-1 space-y-1">
+							{#each materials.unknown as unk, ui (ui)}
+								<div class="flex flex-wrap items-end gap-2">
+									<label class="label text-sm">
+										<span class="block font-semibold"
+											>{group.fissileElementLabel} in {unk.NETL_code || `Unknown ${ui + 1}`} ({unitLabel})</span
+										>
+										<input
+											class="input"
+											type="number"
+											step="any"
+											min="0"
+											placeholder="C_fissile^U"
+											bind:value={entry.inUnknown[ui].value}
+										/>
+									</label>
+									<label class="label text-sm">
+										<span class="block font-semibold">± uncertainty</span>
+										<input
+											class="input"
+											type="number"
+											step="any"
+											min="0"
+											placeholder="optional"
+											bind:value={entry.inUnknown[ui].uncertainty}
+										/>
+									</label>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/each}
+
+			{#if blockedFissionResults.some((r) => !r.needsFissileInput)}
 				<div class="mb-4 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3">
 					<p class="font-bold">⚠ Fission correction not applied</p>
 					<ul class="ml-4 list-disc text-sm">
-						{#each blockedFissionResults as result (result.isotopeIndex + ':' + result.unknownIndex)}
+						{#each blockedFissionResults.filter((r) => !r.needsFissileInput) as result (result.isotopeIndex + ':' + result.unknownIndex)}
 							<li>
 								<strong
 									>{getResultColumnName(
@@ -4158,7 +4296,7 @@
 			{/if}
 			<br />
 
-			{#if appliedFissionResults.length > 0 || blockedFissionResults.length > 0}
+			{#if appliedFissionResults.length > 0 || blockedFissionResults.some((r) => !r.needsFissileInput)}
 				<h3 class="text-xl font-bold">Fission interference corrections</h3>
 				<p class="mt-1 mb-2 text-sm">
 					C<sub>target</sub><sup>U</sup> = k · (C<sub>target</sub><sup>S</sup> + f · C<sub
@@ -4176,7 +4314,7 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each [...fissionResults.values()] as result (result.isotopeIndex + ':' + result.unknownIndex)}
+							{#each [...fissionResults.values()].filter((r) => r.applied || !r.needsFissileInput) as result (result.isotopeIndex + ':' + result.unknownIndex)}
 								<tr>
 									<td class="border border-surface-300-700 px-3 py-1">
 										{getResultColumnName(isotopeInfo[result.isotopeIndex], result.isotopeIndex)}
