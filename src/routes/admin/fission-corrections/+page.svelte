@@ -12,13 +12,16 @@
 	} from '$lib/utils/fissionCorrections.js';
 
 	// --- form state -------------------------------------------------------
+	// `bind:value` on `<input type="number">` yields a `number` (or `null` when
+	// the field is empty / unparseable), so the three numeric fields are held as
+	// `number | null`, not strings.
 	let fissileNuclide = $state('');
 	let interferingIsotope = $state('');
-	let gammaEnergyKev = $state('');
+	let gammaEnergyKev = $state<number | null>(null);
 	let irradiationPosition = $state('');
 	let irradiationType = $state<IrradiationType>('thermal');
-	let correctionFactor = $state('');
-	let uncertainty = $state('');
+	let correctionFactor = $state<number | null>(null);
+	let uncertainty = $state<number | null>(null);
 	let notes = $state('');
 
 	let saving = $state(false);
@@ -54,11 +57,11 @@
 		const problems: string[] = [];
 		if (!fissileNuclide.trim()) problems.push('Fissile nuclide is required.');
 		if (!interferingIsotope.trim()) problems.push('Interfering isotope is required.');
-		if (!Number.isFinite(Number(correctionFactor)) || correctionFactor.trim() === '')
+		if (correctionFactor === null || !Number.isFinite(correctionFactor))
 			problems.push('Correction factor must be a number.');
-		if (gammaEnergyKev.trim() !== '' && !Number.isFinite(Number(gammaEnergyKev)))
+		if (gammaEnergyKev !== null && !Number.isFinite(gammaEnergyKev))
 			problems.push('Gamma energy must be a number (or blank).');
-		if (uncertainty.trim() !== '' && !(Number(uncertainty) >= 0))
+		if (uncertainty !== null && !(uncertainty >= 0))
 			problems.push('Uncertainty must be zero or greater (or blank).');
 		return problems;
 	}
@@ -66,11 +69,11 @@
 	function resetForm() {
 		fissileNuclide = '';
 		interferingIsotope = '';
-		gammaEnergyKev = '';
+		gammaEnergyKev = null;
 		irradiationPosition = '';
 		irradiationType = 'thermal';
-		correctionFactor = '';
-		uncertainty = '';
+		correctionFactor = null;
+		uncertainty = null;
 		notes = '';
 	}
 
@@ -90,11 +93,11 @@
 			const result = await saveFissionCorrection({
 				fissileNuclide: fissileNuclide.trim(),
 				interferingIsotope: interferingIsotope.trim(),
-				gammaEnergyKev: gammaEnergyKev.trim() === '' ? null : Number(gammaEnergyKev),
+				gammaEnergyKev,
 				irradiationPosition: irradiationPosition.trim(),
 				irradiationType,
-				correctionFactor: Number(correctionFactor),
-				uncertainty: uncertainty.trim() === '' ? 0 : Number(uncertainty),
+				correctionFactor: correctionFactor as number,
+				uncertainty: uncertainty ?? 0,
 				notes: notes.trim()
 			});
 			formNotice = result.created
