@@ -37,7 +37,7 @@
 		}
 	},
 	"navigationFallback": {
-		"rewrite": "/index.html",
+		"rewrite": "/404.html",
 		"exclude": ["/api/*", "/app/*", "/favicon.svg"]
 	}
 }
