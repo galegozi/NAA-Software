@@ -1350,12 +1350,14 @@
 	let step = $state(0);
 
 	// Shallow-routing (pushState/replaceState) can only be used once SvelteKit's
-	// router is initialized — afterNavigate fires right after the initial load.
+	// router is initialized. afterNavigate fires during hydration *just before*
+	// the router flips its internal `started` flag, so defer to a microtask.
 	let routerReady = false;
 	let draftHydrated = false;
 
-	// Seed the first history entry with the current step (once both the router is
-	// ready and the draft has been restored) so browser back/forward has a target.
+	// Seed the current history entry with the current step so browser back/forward
+	// has a target. Only meaningful once the router is ready and the draft has
+	// been restored, and only if we haven't already stamped this entry.
 	function seedStepHistory() {
 		if (browser && routerReady && draftHydrated && page.state.wizardStep === undefined) {
 			replaceState('', { ...page.state, wizardStep: step });
@@ -1363,8 +1365,10 @@
 	}
 
 	afterNavigate(() => {
-		routerReady = true;
-		seedStepHistory();
+		queueMicrotask(() => {
+			routerReady = true;
+			seedStepHistory();
+		});
 	});
 
 	let title = $state('NAA Analysis');
@@ -2562,16 +2566,24 @@
 	 */
 	function goToStep(target: number, { replace = false }: { replace?: boolean } = {}) {
 		const clamped = Math.min(Math.max(Math.trunc(target), 0), totalSteps);
+		const leavingStep = step;
 		step = clamped;
 		if (!browser || !routerReady) {
 			return;
 		}
-		const nextState = { ...page.state, wizardStep: clamped };
-		if (replace || page.state.wizardStep === undefined) {
-			replaceState('', nextState);
-		} else if (page.state.wizardStep !== clamped) {
-			pushState('', nextState);
+		if (replace) {
+			replaceState('', { ...page.state, wizardStep: clamped });
+			return;
 		}
+		if (clamped === leavingStep) {
+			return;
+		}
+		// Make sure the entry we're leaving carries its own step, so pressing Back
+		// from the new entry restores it rather than falling out of the app.
+		if (page.state.wizardStep === undefined) {
+			replaceState('', { ...page.state, wizardStep: leavingStep });
+		}
+		pushState('', { ...page.state, wizardStep: clamped });
 	}
 
 	const next = async () => {
