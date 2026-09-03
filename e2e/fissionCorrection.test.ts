@@ -37,7 +37,10 @@ test('fission-interference correction is applied and shown on Review', async ({ 
 	await page.getByRole('button', { name: 'Apply factor' }).click();
 	await expect(page.getByText('(custom)').first()).toBeVisible();
 
-	await page.getByRole('button', { name: /^Next:/ }).click();
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
 
 	// --- Step 2: one reference material -------------------------------------
 	await page.getByRole('button', { name: '+ Add custom reference material' }).click();
@@ -51,7 +54,10 @@ test('fission-interference correction is applied and shown on Review', async ({ 
 	for (const select of await page.getByLabel('Reference Material Concentration Units').all()) {
 		await select.selectOption('ppm');
 	}
-	await page.getByRole('button', { name: /^Next:/ }).click();
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
 
 	// --- Step 3: one unknown ---------------------------------------------------
 	await page.getByRole('button', { name: 'Add unknown material' }).click();
@@ -59,7 +65,10 @@ test('fission-interference correction is applied and shown on Review', async ({ 
 	// Ce unknown net = 1250 (k = 1.25); U unknown net = 4800 (k = 6, C_U^U = 6·5 = 30)
 	await setCounts(page, 0, 1250);
 	await setCounts(page, 1, 4800);
-	await page.getByRole('button', { name: /^Next:/ }).click();
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
 
 	// --- Step 4: Review ------------------------------------------------------
 	await expect(page.getByRole('heading', { name: 'Step 4: Review' })).toBeVisible();
@@ -109,19 +118,28 @@ test('prompts for fissile concentrations when uranium is not analysed', async ({
 	await page.locator('select').filter({ hasText: 'U-235' }).first().selectOption('U-235');
 	await page.getByLabel('Correction factor').fill('0.08');
 	await page.getByRole('button', { name: 'Apply factor' }).click();
-	await page.getByRole('button', { name: /^Next:/ }).click();
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
 
 	await page.getByRole('button', { name: '+ Add custom reference material' }).click();
 	await fillMaterial(page, { netl: 'REF-A', sample: 'Standard A' });
 	await setCounts(page, 0, 1000);
 	await page.getByLabel('Known Concentration').fill('4');
 	await page.getByLabel('Reference Material Concentration Units').selectOption('ppm');
-	await page.getByRole('button', { name: /^Next:/ }).click();
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
 
 	await page.getByRole('button', { name: 'Add unknown material' }).click();
 	await fillMaterial(page, { netl: 'UNK-1', sample: 'Unknown 1' });
 	await setCounts(page, 0, 1250);
-	await page.getByRole('button', { name: /^Next:/ }).click();
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
 
 	// Review: the prompt appears because uranium isn't analysed.
 	await expect(page.getByText(/Uranium concentration needed/i)).toBeVisible();

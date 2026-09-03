@@ -31,7 +31,10 @@ test('fission-interference prompt appears for a fission product and records a ch
 	await expect(page.getByText('not reviewed')).toHaveCount(0);
 
 	// The Step 2 notice should be gone once every candidate is reviewed.
-	await page.getByRole('button', { name: /^Next:/ }).click();
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
 	await expect(page.getByRole('heading', { name: 'Step 2: Build Library' })).toBeVisible();
 	await expect(page.getByText('unreviewed fission-interference potential')).toHaveCount(0);
 

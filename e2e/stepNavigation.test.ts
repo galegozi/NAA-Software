@@ -23,7 +23,10 @@ test('browser back/forward navigates the wizard steps', async ({ page }) => {
 	await page.getByLabel('Half Life', { exact: true }).fill('2.7');
 
 	// Step 1 -> Step 2
-	await page.getByRole('button', { name: /^Next:/ }).click();
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
 	await expect(page.getByRole('heading', { name: 'Step 2: Build Library' })).toBeVisible();
 
 	// Back button: 2 -> 1 -> Welcome

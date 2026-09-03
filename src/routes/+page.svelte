@@ -1945,7 +1945,6 @@
 			seedStepHistory();
 			analysisMeta.registerWelcomeHandler(() => {
 				goToStep(0);
-				window.scrollTo({ top: 0, behavior: 'smooth' });
 			});
 		});
 		void swaAuth.refresh();
@@ -2862,6 +2861,8 @@
 		if (clamped === leavingStep) {
 			return;
 		}
+		// Every step change starts back at the top of the page.
+		window.scrollTo({ top: 0, behavior: 'smooth' });
 		// Make sure the entry we're leaving carries its own step, so pressing Back
 		// from the new entry restores it rather than falling out of the app.
 		if (page.state.wizardStep === undefined) {
@@ -3096,6 +3097,17 @@
 	{/if}
 {/snippet}
 
+{#snippet stepNavButtons()}
+	<button type="button" class="btn preset-tonal-surface text-xl" onclick={prev}>
+		{backButtonText}
+	</button>
+	{#if stepType !== StepType.REVIEW}
+		<button type="button" class="btn preset-filled-primary-500 text-xl" onclick={next}>
+			{nextButtonText}
+		</button>
+	{/if}
+{/snippet}
+
 <div style="padding: 5%">
 	<h1 class="text-3xl font-bold">NAA Analysis Software - Version {APP_VERSION}</h1>
 	<br />
@@ -3122,6 +3134,12 @@
 			handleSubmit();
 		}}
 	>
+		{#if stepType !== StepType.WELCOME}
+			<div class="mb-6 flex flex-wrap gap-4">
+				{@render stepNavButtons()}
+			</div>
+		{/if}
+
 		{#if stepType === StepType.WELCOME}
 			<p>Welcome to the NAA Analysis software!</p>
 			<br />
@@ -4478,14 +4496,7 @@
 
 		{#if stepType !== StepType.WELCOME}
 			<div class="mt-6 flex flex-wrap gap-4">
-				<button type="button" class="btn preset-tonal-surface text-xl" onclick={prev}>
-					{backButtonText}
-				</button>
-				{#if stepType !== StepType.REVIEW}
-					<button type="button" class="btn preset-filled-primary-500 text-xl" onclick={next}>
-						{nextButtonText}
-					</button>
-				{/if}
+				{@render stepNavButtons()}
 			</div>
 		{/if}
 		<br />
