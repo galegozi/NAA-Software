@@ -45,6 +45,7 @@ function makeDraft(overrides: Partial<AnalysisDraft> = {}): AnalysisDraft {
 		localIsotopeLinks: [],
 		fissionChoices: [],
 		fissionManualFissile: [],
+		fissionBariumHalfLife: { value: null, unit: 'days' },
 		...overrides
 	};
 }

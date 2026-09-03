@@ -4,13 +4,18 @@ import type { EverythingComputed } from '$lib/NAAMath/types.js';
 import type { FissionChoice } from './fissionInterference.js';
 import { computeFissionResults, type FissionResultsContext } from './fissionResults.js';
 
-const iso = (elementName: string, isotopeName: string): IsotopeInfo => ({
+const iso = (
+	elementName: string,
+	isotopeName: string,
+	halfLife = 0,
+	unit: IsotopeInfo['unit'] = 'seconds'
+): IsotopeInfo => ({
 	elementName,
 	isotopeName,
 	energy: 0,
-	halfLife: 0,
+	halfLife,
 	linkedReference: 0,
-	unit: 'seconds'
+	unit
 });
 
 const comp = (
@@ -51,6 +56,7 @@ function baseContext(overrides: Partial<FissionResultsContext> = {}): FissionRes
 		],
 		linkedReferenceIndex: () => 0,
 		manualFissile: [],
+		bariumDecayConstant: null,
 		...overrides
 	};
 }
@@ -166,6 +172,63 @@ describe('computeFissionResults', () => {
 		expect(result?.corrected).toBeCloseTo(48.1, 8);
 		// relFissile = 1.5/30 = 5%, no factor uncertainty, target 0% → 5%
 		expect(result?.correctedUncertaintyPercent).toBeCloseTo(5, 6);
+	});
+
+	// --- La-140: Ba-140 → La-140 in-growth --------------------------------------
+	const lanthanumChoice: FissionChoice = {
+		isotopeKey: 'la|140|',
+		factor: 0.00233,
+		uncertainty: 0.00012,
+		mode: 'table',
+		fissileNuclide: 'U-235'
+	};
+
+	function lanthanumContext(overrides: Partial<FissionResultsContext> = {}): FissionResultsContext {
+		return baseContext({
+			candidates: [{ index: 0, choice: lanthanumChoice }],
+			isotopeInfo: [iso('Lanthanum', 'La-140', 1.678, 'days'), iso('Uranium', 'U-238')],
+			references: [
+				{
+					knownConcentration: [30, 5],
+					concentrationUnits: ['ppm', 'ppm'],
+					irradiationTime: 3600,
+					decayTime: 3 * 86400
+				} as unknown as ReferenceMaterial
+			],
+			unknowns: [{ irradiationTime: 3600, decayTime: 5 * 86400 } as UnknownMaterial],
+			everythingComp: [[comp(1.25, 37.5)], [comp(0.9, 30)]],
+			bariumDecayConstant: Math.LN2 / (12.75 * 86400),
+			...overrides
+		});
+	}
+
+	it('applies the La-140 correction with per-sample f_S / f_U from the Ba-140 in-growth', () => {
+		const result = computeFissionResults(lanthanumContext()).get('0:0');
+		expect(result?.applied).toBe(true);
+		expect(result?.isLanthanum).toBe(true);
+		// longer decay on the unknown (5 d vs 3 d) → larger factor there
+		expect(result?.f).toBeGreaterThan(result!.fStandard);
+		expect(result!.fStandard).toBeGreaterThan(0);
+		// tiny interference here (U ≈ La), so the corrected value barely moves
+		expect(result?.corrected).toBeCloseTo(37.5, 1);
+	});
+
+	it('blocks the La-140 correction (needsBariumHalfLife) with no Ba-140 half-life', () => {
+		const result = computeFissionResults(lanthanumContext({ bariumDecayConstant: null })).get(
+			'0:0'
+		);
+		expect(result?.applied).toBe(false);
+		expect(result?.needsBariumHalfLife).toBe(true);
+		expect(result?.note).toMatch(/Ba-140 half-life/i);
+	});
+
+	it('blocks the La-140 correction when an irradiation time is missing', () => {
+		const result = computeFissionResults(
+			lanthanumContext({ unknowns: [{ decayTime: 5 * 86400 } as UnknownMaterial] })
+		).get('0:0');
+		expect(result?.applied).toBe(false);
+		expect(result?.needsBariumHalfLife).toBe(false);
+		expect(result?.note).toMatch(/irradiation time/i);
 	});
 
 	it('prompts (needsFissileInput) when the reference has no known fissile concentration', () => {

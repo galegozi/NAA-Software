@@ -3,6 +3,7 @@ import {
 	fissionCorrectedMassFraction,
 	fissionCorrectedRelativeUncertainty,
 	fissionCorrectionDelta,
+	lanthanumFissionFactor,
 	uncorrectedMassFraction,
 	type FissionCorrectionInputs
 } from './fissionCorrectionMath.ts';
@@ -49,6 +50,46 @@ describe('fissionCorrectionMath', () => {
 	it('drops terms whose relative uncertainty is missing / non-finite', () => {
 		expect(fissionCorrectedRelativeUncertainty(0.06, 0, 0)).toBeCloseTo(0.06, 12);
 		expect(fissionCorrectedRelativeUncertainty(0.06, NaN, -1)).toBeCloseTo(0.06, 12);
+	});
+
+	it('uses fInUnknown for the C_fissile^U term when the two factors differ (lanthanum)', () => {
+		// k·(Ct_S + f_S·Cf_S) − f_U·Cf_U = 1.25·(40 + 0.08·5) − 0.05·30 = 50.5 − 1.5 = 49.0
+		const inputs: FissionCorrectionInputs = { ...ceExample, f: 0.08, fInUnknown: 0.05 };
+		expect(fissionCorrectedMassFraction(inputs)).toBeCloseTo(49.0, 10);
+		// falls back to `f` for both terms when fInUnknown is omitted
+		expect(fissionCorrectedMassFraction({ ...ceExample, f: 0.08 })).toBeCloseTo(
+			fissionCorrectedMassFraction({ ...ceExample, f: 0.08, fInUnknown: 0.08 }),
+			10
+		);
+	});
+
+	describe('lanthanumFissionFactor', () => {
+		const params = {
+			constant: 0.00233,
+			lambdaBa: Math.LN2 / (12.75 * 86400),
+			lambdaLa: Math.LN2 / (1.678 * 86400),
+			halfIrradiationTime: 1800,
+			decayTime: 3 * 86400
+		};
+
+		it('is A·[e^(-λ_Ba·m) − e^(-λ_La·m)]·e^(λ_La·t)', () => {
+			const expected =
+				params.constant *
+				(Math.exp(-params.lambdaBa * params.halfIrradiationTime) -
+					Math.exp(-params.lambdaLa * params.halfIrradiationTime)) *
+				Math.exp(params.lambdaLa * params.decayTime);
+			expect(lanthanumFissionFactor(params)).toBeCloseTo(expected, 14);
+			expect(lanthanumFissionFactor(params)).toBeGreaterThan(0);
+		});
+
+		it('is 0 at m = 0 and grows with the decay time', () => {
+			expect(
+				lanthanumFissionFactor({ ...params, halfIrradiationTime: 0, decayTime: 0 })
+			).toBeCloseTo(0, 14);
+			const early = lanthanumFissionFactor({ ...params, decayTime: 1 * 86400 });
+			const late = lanthanumFissionFactor({ ...params, decayTime: 8 * 86400 });
+			expect(late).toBeGreaterThan(early);
+		});
 	});
 
 	it('scales linearly with unit choice (ppm vs mass fraction)', () => {

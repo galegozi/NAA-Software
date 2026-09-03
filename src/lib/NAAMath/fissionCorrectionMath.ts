@@ -29,8 +29,15 @@
 export type FissionCorrectionInputs = {
 	/** Combined correction factor `k`. */
 	k: number;
-	/** Fission-interference factor `f` (dimensionless). */
+	/** Fission-interference factor `f` (dimensionless) — the standard's value. */
 	f: number;
+	/**
+	 * Fission-interference factor in the unknown, when it differs from the
+	 * standard's. Only lanthanum needs this: La-140 from fission is fed by its
+	 * precursor Ba-140, so `f` depends on each sample's own irradiation / decay
+	 * timing. Defaults to `f` (the Ce case, where the two are equal).
+	 */
+	fInUnknown?: number;
 	/** Target concentration in the standard, as a mass fraction. */
 	targetInStandard: number;
 	/** Fissile-element concentration in the standard, as a mass fraction. */
@@ -46,16 +53,43 @@ export function uncorrectedMassFraction(k: number, targetInStandard: number): nu
 
 /**
  * Fission-interference-corrected target concentration in the unknown, as a mass
- * fraction: `k * (Ct_S + f * Cf_S) - f * Cf_U`.
+ * fraction: `k * (Ct_S + f_S * Cf_S) - f_U * Cf_U` (with `f_U === f_S` unless
+ * `fInUnknown` is given).
  */
 export function fissionCorrectedMassFraction(inputs: FissionCorrectionInputs): number {
 	const { k, f, targetInStandard, fissileInStandard, fissileInUnknown } = inputs;
-	return k * (targetInStandard + f * fissileInStandard) - f * fissileInUnknown;
+	const fInUnknown = inputs.fInUnknown ?? f;
+	return k * (targetInStandard + f * fissileInStandard) - fInUnknown * fissileInUnknown;
+}
+
+/**
+ * Fission-interference factor for La-140 at one sample's timing.
+ *
+ * La-140 produced by uranium fission is fed almost entirely through its
+ * precursor Ba-140 (T½ ≈ 12.75 d), so the flat catalog constant `A`
+ * (≈ 0.00233 ± 0.00012 for U-235) is shaped by the Ba-140 → La-140 in-growth:
+ *
+ *   f = A · [exp(-λ_Ba · m) − exp(-λ_La · m)] · exp(λ_La · t)
+ *
+ * with `m` = half the irradiation time and `t` = the decay time (end of
+ * irradiation to start of counting). `lambdaBa` / `lambdaLa` must be in the
+ * reciprocal of whatever time unit `m` and `t` use (seconds throughout here).
+ */
+export function lanthanumFissionFactor(params: {
+	constant: number;
+	lambdaBa: number;
+	lambdaLa: number;
+	halfIrradiationTime: number;
+	decayTime: number;
+}): number {
+	const { constant, lambdaBa, lambdaLa, halfIrradiationTime: m, decayTime: t } = params;
+	return constant * (Math.exp(-lambdaBa * m) - Math.exp(-lambdaLa * m)) * Math.exp(lambdaLa * t);
 }
 
 /**
  * Signed size of the correction (corrected − uncorrected), as a mass fraction.
- * Equivalent to `f * (k * Cf_S - Cf_U)`.
+ * Equivalent to `k * f_S * Cf_S - f_U * Cf_U` (`= f * (k * Cf_S - Cf_U)` when the
+ * two factors are equal).
  */
 export function fissionCorrectionDelta(inputs: FissionCorrectionInputs): number {
 	return (

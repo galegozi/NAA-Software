@@ -6,7 +6,12 @@
  * draft is only cleared explicitly ("Start new analysis").
  */
 import type { IsotopeInfo, ReferenceMaterial, UnknownMaterial } from '$lib/types.js';
-import type { FissionChoice, FissionManualEntry } from '$lib/utils/fissionInterference.js';
+import {
+	DEFAULT_FISSION_BARIUM_HALF_LIFE,
+	type FissionBariumHalfLife,
+	type FissionChoice,
+	type FissionManualEntry
+} from '$lib/utils/fissionInterference.js';
 
 export const DRAFT_KEY = 'naa-analysis-draft';
 export const DRAFT_VERSION = 3;
@@ -49,7 +54,30 @@ export type AnalysisDraft = {
 	fissionChoices: FissionChoice[];
 	/** Hand-entered fissile concentrations, when the fissile element isn't analysed. */
 	fissionManualFissile: FissionManualEntry[];
+	/** Hand-entered Ba-140 half-life for the La-140 fission correction. */
+	fissionBariumHalfLife: FissionBariumHalfLife;
 };
+
+const HALF_LIFE_UNITS: FissionBariumHalfLife['unit'][] = [
+	'seconds',
+	'minutes',
+	'hours',
+	'days',
+	'weeks',
+	'years'
+];
+
+function parseBariumHalfLife(value: unknown): FissionBariumHalfLife {
+	if (value && typeof value === 'object') {
+		const raw = value as Partial<FissionBariumHalfLife>;
+		const num = typeof raw.value === 'number' && Number.isFinite(raw.value) ? raw.value : null;
+		const unit = HALF_LIFE_UNITS.includes(raw.unit as FissionBariumHalfLife['unit'])
+			? (raw.unit as FissionBariumHalfLife['unit'])
+			: DEFAULT_FISSION_BARIUM_HALF_LIFE.unit;
+		return { value: num, unit };
+	}
+	return { ...DEFAULT_FISSION_BARIUM_HALF_LIFE };
+}
 
 function hasLocalStorage(): boolean {
 	try {
@@ -115,7 +143,8 @@ function parseDraft(raw: string | null, expectedVersion: number): AnalysisDraft 
 			fissionChoices: Array.isArray(parsed.fissionChoices) ? parsed.fissionChoices : [],
 			fissionManualFissile: Array.isArray(parsed.fissionManualFissile)
 				? parsed.fissionManualFissile
-				: []
+				: [],
+			fissionBariumHalfLife: parseBariumHalfLife(parsed.fissionBariumHalfLife)
 		};
 	} catch {
 		return null;

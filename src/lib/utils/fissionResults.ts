@@ -17,13 +17,16 @@ import {
 } from '../NAAMath/everythingMath.ts';
 import {
 	fissionCorrectedMassFraction,
-	fissionCorrectedRelativeUncertainty
+	fissionCorrectedRelativeUncertainty,
+	lanthanumFissionFactor
 } from '../NAAMath/fissionCorrectionMath.ts';
+import { convertHalfLifeToSeconds } from '../NAAMath/isotopeMath.ts';
 import { lookupElementName } from '$lib/utils/elementNames.js';
 import {
 	fissileParentSymbol,
 	findManualFissile,
 	fissionIsotopeKey,
+	isLanthanum140,
 	isotopeIsElement,
 	type FissionChoice,
 	type FissionManualEntry
@@ -35,7 +38,12 @@ export type FissionResult = {
 	/** True when the corrected value was computed; false + `note` when blocked. */
 	applied: boolean;
 	unit: ConcUnitType;
+	/** Factor multiplying `C_fissile^U` (`= fStandard` for every isotope but La-140). */
 	f: number;
+	/** Factor multiplying `C_fissile^S` inside `k · (…)`. */
+	fStandard: number;
+	/** True when `f` / `fStandard` came from the La-140 Ba-140-precursor in-growth. */
+	isLanthanum: boolean;
 	k: number;
 	fissileSymbol: string;
 	fissileElementLabel: string;
@@ -60,6 +68,11 @@ export type FissionResult = {
 	 * concentration the user can supply by hand (the Review step renders inputs).
 	 */
 	needsFissileInput: boolean;
+	/**
+	 * True (La-140 only) when the correction is blocked because the Ba-140
+	 * half-life needed for the precursor in-growth could not be resolved.
+	 */
+	needsBariumHalfLife: boolean;
 	note: string;
 };
 
@@ -75,6 +88,12 @@ export type FissionResultsContext = {
 	linkedReferenceIndex: (isotopeIndex: number) => number;
 	/** Hand-entered fissile concentrations (fallback when the element isn't analysed). */
 	manualFissile: FissionManualEntry[];
+	/**
+	 * Ba-140 decay constant (per second) for the La-140 precursor in-growth,
+	 * resolved by the caller from a hand-entered half-life, an analysed Ba-140
+	 * isotope, or the catalog. `null` blocks the La-140 correction.
+	 */
+	bariumDecayConstant: number | null;
 };
 
 function nonNegativeOrNull(value: number | null | undefined): number | null {
@@ -83,6 +102,17 @@ function nonNegativeOrNull(value: number | null | undefined): number | null {
 
 function numberOr(value: number | undefined | null, fallback = 0): number {
 	return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+const HALF_LIFE_UNITS = ['seconds', 'minutes', 'hours', 'days', 'weeks', 'years'];
+
+/** Decay constant (per second) from a half-life; `0` when the inputs don't parse. */
+function decayConstantFromHalfLife(value: number | null | undefined, unit: string): number {
+	if (!HALF_LIFE_UNITS.includes(unit)) {
+		return 0;
+	}
+	const seconds = convertHalfLifeToSeconds(numberOr(value), unit);
+	return Number.isFinite(seconds) && seconds > 0 ? Math.LN2 / seconds : 0;
 }
 
 /**
@@ -131,6 +161,20 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 			lookupElementName(fissileSymbol) || fissileSymbol || 'the fissile parent';
 		const manual = findManualFissile(ctx.manualFissile, fissionIsotopeKey(ctx.isotopeInfo[ti]));
 
+		// La-140 is fed by its precursor Ba-140, so the flat catalog constant is
+		// shaped by the Ba-140 → La-140 in-growth, evaluated per sample.
+		const lanthanum = isLanthanum140(ctx.isotopeInfo[ti]);
+		const lambdaLa = lanthanum
+			? decayConstantFromHalfLife(ctx.isotopeInfo[ti].halfLife, ctx.isotopeInfo[ti].unit)
+			: 0;
+		const lambdaBa =
+			lanthanum &&
+			ctx.bariumDecayConstant != null &&
+			Number.isFinite(ctx.bariumDecayConstant) &&
+			ctx.bariumDecayConstant > 0
+				? ctx.bariumDecayConstant
+				: null;
+
 		for (let ui = 0; ui < ctx.unknowns.length; ui++) {
 			const comp = ctx.everythingComp[ti]?.[ui];
 			const k = comp?.combinedCorrectionFactor;
@@ -151,6 +195,8 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 				applied: false,
 				unit,
 				f: choice.factor,
+				fStandard: choice.factor,
+				isLanthanum: lanthanum,
 				k,
 				fissileSymbol,
 				fissileElementLabel,
@@ -164,12 +210,57 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 				correctedUncertaintyAbsolute: uncorrectedUncertaintyAbsolute,
 				correctedUncertaintyPercent: numberOr(comp.unknownConcentrationUncertainty),
 				needsFissileInput: false,
+				needsBariumHalfLife: false,
 				note: ''
 			};
 
 			if (!fissileSymbol) {
 				out.set(key, { ...base, note: 'Set the fissile parent for this factor in Step 1.' });
 				continue;
+			}
+
+			// La-140: turn the flat constant `choice.factor` into per-sample factors
+			// f_S / f_U via the Ba-140 → La-140 Bateman envelope (m = half the
+			// irradiation time, t = the decay time). Every other isotope keeps a
+			// flat factor (f_S === f_U === choice.factor).
+			let fStandard = choice.factor;
+			let fUnknown = choice.factor;
+			if (lanthanum) {
+				if (!(lambdaLa > 0)) {
+					out.set(key, {
+						...base,
+						note: 'Enter the La-140 half-life on the isotope — the fission correction needs its decay constant.'
+					});
+					continue;
+				}
+				if (lambdaBa === null) {
+					out.set(key, {
+						...base,
+						needsBariumHalfLife: true,
+						note: 'The Ba-140 half-life is required for the lanthanum fission correction — it drives the Ba-140 → La-140 in-growth. Add Ba-140 to your analysed isotopes or enter its half-life below; the correction cannot be applied without it.'
+					});
+					continue;
+				}
+				const mStandard = numberOr(ref.irradiationTime) / 2;
+				const mUnknown = numberOr(ctx.unknowns[ui]?.irradiationTime) / 2;
+				if (!(mStandard > 0) || !(mUnknown > 0)) {
+					out.set(key, {
+						...base,
+						note: 'The lanthanum fission correction needs the irradiation time for the standard and this unknown.'
+					});
+					continue;
+				}
+				const envelope = { constant: choice.factor, lambdaBa, lambdaLa };
+				fStandard = lanthanumFissionFactor({
+					...envelope,
+					halfIrradiationTime: mStandard,
+					decayTime: numberOr(ref.decayTime)
+				});
+				fUnknown = lanthanumFissionFactor({
+					...envelope,
+					halfIrradiationTime: mUnknown,
+					decayTime: numberOr(ctx.unknowns[ui]?.decayTime)
+				});
 			}
 
 			const fi = resolveFissileIsotopeIndex(ctx, fissileSymbol, refIndex);
@@ -225,7 +316,8 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 			const mfTargetS = concentrationToMassFraction(base.cTargetStandard, unit);
 			const correctedMassFraction = fissionCorrectedMassFraction({
 				k,
-				f: choice.factor,
+				f: fStandard,
+				fInUnknown: fUnknown,
 				targetInStandard: mfTargetS,
 				fissileInStandard: mfFissileS,
 				fissileInUnknown: mfFissileU
@@ -248,6 +340,8 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 			out.set(key, {
 				...base,
 				applied: true,
+				f: fUnknown,
+				fStandard,
 				// C_fissile^S / C_fissile^U shown in the target unit so the printed formula is literal.
 				cFissileStandard: massFractionToConcentration(mfFissileS, unit),
 				cFissileUnknown: massFractionToConcentration(mfFissileU, unit),

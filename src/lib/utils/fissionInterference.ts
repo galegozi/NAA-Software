@@ -13,7 +13,7 @@
  * This module only wires up the *choice* (which factor, or an explicit 0 for
  * "no interference"). The subtraction math is not implemented yet.
  */
-import type { ConcUnitType, IsotopeInfo } from '$lib/types.js';
+import type { ConcUnitType, HalfLife, IsotopeInfo } from '$lib/types.js';
 import { parseIsotopeName, isotopeIdentityKey } from '$lib/utils/catalogWrite.js';
 import { lookupElementSymbol, normalizeElementSymbol } from '$lib/utils/elementNames.js';
 import type { FissionCorrectionRecord, IrradiationType } from '$lib/utils/fissionCorrections.js';
@@ -37,6 +37,18 @@ export type FissionChoice = {
 	irradiationType?: IrradiationType;
 	/** Catalog row id the factor came from, when available. */
 	sourceRowId?: string;
+};
+
+/**
+ * Hand-entered Ba-140 half-life for the La-140 fission correction's precursor
+ * in-growth term, used when it can't be resolved from an analysed Ba-140
+ * isotope or the catalog. Held with the draft.
+ */
+export type FissionBariumHalfLife = { value: number | null; unit: HalfLife['unit'] };
+
+export const DEFAULT_FISSION_BARIUM_HALF_LIFE: FissionBariumHalfLife = {
+	value: null,
+	unit: 'days'
 };
 
 /**
@@ -95,6 +107,27 @@ export function fissionIsotopeKey(isotope: IsotopeIdentity): string {
 		return isotopeIdentityKey(parsed);
 	}
 	return `raw:${(isotope.elementName ?? '').trim().toLowerCase()}-${raw.toLowerCase()}`;
+}
+
+function keyFor(name: string): string {
+	const parsed = parseIsotopeName(name);
+	return parsed ? isotopeIdentityKey(parsed) : `raw:-${name.toLowerCase()}`;
+}
+
+const LA_140_KEY = keyFor('La-140');
+const BA_140_KEY = keyFor('Ba-140');
+
+/**
+ * True when the isotope is La-140 — the one fission product whose interference
+ * correction needs the Ba-140 → La-140 in-growth term rather than a flat factor.
+ */
+export function isLanthanum140(isotope: IsotopeIdentity): boolean {
+	return fissionIsotopeKey(isotope) === LA_140_KEY;
+}
+
+/** True when the isotope is Ba-140 (the La-140 fission precursor). */
+export function isBarium140(isotope: IsotopeIdentity): boolean {
+	return fissionIsotopeKey(isotope) === BA_140_KEY;
 }
 
 /**

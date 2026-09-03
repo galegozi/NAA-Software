@@ -166,6 +166,81 @@ test('no fission correction is offered until uranium is analysed', async ({ page
 	expect(pageErrors).toEqual([]);
 });
 
+/**
+ * La-140 needs the Ba-140 → La-140 in-growth: the Review step blocks the
+ * correction (red error) until the Ba-140 half-life is supplied, then applies it.
+ */
+test('La-140 correction is blocked until the Ba-140 half-life is given', async ({ page }) => {
+	const pageErrors: string[] = [];
+	page.on('pageerror', (e) => pageErrors.push(e.message));
+
+	await page.goto('/');
+	await page.getByRole('button', { name: 'Get Started' }).click();
+
+	// La-140 (idx 0) + Uranium (idx 1).
+	await page.getByRole('button', { name: 'Add custom isotope' }).click();
+	await page.getByLabel('Element Name').nth(0).fill('Lanthanum');
+	await page.getByLabel('Isotope', { exact: true }).nth(0).fill('La-140');
+	await page.getByLabel('Energy (in KeV)').nth(0).fill('1596');
+	await page.getByLabel('Half Life', { exact: true }).nth(0).fill('1.678');
+	await page.getByLabel('Half Life Unit').nth(0).selectOption('days');
+
+	await page.getByRole('button', { name: 'Add custom isotope' }).click();
+	await page.getByLabel('Element Name').nth(1).fill('Uranium');
+	await page.getByLabel('Isotope', { exact: true }).nth(1).fill('U-239');
+	await page.getByLabel('Energy (in KeV)').nth(1).fill('74');
+	await page.getByLabel('Half Life', { exact: true }).nth(1).fill('1500');
+
+	// La-140 fission factor: the flat constant A = 0.00233.
+	await page.locator('select').filter({ hasText: 'U-235' }).first().selectOption('U-235');
+	await page.getByLabel('Correction factor').fill('0.00233');
+	await page.getByRole('button', { name: 'Apply factor' }).click();
+
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
+
+	// Standard.
+	await page.getByRole('button', { name: '+ Add custom reference material' }).click();
+	await fillMaterial(page, { netl: 'REF-A', sample: 'Standard A' });
+	await setCounts(page, 0, 1000);
+	await setCounts(page, 1, 800);
+	await page.getByLabel('Known Concentration').nth(0).fill('4');
+	await page.getByLabel('Known Concentration').nth(1).fill('5');
+	for (const select of await page.getByLabel('Reference Material Concentration Units').all()) {
+		await select.selectOption('ppm');
+	}
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
+
+	// Unknown.
+	await page.getByRole('button', { name: 'Add unknown material' }).click();
+	await fillMaterial(page, { netl: 'UNK-1', sample: 'Unknown 1' });
+	await setCounts(page, 0, 1250);
+	await setCounts(page, 1, 4800);
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
+
+	// Review: blocked on the Ba-140 half-life.
+	await expect(page.getByRole('heading', { name: 'Step 4: Review' })).toBeVisible();
+	await expect(page.getByText(/Ba-140 half-life required/i)).toBeVisible();
+	await expect(page.getByText(/Fission-interference corrections applied/)).toHaveCount(0);
+
+	// Supply it — the correction is then applied.
+	await page.getByLabel('Ba-140 half-life').fill('12.75');
+	await expect(page.getByText(/Ba-140 half-life required/i)).toHaveCount(0);
+	await expect(
+		page.getByText('Fission-interference corrections applied to 1 result')
+	).toBeVisible();
+
+	expect(pageErrors).toEqual([]);
+});
+
 async function fillMaterial(
 	page: import('@playwright/test').Page,
 	{ netl, sample }: { netl: string; sample: string }
