@@ -54,12 +54,12 @@
 		type FissionCorrectionRecord
 	} from '$lib/utils/fissionCorrections.js';
 	import {
-		FISSILE_NUCLIDES,
 		describeFissionChoice,
 		describeFissionRow,
 		findFissionChoice,
 		fissionIsotopeKey,
 		isKnownFissionProduct,
+		isotopeIsElement,
 		matchingFissionRows,
 		pruneFissionChoices,
 		pruneManualFissile,
@@ -519,6 +519,11 @@
 	let fissionDraftFactor = $state<Record<number, number | null>>({});
 	let fissionDraftUncertainty = $state<Record<number, number | null>>({});
 	let fissionDraftParent = $state<Record<number, string>>({});
+	// Search term for the Step 1 isotope catalog browser — bound so the "find
+	// uranium" button in the fission-interference warning can drive it.
+	let isotopeCatalogSearch = $state('');
+	/** Uranium is the only fissile parent the fission correction is applied for. */
+	const URANIUM_NUCLIDES = ['U-235', 'U-238'] as const;
 
 	/**
 	 * A pending upload the user must confirm first. `steps` are shown verbatim;
@@ -1167,6 +1172,23 @@
 		}
 	}
 
+	/**
+	 * Fill the Step 1 catalog search with "uranium" and scroll the browser into
+	 * view, so the user can add a uranium isotope (the fission correction is only
+	 * applied when uranium is part of the analysis).
+	 */
+	async function findUraniumInCatalog() {
+		isotopeCatalogSearch = 'uranium';
+		await tick();
+		if (browser) {
+			requestAnimationFrame(() => {
+				document
+					.getElementById('isotope-catalog-browser')
+					?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			});
+		}
+	}
+
 	function applyFissionRow(index: number, row: FissionCorrectionRecord) {
 		fissionChoices = upsertFissionChoice(fissionChoices, fissionIsotopeKey(isotopeInfo[index]), {
 			isotopeKey: fissionIsotopeKey(isotopeInfo[index]),
@@ -1204,7 +1226,7 @@
 			factor,
 			uncertainty,
 			mode: factor === 0 ? 'none' : 'manual',
-			fissileNuclide: factor === 0 ? undefined : (fissionDraftParent[index] ?? FISSILE_NUCLIDES[0])
+			fissileNuclide: factor === 0 ? undefined : (fissionDraftParent[index] ?? URANIUM_NUCLIDES[0])
 		});
 	}
 
@@ -1655,7 +1677,17 @@
 				} => c !== null
 			)
 	);
-	let unreviewedFissionCount = $derived(fissionCandidates.filter((c) => c.choice === null).length);
+	/**
+	 * Fission interference is only corrected for when a uranium isotope is part of
+	 * the analysis (its concentration is what the correction is scaled against).
+	 * Without uranium the fission candidates raise an informational warning only.
+	 */
+	let hasUraniumAnalyzed = $derived(isotopeInfo.some((iso) => isotopeIsElement(iso, 'U')));
+	let unreviewedFissionCount = $derived(
+		hasUraniumAnalyzed ? fissionCandidates.filter((c) => c.choice === null).length : 0
+	);
+	/** Fission candidates the user has not yet acted on (picked a factor or dismissed). */
+	let unresolvedFissionCandidates = $derived(fissionCandidates.filter((c) => c.choice === null));
 	let fissionCandidateByIndex = $derived(new Map(fissionCandidates.map((c) => [c.index, c])));
 
 	// computed isotope information
@@ -1845,7 +1877,11 @@
 	 */
 	let fissionResults = $derived(
 		computeFissionResults({
-			candidates: fissionCandidates.map((c) => ({ index: c.index, choice: c.choice })),
+			// The correction is only applied when uranium is one of the analysed
+			// isotopes; otherwise there is nothing to scale the fission term against.
+			candidates: hasUraniumAnalyzed
+				? fissionCandidates.map((c) => ({ index: c.index, choice: c.choice }))
+				: [],
 			isotopeInfo,
 			references: materials.reference,
 			unknowns: materials.unknown,
@@ -2101,7 +2137,7 @@
 			for (const index of indices) {
 				fissionDraftParent[index] ??=
 					fissionChoices.find((c) => c.isotopeKey === fissionIsotopeKey(isotopeInfo[index]))
-						?.fissileNuclide ?? FISSILE_NUCLIDES[0];
+						?.fissileNuclide ?? URANIUM_NUCLIDES[0];
 			}
 		});
 	});
@@ -2487,10 +2523,28 @@
 		untrack(() => reconcileCatalogReferenceCoverage());
 	});
 
-	function addCustomIsotope() {
-		isotopeInfo = [...isotopeInfo, createIsotopeInfo()];
+	function addCustomIsotope(overrides: Partial<IsotopeInfoType> = {}) {
+		isotopeInfo = [...isotopeInfo, { ...createIsotopeInfo(), ...overrides }];
 		isoRef = [...isoRef, undefined];
 		expandedIsotopes.add(isotopeInfo.length - 1);
+	}
+
+	/**
+	 * Add a custom isotope pre-filled as uranium ("Uranium" / "U-") for the user
+	 * to finish, and scroll its card into view. Used from the fission-interference
+	 * warning when uranium isn't part of the analysis yet.
+	 */
+	async function addCustomUraniumIsotope() {
+		addCustomIsotope({ elementName: 'Uranium', isotopeName: 'U-' });
+		const newIndex = isotopeInfo.length - 1;
+		await tick();
+		if (browser) {
+			requestAnimationFrame(() => {
+				document
+					.getElementById(`isotope-card-${newIndex}`)
+					?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			});
+		}
 	}
 
 	function removeIsotope(isotopeIndex: number) {
@@ -3180,8 +3234,8 @@
 			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
 			<br />
 			<p>
-				In this version (v{APP_VERSION}), the main focus is to work on small bug fixes and
-				improvements after the big 7.0 release.
+				In this version (v{APP_VERSION}), the main focus is to implement fission correction and work
+				on more minor bug fixes and UI changes.
 			</p>
 			<br />
 			<h2 class="text-2xl font-bold">Next planned releases</h2>
@@ -3219,7 +3273,13 @@
 			<br />
 
 			{#if catalogAvailable}
-				<IsotopeViewer bind:selectedIsotopes={isotopeInfo} showSelectionList={false} />
+				<div id="isotope-catalog-browser" class="scroll-mt-24">
+					<IsotopeViewer
+						bind:selectedIsotopes={isotopeInfo}
+						bind:searchTerm={isotopeCatalogSearch}
+						showSelectionList={false}
+					/>
+				</div>
 				<br />
 			{/if}
 
@@ -3245,38 +3305,81 @@
 				</div>
 			{/if}
 
-			{#if fissionCandidates.length > 0}
+			{#if fissionCandidates.length > 0 && (hasUraniumAnalyzed || unresolvedFissionCandidates.length > 0)}
 				<div class="mt-2 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
 					<p class="font-bold">⚠ Possible fission interference</p>
-					<p class="text-sm">
-						{fissionCandidates.length}
-						{fissionCandidates.length === 1 ? 'isotope is' : 'isotopes are'} also produced by the in-pile
-						fission of uranium / thorium / plutonium. If your sample contains a fissile nuclide, their
-						counts include a contribution that must be subtracted. Pick a correction factor for each,
-						or set it to 0 if fission interference does not apply.
-					</p>
-					<ul class="space-y-2">
-						{#each fissionCandidates as candidate (candidate.index)}
-							<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
-								<span>
-									<strong>{getIsotopeDisplayName(candidate.isotope, candidate.index)}</strong>
-									—
-									{#if candidate.choice}
-										{describeFissionChoice(candidate.choice)}
-									{:else}
-										<span class="text-warning-700-300">not reviewed</span>
-									{/if}
-								</span>
+					{#if hasUraniumAnalyzed}
+						<p class="text-sm">
+							{fissionCandidates.length}
+							{fissionCandidates.length === 1 ? 'isotope is' : 'isotopes are'} also produced by the in-pile
+							fission of uranium. Part of their counts comes from the fission of the uranium in your sample
+							and must be subtracted. Pick a correction factor for each, or set it to 0 if fission interference
+							does not apply.
+						</p>
+						<ul class="space-y-2">
+							{#each fissionCandidates as candidate (candidate.index)}
+								<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+									<span>
+										<strong>{getIsotopeDisplayName(candidate.isotope, candidate.index)}</strong>
+										—
+										{#if candidate.choice}
+											{describeFissionChoice(candidate.choice)}
+										{:else}
+											<span class="text-warning-700-300">not reviewed</span>
+										{/if}
+									</span>
+									<button
+										type="button"
+										class="btn shrink-0 preset-tonal-surface"
+										onclick={() => reviewFissionCorrection(candidate.index)}
+									>
+										{candidate.choice ? 'Change' : 'Set correction'}
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{:else}
+						<p class="text-sm">
+							The fission correction is only applied when a uranium isotope is part of the analysis.
+							If your sample contains uranium, add a uranium isotope so its concentration can be
+							used to subtract the fission contribution — otherwise dismiss each isotope below.
+						</p>
+						<ul class="space-y-2">
+							{#each unresolvedFissionCandidates as candidate (candidate.index)}
+								<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+									<span>
+										<strong>{getIsotopeDisplayName(candidate.isotope, candidate.index)}</strong>
+										can also be produced by the in-pile fission of uranium.
+									</span>
+									<button
+										type="button"
+										class="btn shrink-0 preset-tonal-surface"
+										onclick={() => dismissFissionCorrection(candidate.index)}
+									>
+										No uranium — dismiss
+									</button>
+								</li>
+							{/each}
+						</ul>
+						<div class="flex flex-wrap gap-2">
+							{#if catalogAvailable}
 								<button
 									type="button"
 									class="btn shrink-0 preset-tonal-surface"
-									onclick={() => reviewFissionCorrection(candidate.index)}
+									onclick={findUraniumInCatalog}
 								>
-									{candidate.choice ? 'Change' : 'Set correction'}
+									Choose uranium from the catalog
 								</button>
-							</li>
-						{/each}
-					</ul>
+							{/if}
+							<button
+								type="button"
+								class="btn shrink-0 preset-tonal-surface"
+								onclick={addCustomUraniumIsotope}
+							>
+								Add a custom uranium isotope
+							</button>
+						</div>
+					{/if}
 				</div>
 			{/if}
 
@@ -3290,6 +3393,7 @@
 			<div class="mt-2 space-y-2">
 				{#each isotopeInfo as isotope, index (index)}
 					<CollapsibleCard
+						id="isotope-card-{index}"
 						title={getIsotopeDisplayName(isotope, index)}
 						subtitle={isotope.id ? 'From catalog' : 'Custom'}
 						open={expandedIsotopes.has(index)}
@@ -3436,96 +3540,141 @@
 								class="mt-3 scroll-mt-24 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3"
 							>
 								<p class="font-bold">⚠ Possible fission interference</p>
-								<p class="text-sm">
-									{getIsotopeDisplayName(isotope, index)} is also produced by nuclear fission. If the
-									sample contains a fissile nuclide (U, Th, Pu), part of its signal comes from fission
-									and must be subtracted. Choose a correction factor, or set it to 0 if this does not
-									apply.
-								</p>
-
-								{#if candidate.choice}
-									<p class="text-sm">
-										Current: <strong>{describeFissionChoice(candidate.choice)}</strong>
-										<button
-											type="button"
-											class="ml-2 btn preset-tonal-surface"
-											onclick={() => clearFissionCorrection(index)}
-										>
-											Clear
-										</button>
-									</p>
-								{/if}
-
-								{#if candidate.rows.length > 0}
-									<p class="text-sm font-semibold">From the catalog table:</p>
-									<ul class="space-y-1">
-										{#each candidate.rows as row (row.id)}
-											<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
-												<span>{describeFissionRow(row)}</span>
+								{#if !hasUraniumAnalyzed}
+									{#if candidate.choice}
+										<p class="text-sm">
+											Dismissed — no uranium in the sample.
+											<button
+												type="button"
+												class="ml-2 btn preset-tonal-surface"
+												onclick={() => clearFissionCorrection(index)}
+											>
+												Undo
+											</button>
+										</p>
+									{:else}
+										<p class="text-sm">
+											{getIsotopeDisplayName(isotope, index)} is also produced by the in-pile fission
+											of uranium. The correction is only applied when a uranium isotope is part of the
+											analysis — add one if your sample contains uranium.
+										</p>
+										<div class="flex flex-wrap gap-2">
+											{#if catalogAvailable}
 												<button
 													type="button"
 													class="btn shrink-0 preset-tonal-surface"
-													onclick={() => applyFissionRow(index, row)}
+													onclick={findUraniumInCatalog}
 												>
-													Use this
+													Choose uranium from the catalog
 												</button>
-											</li>
-										{/each}
-									</ul>
+											{/if}
+											<button
+												type="button"
+												class="btn shrink-0 preset-tonal-surface"
+												onclick={addCustomUraniumIsotope}
+											>
+												Add a custom uranium isotope
+											</button>
+											<button
+												type="button"
+												class="btn shrink-0 preset-tonal-surface"
+												onclick={() => dismissFissionCorrection(index)}
+											>
+												No uranium — dismiss
+											</button>
+										</div>
+									{/if}
 								{:else}
 									<p class="text-sm">
-										No matching row in the fission-correction table{catalogAvailable
-											? ''
-											: ' (sign in to a deployment with the shared catalog to load it)'}. Enter a
-										factor by hand.
+										{getIsotopeDisplayName(isotope, index)} is also produced by the in-pile fission of
+										uranium. Part of its signal comes from fission of the uranium in your sample and must
+										be subtracted. Choose a correction factor, or set it to 0 if this does not apply.
 									</p>
-								{/if}
 
-								<div class="flex flex-wrap items-end gap-2">
-									<label class="label text-sm">
-										<span class="block font-semibold">Fissile parent</span>
-										<select class="select input" bind:value={fissionDraftParent[index]}>
-											{#each FISSILE_NUCLIDES as nuclide (nuclide)}
-												<option value={nuclide}>{nuclide}</option>
+									{#if candidate.choice}
+										<p class="text-sm">
+											Current: <strong>{describeFissionChoice(candidate.choice)}</strong>
+											<button
+												type="button"
+												class="ml-2 btn preset-tonal-surface"
+												onclick={() => clearFissionCorrection(index)}
+											>
+												Clear
+											</button>
+										</p>
+									{/if}
+
+									{#if candidate.rows.length > 0}
+										<p class="text-sm font-semibold">From the catalog table:</p>
+										<ul class="space-y-1">
+											{#each candidate.rows as row (row.id)}
+												<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+													<span>{describeFissionRow(row)}</span>
+													<button
+														type="button"
+														class="btn shrink-0 preset-tonal-surface"
+														onclick={() => applyFissionRow(index, row)}
+													>
+														Use this
+													</button>
+												</li>
 											{/each}
-										</select>
-									</label>
-									<label class="label text-sm">
-										<span class="block font-semibold">Correction factor</span>
-										<input
-											class="input"
-											type="number"
-											step="any"
-											placeholder="e.g. 0.0123"
-											bind:value={fissionDraftFactor[index]}
-										/>
-									</label>
-									<label class="label text-sm">
-										<span class="block font-semibold">Uncertainty</span>
-										<input
-											class="input"
-											type="number"
-											step="any"
-											min="0"
-											placeholder="optional"
-											bind:value={fissionDraftUncertainty[index]}
-										/>
-									</label>
-									<button
-										type="button"
-										class="btn preset-tonal-surface"
-										onclick={() => applyManualFissionFactor(index)}
-									>
-										Apply factor
-									</button>
-									<button
-										type="button"
-										class="btn preset-tonal-surface"
-										onclick={() => dismissFissionCorrection(index)}
-									>
-										No fission interference (0)
-									</button>
-								</div>
+										</ul>
+									{:else}
+										<p class="text-sm">
+											No matching row in the fission-correction table{catalogAvailable
+												? ''
+												: ' (sign in to a deployment with the shared catalog to load it)'}. Enter a
+											factor by hand.
+										</p>
+									{/if}
+
+									<div class="flex flex-wrap items-end gap-2">
+										<label class="label text-sm">
+											<span class="block font-semibold">Fissile parent</span>
+											<select class="select input" bind:value={fissionDraftParent[index]}>
+												{#each URANIUM_NUCLIDES as nuclide (nuclide)}
+													<option value={nuclide}>{nuclide}</option>
+												{/each}
+											</select>
+										</label>
+										<label class="label text-sm">
+											<span class="block font-semibold">Correction factor</span>
+											<input
+												class="input"
+												type="number"
+												step="any"
+												placeholder="e.g. 0.0123"
+												bind:value={fissionDraftFactor[index]}
+											/>
+										</label>
+										<label class="label text-sm">
+											<span class="block font-semibold">Uncertainty</span>
+											<input
+												class="input"
+												type="number"
+												step="any"
+												min="0"
+												placeholder="optional"
+												bind:value={fissionDraftUncertainty[index]}
+											/>
+										</label>
+										<button
+											type="button"
+											class="btn preset-tonal-surface"
+											onclick={() => applyManualFissionFactor(index)}
+										>
+											Apply factor
+										</button>
+										<button
+											type="button"
+											class="btn preset-tonal-surface"
+											onclick={() => dismissFissionCorrection(index)}
+										>
+											No fission interference (0)
+										</button>
+									</div>
+								{/if}
 							</div>
 						{/if}
 
@@ -3556,7 +3705,12 @@
 				{/each}
 			</div>
 			<br />
-			<button type="button" class="btn preset-filled-primary-500" onclick={addCustomIsotope}>
+			<button
+				type="button"
+				id="add-custom-isotope"
+				class="btn scroll-mt-24 preset-filled-primary-500"
+				onclick={() => addCustomIsotope()}
+			>
 				Add custom isotope
 			</button>
 

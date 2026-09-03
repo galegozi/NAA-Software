@@ -9,12 +9,12 @@
 		selectedIsotopes = $bindable<IsotopeInfo[]>([]),
 		singleEntryPerIsotope = false,
 		allowedElementNames = [] as string[],
-		showSelectionList = true
+		showSelectionList = true,
+		searchTerm = $bindable('')
 	} = $props();
 
 	let isLoading = $state(false);
 	let errorMessage = $state('');
-	let searchTerm = $state('');
 	let lastFetchedSearch = '';
 	let lastFetchSequence = 0;
 	let cachedItems: IsotopeCatalogItem[] = $state([]);

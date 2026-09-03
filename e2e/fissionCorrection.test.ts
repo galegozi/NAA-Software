@@ -97,12 +97,12 @@ test('fission-interference correction is applied and shown on Review', async ({ 
 });
 
 /**
- * Uranium is NOT analysed: the Review step must prompt for the fissile
- * concentrations and apply the correction once they are entered.
- *   C_Ce^S = 4, C_U^S = 5 (hand-entered), C_U^U = 30 (hand-entered), k = 1.25
- *   corrected = 1.25·(4 + 0.08·5) − 0.08·30 = 3.1 ppm
+ * Uranium is NOT analysed: no fission correction is offered or applied. Step 1
+ * shows an informational note (with no factor controls), and the Review step
+ * reports the plain comparative-NAA result with no correction.
+ *   k(Ce) = 1250/1000 = 1.25,  uncorrected(Ce) = 1.25·4 = 5.0 ppm
  */
-test('prompts for fissile concentrations when uranium is not analysed', async ({ page }) => {
+test('no fission correction is offered until uranium is analysed', async ({ page }) => {
 	const pageErrors: string[] = [];
 	page.on('pageerror', (e) => pageErrors.push(e.message));
 
@@ -115,9 +115,23 @@ test('prompts for fissile concentrations when uranium is not analysed', async ({
 	await page.getByLabel('Energy (in KeV)').fill('145');
 	await page.getByLabel('Half Life', { exact: true }).fill('3000');
 
-	await page.locator('select').filter({ hasText: 'U-235' }).first().selectOption('U-235');
-	await page.getByLabel('Correction factor').fill('0.08');
-	await page.getByRole('button', { name: 'Apply factor' }).click();
+	// Informational note only — no factor / parent / "apply" controls.
+	await expect(page.getByText('Possible fission interference').first()).toBeVisible();
+	await expect(
+		page.getByText(/only applied when a uranium isotope is part of the analysis/).first()
+	).toBeVisible();
+	await expect(page.getByLabel('Correction factor')).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Apply factor' })).toHaveCount(0);
+
+	// The note can be dismissed ("no uranium in the sample") and undone.
+	await page.getByRole('button', { name: 'No uranium — dismiss' }).first().click();
+	await expect(page.getByText(/Dismissed — no uranium in the sample/)).toBeVisible();
+	await page.getByRole('button', { name: 'Undo' }).click();
+	await expect(
+		page.getByText(/only applied when a uranium isotope is part of the analysis/).first()
+	).toBeVisible();
+	await page.getByRole('button', { name: 'No uranium — dismiss' }).first().click();
+
 	await page
 		.getByRole('button', { name: /^Next:/ })
 		.first()
@@ -141,18 +155,13 @@ test('prompts for fissile concentrations when uranium is not analysed', async ({
 		.first()
 		.click();
 
-	// Review: the prompt appears because uranium isn't analysed.
-	await expect(page.getByText(/Uranium concentration needed/i)).toBeVisible();
-	await expect(page.getByText(/isn't one of your analysed isotopes/i)).toBeVisible();
-
-	await page.getByLabel(/Uranium in the standard/i).fill('5');
-	await page.getByLabel(/Uranium in UNK-1/i).fill('30');
-
-	// Correction now applies.
+	// Review: no correction, no hand-entry prompt, plain result shown.
+	await expect(page.getByRole('heading', { name: 'Step 4: Review' })).toBeVisible();
+	await expect(page.getByText(/Fission-interference corrections applied/)).toHaveCount(0);
+	await expect(page.getByText(/concentration needed/i)).toHaveCount(0);
 	await expect(
-		page.getByText('Fission-interference corrections applied to 1 result')
+		page.getByRole('cell', { name: /^5(\.0+)? ± /, exact: false }).first()
 	).toBeVisible();
-	await expect(page.getByRole('cell', { name: /^3\.1† ± / })).toBeVisible();
 
 	expect(pageErrors).toEqual([]);
 });
