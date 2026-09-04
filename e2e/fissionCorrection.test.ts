@@ -102,12 +102,14 @@ test('fission-interference correction is applied and shown on Review', async ({ 
 });
 
 /**
- * Uranium is NOT analysed: no fission correction is offered or applied. Step 1
- * shows an informational note (with no factor controls), and the Review step
- * reports the plain comparative-NAA result with no correction.
- *   k(Ce) = 1250/1000 = 1.25,  uncorrected(Ce) = 1.25·4 = 5.0 ppm
+ * Uranium is NOT analysed: the factor picker is offered anyway (no gate), and
+ * its concentration is typed in directly on the reference material and the
+ * unknown instead — same worked example as the analysed-uranium test.
+ *   k(Ce) = 1250/1000 = 1.25,  corrected = 1.25·(4 + 0.08·5) − 0.08·30 = 3.1 ppm
  */
-test('no fission correction is offered until uranium is analysed', async ({ page }) => {
+test('fission correction applies from hand-typed uranium concentrations when uranium is not analysed', async ({
+	page
+}) => {
 	const pageErrors: string[] = [];
 	page.on('pageerror', (e) => pageErrors.push(e.message));
 
@@ -120,57 +122,69 @@ test('no fission correction is offered until uranium is analysed', async ({ page
 	await page.getByLabel('Energy (in KeV)').fill('145');
 	await page.getByLabel('Half Life', { exact: true }).fill('3000');
 
-	// Informational note only — no factor / parent / "apply" controls.
+	// The factor picker is offered even though uranium isn't analysed — not a
+	// blocking gate, just a note that its concentration will need to be typed
+	// in on the reference material and unknowns instead.
 	await expect(page.getByText('Possible fission interference').first()).toBeVisible();
-	await expect(
-		page.getByText('only applied when a uranium isotope is part of the analysis').first()
-	).toBeVisible();
-	await expect(page.getByLabel('Correction factor')).toHaveCount(0);
-	await expect(page.getByRole('button', { name: 'Apply factor' })).toHaveCount(0);
-
-	// Dismissing settles the panel to a compact, non-warning "reviewed" row —
-	// the warning auto-dismisses once the isotope has been reviewed.
-	await page.getByRole('button', { name: 'No uranium — dismiss' }).first().click();
-	await expect(page.getByText('No fission interference (0)').first()).toBeVisible();
-	await expect(page.getByText(/Possible fission interference/)).toHaveCount(0);
-
-	// "Change" reopens it for editing.
-	await page.getByRole('button', { name: 'Change' }).click();
-	await expect(
-		page.getByText('only applied when a uranium isotope is part of the analysis').first()
-	).toBeVisible();
-	await page.getByRole('button', { name: 'No uranium — dismiss' }).first().click();
+	await expect(page.getByText("isn't one of your analysed isotopes").first()).toBeVisible();
+	await page.locator('select').filter({ hasText: 'U-235' }).first().selectOption('U-235');
+	await page.getByLabel('Correction factor').fill('0.08');
+	await page.getByLabel('Uncertainty', { exact: true }).fill('0.008');
+	await page.getByRole('button', { name: 'Apply factor' }).click();
+	await expect(page.getByText('(custom)').first()).toBeVisible();
 
 	await page
 		.getByRole('button', { name: /^Next:/ })
 		.first()
 		.click();
 
+	// Step 2: reference material. The "Uranium concentration" prompt needs a
+	// computed Ce result first (from both the reference and an unknown), so it
+	// isn't visible yet — fill in Ce here, come back to it after Step 3.
 	await page.getByRole('button', { name: '+ Add custom reference material' }).click();
 	await fillMaterial(page, { netl: 'REF-A', sample: 'Standard A' });
 	await setCounts(page, 0, 1000);
 	await page.getByLabel('Known Concentration').fill('4');
 	await page.getByLabel('Reference Material Concentration Units').selectOption('ppm');
+	await expect(page.getByLabel(/Uranium in this reference material/)).toHaveCount(0);
 	await page
 		.getByRole('button', { name: /^Next:/ })
 		.first()
 		.click();
 
+	// Step 3: the unknown. Once its own Ce counts are in, the prompt appears
+	// right here.
 	await page.getByRole('button', { name: 'Add unknown material' }).click();
 	await fillMaterial(page, { netl: 'UNK-1', sample: 'Unknown 1' });
 	await setCounts(page, 0, 1250);
+	await expect(page.getByText(/Uranium concentration/).first()).toBeVisible();
+	await page.getByLabel(/Uranium in this unknown/).fill('30');
+
+	// Back to Step 2 — the reference-material prompt is visible now.
+	await page
+		.getByRole('button', { name: /^Back:/ })
+		.first()
+		.click();
+	await expect(page.getByLabel(/Uranium in this reference material/)).toBeVisible();
+	await page.getByLabel(/Uranium in this reference material/).fill('5');
+
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
 	await page
 		.getByRole('button', { name: /^Next:/ })
 		.first()
 		.click();
 
-	// Review: no correction, no hand-entry prompt, plain result shown.
+	// Review: the correction applies from the typed-in concentrations, exactly
+	// like the analysed-uranium worked example.
 	await expect(page.getByRole('heading', { name: 'Step 4: Review' })).toBeVisible();
-	await expect(page.getByText(/Fission-interference corrections applied/)).toHaveCount(0);
 	await expect(page.getByText(/concentration needed/i)).toHaveCount(0);
 	await expect(
-		page.getByRole('cell', { name: /^5(\.0+)? ± /, exact: false }).first()
+		page.getByText('Fission-interference corrections applied to 1 result')
 	).toBeVisible();
+	await expect(page.getByRole('cell', { name: /^3\.1† ± / })).toBeVisible();
 
 	expect(pageErrors).toEqual([]);
 });

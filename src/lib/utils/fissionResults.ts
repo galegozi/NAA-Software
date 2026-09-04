@@ -308,8 +308,8 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 					...base,
 					needsFissileInput: true,
 					note: analysed
-						? `The fission correction needs ${need} — enter ${missing.length > 1 ? 'them' : 'it'} below.`
-						: `${fissileElementLabel} isn't one of your analysed isotopes. The fission correction needs ${need} — enter ${missing.length > 1 ? 'them' : 'it'} below.`
+						? `The fission correction needs ${need}.`
+						: `${fissileElementLabel} isn't one of your analysed isotopes. The fission correction needs ${need}.`
 				});
 				continue;
 			}
