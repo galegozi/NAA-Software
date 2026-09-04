@@ -17,7 +17,11 @@
 	import { getAll as matGA } from '../lib/NAAMath/MaterialMath.ts';
 	import { getAll as matIsoGA } from '../lib/NAAMath/MaterialIsotopeMath.ts';
 	import { getAll as MMGA } from '../lib/NAAMath/MultiMaterialMath.ts';
-	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
+	import {
+		getAll as EGA,
+		concentrationToMassFraction,
+		massFractionToConcentration
+	} from '../lib/NAAMath/everythingMath.ts';
 
 	import type {
 		ConcUnitType,
@@ -99,6 +103,7 @@
 		findIsotopeMeasurementLink,
 		saveIsotopeMeasurementLink,
 		applyDatasheetToReference,
+		findDatasheetEntryForElement,
 		type CatalogIsotopeMatch,
 		type CatalogReferenceMatch,
 		type SavedDatasheet
@@ -954,6 +959,42 @@
 		}
 	}
 
+	/**
+	 * Fill in a fission candidate's "uranium in this reference material" value
+	 * from a loaded datasheet's uranium row, when uranium isn't itself one of
+	 * the analysed isotopes (so it has nowhere else to come from) and the field
+	 * hasn't already been hand-filled. Returns true if it filled anything in.
+	 */
+	function applyDatasheetUraniumToFissionEntries(referenceIndex: number, sheet: SavedDatasheet) {
+		if (hasUraniumAnalyzed) {
+			return false;
+		}
+		const uraniumRow = findDatasheetEntryForElement(sheet, 'U');
+		if (!uraniumRow) {
+			return false;
+		}
+		let filled = false;
+		for (const candidate of fissionCandidates) {
+			if (getLinkedReferenceIndex(candidate.index) !== referenceIndex) {
+				continue;
+			}
+			const entry = fissionManualEntryFor(candidate.index);
+			if (!entry || entry.inStandard != null) {
+				continue;
+			}
+			const unit = fissionTargetUnit(candidate.index);
+			if (unit !== 'ppm' && unit !== 'percentage') {
+				continue;
+			}
+			entry.inStandard = massFractionToConcentration(
+				concentrationToMassFraction(uraniumRow.concentration, uraniumRow.unit),
+				unit
+			);
+			filled = true;
+		}
+		return filled;
+	}
+
 	/** Fill this reference material's known concentrations from a picked datasheet. */
 	function loadDatasheetIntoReference(index: number) {
 		const reference = materials.reference[index];
@@ -978,12 +1019,19 @@
 		// Also preselect it for publishing, so it doesn't need to be picked again there.
 		selectedDatasheetId = { ...selectedDatasheetId, [index]: sheet.id };
 
+		// Uranium concentration for the fission correction, when uranium isn't
+		// analysed — the manual entry only exists once a correction is chosen in
+		// Step 1, so this is a no-op until then.
+		const filledUranium = applyDatasheetUraniumToFissionEntries(index, sheet);
+
 		datasheetLoadFeedback = {
 			...datasheetLoadFeedback,
 			[index]:
 				matchedCount > 0
-					? `Loaded known concentrations for ${matchedCount} isotope${matchedCount === 1 ? '' : 's'} from "${sheet.sampleName}".`
-					: `"${sheet.sampleName}" didn't match any of your isotopes by name — nothing was changed.`
+					? `Loaded known concentrations for ${matchedCount} isotope${matchedCount === 1 ? '' : 's'} from "${sheet.sampleName}".${filledUranium ? ' Its uranium concentration was used for the fission correction too.' : ''}`
+					: filledUranium
+						? `"${sheet.sampleName}" didn't match any of your isotopes by name, but its uranium concentration was used for the fission correction.`
+						: `"${sheet.sampleName}" didn't match any of your isotopes by name — nothing was changed.`
 		};
 	}
 
