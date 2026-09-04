@@ -3313,8 +3313,8 @@
 			? 'bg-primary-500/20 text-primary-700-300'
 			: 'bg-surface-500/20 text-surface-700-300'}"
 		title={isLanthanumFlag
-			? 'La-140: the factor is computed per sample from the Ba-140 → La-140 in-growth, not a flat number.'
-			: 'A single flat factor, applied the same way to the standard and the unknown.'}
+			? 'La-140, thermal irradiation only: the factor is computed per sample from the Ba-140 → La-140 in-growth, not a flat number.'
+			: 'A single flat factor, applied the same way to the standard and the unknown — recommended for epithermal/fast irradiation.'}
 	>
 		{isLanthanumFlag
 			? 'Special correction — Ba-140 in-growth'
@@ -3740,9 +3740,10 @@
 													onchange={() => (fissionDraftUseSpecial[index] = true)}
 												/>
 												<span>
-													<strong>Special — Ba-140 in-growth</strong> (recommended). La-140 from fission
-													grows in from its precursor Ba-140, so the factor is computed per sample rather
-													than used as a flat number — needs the Ba-140 half-life below.
+													<strong>Special — Ba-140 in-growth.</strong> Thermal irradiation only — the
+													0.00233 constant this correction uses was derived for thermal-neutron fission.
+													La-140 grows in from its precursor Ba-140, so the factor is computed per sample
+													rather than used as a flat number — needs the Ba-140 half-life below.
 												</span>
 											</label>
 											<label class="flex items-start gap-2">
@@ -3754,9 +3755,9 @@
 													onchange={() => (fissionDraftUseSpecial[index] = false)}
 												/>
 												<span>
-													<strong>Standard — flat factor.</strong> Use the entered factor as-is, like
-													any other isotope. Only accurate if you don't have (or don't want to account
-													for) the Ba-140 in-growth.
+													<strong>Standard — flat factor.</strong> Recommended for epithermal (or fast)
+													irradiation, where the Ba-140 in-growth constant doesn't apply — use a factor
+													from an epithermal row in the catalog table, or your own value.
 												</span>
 											</label>
 										</fieldset>
@@ -4777,8 +4778,8 @@
 					the target isotope’s unit; k is the combined correction factor. f is the Step 1 factor (f<sub
 						>S</sub
 					>
-					= f<sub>U</sub>), except for La-140, where it is computed per sample from the Ba-140 →
-					La-140 in-growth so f<sub>S</sub> and f<sub>U</sub> differ.
+					= f<sub>U</sub>), except for La-140 on the special (thermal-only) correction, where it is
+					computed per sample from the Ba-140 → La-140 in-growth so f<sub>S</sub> and f<sub>U</sub> differ.
 				</p>
 				<div class="overflow-x-auto">
 					<table class="table-auto border-collapse border border-surface-300-700 text-sm">
