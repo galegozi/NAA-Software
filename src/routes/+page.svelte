@@ -533,12 +533,19 @@
 	let fissionDraftFactor = $state<Record<number, number | null>>({});
 	let fissionDraftUncertainty = $state<Record<number, number | null>>({});
 	let fissionDraftParent = $state<Record<number, string>>({});
+	// Whether the per-isotope fission panel is reopened for editing after being
+	// reviewed (it otherwise collapses to a settled, non-warning summary once a
+	// choice is recorded — see the "reviewed" derivation below).
+	let fissionReviewEditing = $state<Record<number, boolean>>({});
 	// Search term for the Step 1 isotope catalog browser — bound so the "find
 	// uranium" button in the fission-interference warning can drive it.
 	let isotopeCatalogSearch = $state('');
 	/** Uranium is the only fissile parent the fission correction is applied for. */
 	const URANIUM_NUCLIDES = ['U-235', 'U-238'] as const;
 	const HALF_LIFE_UNITS = ['seconds', 'minutes', 'hours', 'days', 'weeks', 'years'] as const;
+	function isHalfLifeUnit(unit: string): unit is (typeof HALF_LIFE_UNITS)[number] {
+		return (HALF_LIFE_UNITS as readonly string[]).includes(unit);
+	}
 
 	/**
 	 * A pending upload the user must confirm first. `steps` are shown verbatim;
@@ -1216,6 +1223,8 @@
 			irradiationType: row.irradiationType,
 			sourceRowId: row.id
 		});
+		// Reviewed — collapse the panel out of its "editing" / warning state.
+		fissionReviewEditing[index] = false;
 	}
 
 	function dismissFissionCorrection(index: number) {
@@ -1226,6 +1235,7 @@
 			uncertainty: 0,
 			mode: 'none'
 		});
+		fissionReviewEditing[index] = false;
 	}
 
 	function applyManualFissionFactor(index: number) {
@@ -1243,6 +1253,7 @@
 			mode: factor === 0 ? 'none' : 'manual',
 			fissileNuclide: factor === 0 ? undefined : (fissionDraftParent[index] ?? URANIUM_NUCLIDES[0])
 		});
+		fissionReviewEditing[index] = false;
 	}
 
 	function clearFissionCorrection(index: number) {
@@ -1254,6 +1265,7 @@
 		delete fissionDraftFactor[index];
 		delete fissionDraftUncertainty[index];
 		delete fissionDraftParent[index];
+		delete fissionReviewEditing[index];
 		fissionManualFissile = fissionManualFissile.filter(
 			(entry) => entry.isotopeKey !== fissionIsotopeKey(isotopeInfo[index])
 		);
@@ -1718,25 +1730,56 @@
 	}
 
 	/**
-	 * Ba-140 decay constant (per second) for the La-140 precursor in-growth:
-	 * a hand-entered half-life first, then an analysed Ba-140 isotope, then the
-	 * isotope catalog. `null` when none of those is available.
+	 * Ba-140 half-life auto-resolved from an analysed Ba-140 isotope, else the
+	 * isotope catalog — the two "database" sources for the La-140 precursor
+	 * in-growth term. `null` when neither has it.
 	 */
-	let hasBarium140Isotope = $derived(
-		isotopeInfo.some((iso) => isBarium140(iso) && iso.halfLife > 0)
-	);
-	let bariumHalfLifeAutoResolved = $derived.by<boolean>(() => {
-		if (hasBarium140Isotope) {
-			return true;
+	let resolvedBariumHalfLife = $derived.by<{
+		value: number;
+		unit: (typeof HALF_LIFE_UNITS)[number];
+		source: 'isotope' | 'catalog';
+	} | null>(() => {
+		const isoBa = isotopeInfo.find((iso) => isBarium140(iso) && iso.halfLife > 0);
+		if (isoBa && isHalfLifeUnit(isoBa.unit)) {
+			return { value: isoBa.halfLife, unit: isoBa.unit, source: 'isotope' };
 		}
-		return Object.values(isotopeCatalogById).some(
+		const catBa = Object.values(isotopeCatalogById).find(
 			(item) =>
 				item?.shortName?.toLowerCase() === 'ba' &&
 				Number(item?.massNumber) === 140 &&
 				!(item?.suffix ?? '').trim()
 		);
+		if (catBa?.halfLife && catBa.halfLife.number > 0) {
+			return { value: catBa.halfLife.number, unit: catBa.halfLife.unit, source: 'catalog' };
+		}
+		return null;
 	});
 
+	/** True while the Ba-140 half-life field still holds the auto-resolved value (not hand-overridden). */
+	let fissionBariumHalfLifeIsAuto = $derived(
+		resolvedBariumHalfLife !== null &&
+			fissionBariumHalfLife.value === resolvedBariumHalfLife.value &&
+			fissionBariumHalfLife.unit === resolvedBariumHalfLife.unit
+	);
+
+	// Pre-fill the Ba-140 half-life field as soon as it can be resolved, so the
+	// user sees the actual number the correction will use rather than a blank,
+	// seemingly-required field. Only fires while the field is still empty, so a
+	// hand-entered override is never clobbered.
+	$effect(() => {
+		if (resolvedBariumHalfLife && fissionBariumHalfLife.value == null) {
+			fissionBariumHalfLife = {
+				value: resolvedBariumHalfLife.value,
+				unit: resolvedBariumHalfLife.unit
+			};
+		}
+	});
+
+	/**
+	 * Ba-140 decay constant (per second) for the La-140 precursor in-growth:
+	 * the (possibly auto-filled) half-life field, else the resolved isotope /
+	 * catalog value directly. `null` when neither is available.
+	 */
 	let bariumDecayConstant = $derived.by<number | null>(() => {
 		let seconds: number | null = null;
 
@@ -1744,29 +1787,17 @@
 			seconds = halfLifeSecondsOrNull(fissionBariumHalfLife.value, fissionBariumHalfLife.unit);
 		}
 
-		const isoBa = isotopeInfo.find((iso) => isBarium140(iso) && iso.halfLife > 0);
-		if (seconds == null && isoBa) {
-			seconds = halfLifeSecondsOrNull(isoBa.halfLife, isoBa.unit);
-		}
-
-		if (seconds == null) {
-			const catBa = Object.values(isotopeCatalogById).find(
-				(item) =>
-					item?.shortName?.toLowerCase() === 'ba' &&
-					Number(item?.massNumber) === 140 &&
-					!(item?.suffix ?? '').trim()
-			);
-			if (catBa) {
-				seconds =
-					(Number.isFinite(catBa.halfLifeSeconds) && catBa.halfLifeSeconds > 0
-						? catBa.halfLifeSeconds
-						: null) ??
-					halfLifeSecondsOrNull(catBa.halfLife?.number ?? 0, catBa.halfLife?.unit ?? '');
-			}
+		if (seconds == null && resolvedBariumHalfLife) {
+			seconds = halfLifeSecondsOrNull(resolvedBariumHalfLife.value, resolvedBariumHalfLife.unit);
 		}
 
 		return seconds != null && seconds > 0 ? Math.LN2 / seconds : null;
 	});
+
+	/** Reset the Ba-140 half-life field to the auto-resolved value (clears a hand override). */
+	function resetBariumHalfLifeToDetected() {
+		fissionBariumHalfLife = { value: null, unit: fissionBariumHalfLife.unit };
+	}
 
 	// computed isotope information
 	let isoComp = $derived(mathIsotopeInfo.map(isoGA));
@@ -2812,7 +2843,8 @@
 		}
 
 		const energy = getFiniteEnergy(isotope.energy);
-		const energyLabel = energy !== null ? ` @ ${energy.toLocaleString()} keV` : '';
+		// Plain number — no thousands separators.
+		const energyLabel = energy !== null ? ` @ ${energy} keV` : '';
 		const proxy = proxyByIsotope[index];
 		const proxyLabel = proxy ? ` (via ${describeProxyMeasured(proxy)})` : '';
 
@@ -3234,6 +3266,21 @@
 	{/if}
 {/snippet}
 
+{#snippet fissionModeBadge(isLanthanumFlag: boolean)}
+	<span
+		class="ml-1 inline-block rounded px-1.5 py-0.5 align-middle text-xs font-semibold {isLanthanumFlag
+			? 'bg-primary-500/20 text-primary-700-300'
+			: 'bg-surface-500/20 text-surface-700-300'}"
+		title={isLanthanumFlag
+			? 'La-140: the factor is computed per sample from the Ba-140 → La-140 in-growth, not a flat number.'
+			: 'A single flat factor, applied the same way to the standard and the unknown.'}
+	>
+		{isLanthanumFlag
+			? 'Special correction — Ba-140 in-growth'
+			: 'Standard correction — flat factor'}
+	</span>
+{/snippet}
+
 {#snippet stepNavButtons()}
 	<button type="button" class="btn preset-tonal-surface text-xl" onclick={prev}>
 		{backButtonText}
@@ -3388,35 +3435,32 @@
 				</div>
 			{/if}
 
-			{#if fissionCandidates.length > 0 && (hasUraniumAnalyzed || unresolvedFissionCandidates.length > 0)}
+			{#if unresolvedFissionCandidates.length > 0}
 				<div class="mt-2 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
 					<p class="font-bold">⚠ Possible fission interference</p>
 					{#if hasUraniumAnalyzed}
 						<p class="text-sm">
-							{fissionCandidates.length}
-							{fissionCandidates.length === 1 ? 'isotope is' : 'isotopes are'} also produced by the in-pile
-							fission of uranium. Part of their counts comes from the fission of the uranium in your sample
-							and must be subtracted. Pick a correction factor for each, or set it to 0 if fission interference
-							does not apply.
+							{unresolvedFissionCandidates.length}
+							{unresolvedFissionCandidates.length === 1 ? 'isotope is' : 'isotopes are'} also produced
+							by the in-pile fission of uranium. Part of their counts comes from the fission of the uranium
+							in your sample and must be subtracted. Pick a correction factor for each, or set it to 0
+							if fission interference does not apply. This warning goes away once every isotope below
+							has been reviewed.
 						</p>
 						<ul class="space-y-2">
-							{#each fissionCandidates as candidate (candidate.index)}
+							{#each unresolvedFissionCandidates as candidate (candidate.index)}
 								<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
 									<span>
 										<strong>{getIsotopeDisplayName(candidate.isotope, candidate.index)}</strong>
-										—
-										{#if candidate.choice}
-											{describeFissionChoice(candidate.choice)}
-										{:else}
-											<span class="text-warning-700-300">not reviewed</span>
-										{/if}
+										{@render fissionModeBadge(isLanthanum140(candidate.isotope))}
+										— <span class="text-warning-700-300">not reviewed</span>
 									</span>
 									<button
 										type="button"
 										class="btn shrink-0 preset-tonal-surface"
 										onclick={() => reviewFissionCorrection(candidate.index)}
 									>
-										{candidate.choice ? 'Change' : 'Set correction'}
+										Set correction
 									</button>
 								</li>
 							{/each}
@@ -3432,6 +3476,7 @@
 								<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
 									<span>
 										<strong>{getIsotopeDisplayName(candidate.isotope, candidate.index)}</strong>
+										{@render fissionModeBadge(isLanthanum140(candidate.isotope))}
 										can also be produced by the in-pile fission of uranium.
 									</span>
 									<button
@@ -3618,24 +3663,44 @@
 
 						{#if fissionCandidateByIndex.has(index)}
 							{@const candidate = fissionCandidateByIndex.get(index)!}
+							{@const lanthanum = isLanthanum140(isotope)}
+							{@const reviewed = candidate.choice !== null}
+							{@const editing = fissionReviewEditing[index] ?? false}
 							<div
 								id={fissionAnchorId(index)}
-								class="mt-3 scroll-mt-24 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3"
+								class="mt-3 scroll-mt-24 space-y-2 rounded border p-3 {reviewed && !editing
+									? 'border-surface-300-700'
+									: 'border-warning-500 preset-tonal-warning'}"
 							>
-								<p class="font-bold">⚠ Possible fission interference</p>
-								{#if !hasUraniumAnalyzed}
-									{#if candidate.choice}
-										<p class="text-sm">
-											Dismissed — no uranium in the sample.
+								{#if reviewed && !editing}
+									<!-- Reviewed: settled, no warning styling — this is the "auto-dismiss" state. -->
+									<p class="text-sm">
+										<strong>Fission correction</strong>
+										{@render fissionModeBadge(lanthanum)}
+										— {describeFissionChoice(candidate.choice!)}
+										<button
+											type="button"
+											class="ml-2 btn preset-tonal-surface"
+											onclick={() => (fissionReviewEditing[index] = true)}
+										>
+											Change
+										</button>
+									</p>
+								{:else}
+									<p class="font-bold">
+										⚠ Possible fission interference
+										{@render fissionModeBadge(lanthanum)}
+										{#if editing}
 											<button
 												type="button"
 												class="ml-2 btn preset-tonal-surface"
-												onclick={() => clearFissionCorrection(index)}
+												onclick={() => (fissionReviewEditing[index] = false)}
 											>
-												Undo
+												Cancel
 											</button>
-										</p>
-									{:else}
+										{/if}
+									</p>
+									{#if !hasUraniumAnalyzed}
 										<p class="text-sm">
 											{getIsotopeDisplayName(isotope, index)} is also produced by the in-pile fission
 											of uranium. The correction is only applied when a uranium isotope is part of the
@@ -3666,136 +3731,154 @@
 												No uranium — dismiss
 											</button>
 										</div>
-									{/if}
-								{:else}
-									<p class="text-sm">
-										{getIsotopeDisplayName(isotope, index)} is also produced by the in-pile fission of
-										uranium. Part of its signal comes from fission of the uranium in your sample and must
-										be subtracted. Choose a correction factor, or set it to 0 if this does not apply.
-									</p>
-
-									{#if candidate.choice}
-										<p class="text-sm">
-											Current: <strong>{describeFissionChoice(candidate.choice)}</strong>
-											<button
-												type="button"
-												class="ml-2 btn preset-tonal-surface"
-												onclick={() => clearFissionCorrection(index)}
-											>
-												Clear
-											</button>
-										</p>
-									{/if}
-
-									{#if candidate.rows.length > 0}
-										<p class="text-sm font-semibold">From the catalog table:</p>
-										<ul class="space-y-1">
-											{#each candidate.rows as row (row.id)}
-												<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
-													<span>{describeFissionRow(row)}</span>
-													<button
-														type="button"
-														class="btn shrink-0 preset-tonal-surface"
-														onclick={() => applyFissionRow(index, row)}
-													>
-														Use this
-													</button>
-												</li>
-											{/each}
-										</ul>
 									{:else}
 										<p class="text-sm">
-											No matching row in the fission-correction table{catalogAvailable
-												? ''
-												: ' (sign in to a deployment with the shared catalog to load it)'}. Enter a
-											factor by hand.
+											{getIsotopeDisplayName(isotope, index)} is also produced by the in-pile fission
+											of uranium. Part of its signal comes from fission of the uranium in your sample
+											and must be subtracted. Choose a correction factor, or set it to 0 if this does
+											not apply.
+											{#if lanthanum}
+												Because it's La-140, the factor isn't a flat number — it's computed per
+												sample from the Ba-140 → La-140 in-growth below.
+											{/if}
 										</p>
-									{/if}
 
-									<div class="flex flex-wrap items-end gap-2">
-										<label class="label text-sm">
-											<span class="block font-semibold">Fissile parent</span>
-											<select class="select input" bind:value={fissionDraftParent[index]}>
-												{#each URANIUM_NUCLIDES as nuclide (nuclide)}
-													<option value={nuclide}>{nuclide}</option>
-												{/each}
-											</select>
-										</label>
-										<label class="label text-sm">
-											<span class="block font-semibold">Correction factor</span>
-											<input
-												class="input"
-												type="number"
-												step="any"
-												placeholder="e.g. 0.0123"
-												bind:value={fissionDraftFactor[index]}
-											/>
-										</label>
-										<label class="label text-sm">
-											<span class="block font-semibold">Uncertainty</span>
-											<input
-												class="input"
-												type="number"
-												step="any"
-												min="0"
-												placeholder="optional"
-												bind:value={fissionDraftUncertainty[index]}
-											/>
-										</label>
-										<button
-											type="button"
-											class="btn preset-tonal-surface"
-											onclick={() => applyManualFissionFactor(index)}
-										>
-											Apply factor
-										</button>
-										<button
-											type="button"
-											class="btn preset-tonal-surface"
-											onclick={() => dismissFissionCorrection(index)}
-										>
-											No fission interference (0)
-										</button>
-									</div>
-
-									{#if isLanthanum140(isotope)}
-										<div class="mt-2 space-y-1 rounded border border-surface-300-700 p-2">
-											<p class="text-sm font-semibold">Ba-140 half-life (La-140 precursor)</p>
-											<p class="text-xs">
-												La-140 from fission grows in from Ba-140, so its correction factor is worked
-												out per sample from the Ba-140 → La-140 in-growth (m = half the irradiation
-												time, t = the decay time).
-												{#if bariumHalfLifeAutoResolved}
-													Resolved automatically from {hasBarium140Isotope
-														? 'your Ba-140 isotope'
-														: 'the catalog'} — enter a value here only to override it.
-												{:else}
-													Not found in your isotopes or the catalog — enter it here, or add Ba-140
-													as an isotope. It is required for the fission correction.
-												{/if}
+										{#if candidate.choice}
+											<p class="text-sm">
+												Current: <strong>{describeFissionChoice(candidate.choice)}</strong>
+												<button
+													type="button"
+													class="ml-2 btn preset-tonal-surface"
+													onclick={() => clearFissionCorrection(index)}
+												>
+													Clear
+												</button>
 											</p>
-											<div class="flex flex-wrap items-end gap-2">
-												<label class="label text-sm">
-													<span class="block font-semibold">Half-life</span>
-													<input
-														class="input"
-														type="number"
-														step="any"
-														min="0"
-														placeholder="e.g. 12.75"
-														bind:value={fissionBariumHalfLife.value}
-													/>
-												</label>
-												<label class="label text-sm">
-													<span class="block font-semibold">Unit</span>
-													<select class="select input" bind:value={fissionBariumHalfLife.unit}>
-														{#each HALF_LIFE_UNITS as unitOption (unitOption)}
-															<option value={unitOption}>{unitOption}</option>
-														{/each}
-													</select>
-												</label>
-											</div>
+										{/if}
+
+										{#if candidate.rows.length > 0}
+											<p class="text-sm font-semibold">From the catalog table:</p>
+											<ul class="space-y-1">
+												{#each candidate.rows as row (row.id)}
+													<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+														<span>{describeFissionRow(row)}</span>
+														<button
+															type="button"
+															class="btn shrink-0 preset-tonal-surface"
+															onclick={() => applyFissionRow(index, row)}
+														>
+															Use this
+														</button>
+													</li>
+												{/each}
+											</ul>
+										{:else}
+											<p class="text-sm">
+												No matching row in the fission-correction table{catalogAvailable
+													? ''
+													: ' (sign in to a deployment with the shared catalog to load it)'}. Enter
+												a factor by hand.
+											</p>
+										{/if}
+
+										<div class="flex flex-wrap items-end gap-2">
+											<label class="label text-sm">
+												<span class="block font-semibold">Fissile parent</span>
+												<select class="select input" bind:value={fissionDraftParent[index]}>
+													{#each URANIUM_NUCLIDES as nuclide (nuclide)}
+														<option value={nuclide}>{nuclide}</option>
+													{/each}
+												</select>
+											</label>
+											<label class="label text-sm">
+												<span class="block font-semibold">Correction factor</span>
+												<input
+													class="input"
+													type="number"
+													step="any"
+													placeholder="e.g. 0.0123"
+													bind:value={fissionDraftFactor[index]}
+												/>
+											</label>
+											<label class="label text-sm">
+												<span class="block font-semibold">Uncertainty</span>
+												<input
+													class="input"
+													type="number"
+													step="any"
+													min="0"
+													placeholder="optional"
+													bind:value={fissionDraftUncertainty[index]}
+												/>
+											</label>
+											<button
+												type="button"
+												class="btn preset-tonal-surface"
+												onclick={() => applyManualFissionFactor(index)}
+											>
+												Apply factor
+											</button>
+											<button
+												type="button"
+												class="btn preset-tonal-surface"
+												onclick={() => dismissFissionCorrection(index)}
+											>
+												No fission interference (0)
+											</button>
 										</div>
+
+										{#if lanthanum}
+											<div class="mt-2 space-y-1 rounded border border-surface-300-700 p-2">
+												<p class="text-sm font-semibold">Ba-140 half-life (La-140 precursor)</p>
+												<p class="text-xs">
+													La-140 from fission grows in from Ba-140, so its correction factor is
+													worked out per sample from the Ba-140 → La-140 in-growth (m = half the
+													irradiation time, t = the decay time), using this special correction
+													instead of a flat factor.
+													{#if resolvedBariumHalfLife}
+														<strong
+															>Pre-filled below with {resolvedBariumHalfLife.value}
+															{resolvedBariumHalfLife.unit}</strong
+														>, {resolvedBariumHalfLife.source === 'isotope'
+															? 'from your Ba-140 isotope'
+															: 'from the catalog'} — change it only to override that value.
+													{:else}
+														Not found in your isotopes or the catalog — enter it here, or add Ba-140
+														as an isotope. It is required for the fission correction.
+													{/if}
+												</p>
+												<div class="flex flex-wrap items-end gap-2">
+													<label class="label text-sm">
+														<span class="block font-semibold">Half-life</span>
+														<input
+															class="input"
+															type="number"
+															step="any"
+															min="0"
+															placeholder="e.g. 12.75"
+															bind:value={fissionBariumHalfLife.value}
+														/>
+													</label>
+													<label class="label text-sm">
+														<span class="block font-semibold">Unit</span>
+														<select class="select input" bind:value={fissionBariumHalfLife.unit}>
+															{#each HALF_LIFE_UNITS as unitOption (unitOption)}
+																<option value={unitOption}>{unitOption}</option>
+															{/each}
+														</select>
+													</label>
+													{#if resolvedBariumHalfLife && !fissionBariumHalfLifeIsAuto}
+														<button
+															type="button"
+															class="btn preset-tonal-surface"
+															onclick={resetBariumHalfLifeToDetected}
+														>
+															Use pre-filled value
+														</button>
+													{/if}
+												</div>
+											</div>
+										{/if}
 									{/if}
 								{/if}
 							</div>
@@ -4656,6 +4739,7 @@
 								<tr>
 									<td class="border border-surface-300-700 px-3 py-1">
 										{getResultColumnName(isotopeInfo[result.isotopeIndex], result.isotopeIndex)}
+										{@render fissionModeBadge(result.isLanthanum)}
 									</td>
 									<td class="border border-surface-300-700 px-3 py-1">
 										{materials.unknown[result.unknownIndex]?.NETL_code ||

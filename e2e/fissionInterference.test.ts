@@ -23,7 +23,7 @@ test('fission-interference prompt is gated on uranium being analysed', async ({ 
 	// No uranium yet: informational note only, no factor controls.
 	await expect(page.getByText('Possible fission interference').first()).toBeVisible();
 	await expect(
-		page.getByText(/only applied when a uranium isotope is part of the analysis/).first()
+		page.getByText('only applied when a uranium isotope is part of the analysis').first()
 	).toBeVisible();
 	await expect(page.getByRole('button', { name: 'No fission interference (0)' })).toHaveCount(0);
 	await expect(page.getByText('not reviewed')).toHaveCount(0);
