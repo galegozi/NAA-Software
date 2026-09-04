@@ -32,9 +32,7 @@
 			return null;
 		}
 
-		const numericTokens = trimmed
-			.replace(/,/g, '')
-			.match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g);
+		const numericTokens = trimmed.replace(/,/g, '').match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g);
 
 		if (!numericTokens || numericTokens.length < 7) {
 			throw new Error(`Unable to read ROI values from line: '${trimmed}'`);
@@ -49,7 +47,9 @@
 		const centroid = Number.parseFloat(numericTokens[6]);
 
 		if (
-			![roi, minEnergy, maxEnergy, grossCounts, netCounts, uncertainty, centroid].every(Number.isFinite)
+			![roi, minEnergy, maxEnergy, grossCounts, netCounts, uncertainty, centroid].every(
+				Number.isFinite
+			)
 		) {
 			throw new Error(`Unable to read gross/net counts from line: '${trimmed}'`);
 		}
@@ -232,13 +232,18 @@
 	}
 </script>
 
-<label for="rpt-upload">
+<label class="rpt-upload-label" for="rpt-upload">
 	Optional: Auto-fill some details by uploading an roi file. This is a text file with a .rpt
 	extension.
 </label>
-<br />
-<input id="rpt-upload" type="file" accept=".rpt" bind:files onchange={handleFileChange} />
-<br />
+<input
+	id="rpt-upload"
+	class="rpt-upload-input"
+	type="file"
+	accept=".rpt"
+	bind:files
+	onchange={handleFileChange}
+/>
 
 {#if parseError}
 	<p class="upload-error">{parseError}</p>
@@ -252,6 +257,35 @@
 <!-- {/if} -->
 
 <style>
+	.rpt-upload-label {
+		display: block;
+		margin-bottom: 0.6rem;
+	}
+
+	.rpt-upload-input {
+		display: block;
+		margin-top: 0.25rem;
+		font-size: 0.95rem;
+	}
+
+	/* Give the native "Choose file" button room to breathe so it doesn't crowd
+	   the "no file selected" text next to it. */
+	.rpt-upload-input::file-selector-button {
+		margin-right: 1rem;
+		padding: 0.5rem 1rem;
+		border: 1px solid var(--color-surface-400-600, #94a3b8);
+		border-radius: 0.5rem;
+		background-color: var(--color-surface-200-800, #e2e8f0);
+		color: inherit;
+		font: inherit;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.rpt-upload-input::file-selector-button:hover {
+		border-color: var(--color-primary-500, #2563eb);
+	}
+
 	.upload-error {
 		color: #ef4444;
 		font-size: 0.9rem;

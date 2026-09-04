@@ -10,6 +10,7 @@
 		"COSMOSDB_REFERENCE_CONTAINER": "reference-materials",
 		"COSMOSDB_DATASHEET_CONTAINER": "reference-datasheets",
 		"COSMOSDB_ISOTOPE_MEASUREMENTS_CONTAINER": "isotope-measurements",
+		"COSMOSDB_FISSION_CORRECTIONS_CONTAINER": "fission-corrections",
 		"MOCK_COSMOS": "false",
 		"ISOTOPE_WRITE_ROLE": "isotope_writer",
 		"COSMOSDB_QUERY": "SELECT * FROM c"

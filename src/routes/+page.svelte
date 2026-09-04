@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { afterNavigate, pushState, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
 	import { tick, untrack } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import IsotopeInfo from '$lib/components/isotopeInfo.svelte';
@@ -15,7 +17,11 @@
 	import { getAll as matGA } from '../lib/NAAMath/MaterialMath.ts';
 	import { getAll as matIsoGA } from '../lib/NAAMath/MaterialIsotopeMath.ts';
 	import { getAll as MMGA } from '../lib/NAAMath/MultiMaterialMath.ts';
-	import { getAll as EGA } from '../lib/NAAMath/everythingMath.ts';
+	import {
+		getAll as EGA,
+		concentrationToMassFraction,
+		massFractionToConcentration
+	} from '../lib/NAAMath/everythingMath.ts';
 
 	import type {
 		ConcUnitType,
@@ -32,7 +38,8 @@
 		createReferenceMaterial,
 		createUnknownMaterial,
 		findRoiIndices,
-		roundResult
+		roundResult,
+		roundToMatch
 	} from '$lib/utils/naaUtils.js';
 	import {
 		getBaseMaterialErrors,
@@ -46,6 +53,30 @@
 		type AnalysisDraft,
 		type LocalIsotopeLink
 	} from '$lib/utils/analysisDraft.js';
+	import {
+		listFissionCorrections,
+		type FissionCorrectionRecord
+	} from '$lib/utils/fissionCorrections.js';
+	import {
+		describeFissionChoice,
+		describeFissionRow,
+		findFissionChoice,
+		fissionIsotopeKey,
+		isBarium140,
+		isKnownFissionProduct,
+		isLanthanum140,
+		isotopeIsElement,
+		matchingFissionRows,
+		pruneFissionChoices,
+		pruneManualFissile,
+		upsertFissionChoice,
+		upsertManualFissile,
+		DEFAULT_FISSION_BARIUM_HALF_LIFE,
+		type FissionBariumHalfLife,
+		type FissionChoice,
+		type FissionManualEntry
+	} from '$lib/utils/fissionInterference.js';
+	import { computeFissionResults } from '$lib/utils/fissionResults.js';
 	import { swaAuth, redirectToSignIn } from '$lib/utils/swaAuth.svelte.js';
 	import { catalogStatus } from '$lib/utils/catalogStatus.svelte.js';
 	import { analysisMeta } from '$lib/utils/analysisMeta.svelte.js';
@@ -72,6 +103,7 @@
 		findIsotopeMeasurementLink,
 		saveIsotopeMeasurementLink,
 		applyDatasheetToReference,
+		findDatasheetEntryForElement,
 		type CatalogIsotopeMatch,
 		type CatalogReferenceMatch,
 		type SavedDatasheet
@@ -86,6 +118,7 @@
 	import {
 		APP_VERSION,
 		REVIEW_STEP,
+		STEP,
 		StepType,
 		getBackButtonText,
 		getNextButtonText,
@@ -284,7 +317,10 @@
 			expandedIsotopes: Array.from(expandedIsotopes),
 			expandedReferences: Array.from(expandedReferences),
 			expandedUnknowns: Array.from(expandedUnknowns),
-			localIsotopeLinks
+			localIsotopeLinks,
+			fissionChoices,
+			fissionManualFissile,
+			fissionBariumHalfLife
 		};
 	}
 
@@ -353,6 +389,13 @@
 		);
 		isotopeReferenceMap = Array.isArray(saved.isotopeReferenceMap) ? saved.isotopeReferenceMap : [];
 		localIsotopeLinks = Array.isArray(saved.localIsotopeLinks) ? saved.localIsotopeLinks : [];
+		fissionChoices = Array.isArray(saved.fissionChoices) ? saved.fissionChoices : [];
+		fissionManualFissile = Array.isArray(saved.fissionManualFissile)
+			? saved.fissionManualFissile
+			: [];
+		fissionBariumHalfLife = saved.fissionBariumHalfLife
+			? { ...saved.fissionBariumHalfLife }
+			: { ...DEFAULT_FISSION_BARIUM_HALF_LIFE };
 
 		hydrateExpandedSet(expandedIsotopes, saved.expandedIsotopes ?? []);
 		hydrateExpandedSet(expandedReferences, saved.expandedReferences ?? []);
@@ -371,7 +414,7 @@
 			return;
 		}
 		clearDraft();
-		step = 0;
+		goToStep(0, { replace: true });
 		title = 'NAA Analysis';
 		isotopeInfo = [];
 		isoRef = [];
@@ -395,6 +438,14 @@
 		isotopeDup = {};
 		referenceDup = {};
 		localIsotopeLinks = [];
+		fissionChoices = [];
+		fissionManualFissile = [];
+		fissionBariumHalfLife = { ...DEFAULT_FISSION_BARIUM_HALF_LIFE };
+		fissionDraftFactor = {};
+		fissionDraftUncertainty = {};
+		fissionDraftParent = {};
+		fissionDraftUseSpecial = {};
+		fissionReviewEditing = {};
 		relationshipFeedback = '';
 		relationshipConfirm = null;
 		relationshipPanelOpen = false;
@@ -469,6 +520,42 @@
 	let relationshipFeedback = $state('');
 	let relationshipForm = $state<IsotopeRelationshipForm>();
 	let relationshipBusy = $state(false);
+
+	// Fission-interference correction (7.2 WIP): per-isotope choice of a
+	// correction factor (from the `fission-corrections` catalog table or entered
+	// by hand), or an explicit 0 for "no fission interference". The subtraction
+	// math is not wired up yet — this only records the decision.
+	let fissionChoices = $state<FissionChoice[]>([]);
+	// Hand-entered fissile concentrations, when the fissile element isn't analysed.
+	let fissionManualFissile = $state<FissionManualEntry[]>([]);
+	// Hand-entered Ba-140 half-life for the La-140 fission correction (used when it
+	// can't be resolved from an analysed Ba-140 isotope or the catalog).
+	let fissionBariumHalfLife = $state<FissionBariumHalfLife>({
+		...DEFAULT_FISSION_BARIUM_HALF_LIFE
+	});
+	let fissionRows = $state<FissionCorrectionRecord[]>([]);
+	let hasRequestedFissionRows = $state(false);
+	// Draft form values for the inline "set correction" control, keyed by isotope
+	// index. `bind:value` on a number input yields `number | null`.
+	let fissionDraftFactor = $state<Record<number, number | null>>({});
+	let fissionDraftUncertainty = $state<Record<number, number | null>>({});
+	let fissionDraftParent = $state<Record<number, string>>({});
+	// For La-140 only: whether to use the special Ba-140 in-growth correction
+	// (true, the default) or a plain flat factor like every other isotope.
+	let fissionDraftUseSpecial = $state<Record<number, boolean>>({});
+	// Whether the per-isotope fission panel is reopened for editing after being
+	// reviewed (it otherwise collapses to a settled, non-warning summary once a
+	// choice is recorded — see the "reviewed" derivation below).
+	let fissionReviewEditing = $state<Record<number, boolean>>({});
+	// Search term for the Step 1 isotope catalog browser — bound so the "find
+	// uranium" button in the fission-interference warning can drive it.
+	let isotopeCatalogSearch = $state('');
+	/** Uranium is the only fissile parent the fission correction is applied for. */
+	const URANIUM_NUCLIDES = ['U-235', 'U-238'] as const;
+	const HALF_LIFE_UNITS = ['seconds', 'minutes', 'hours', 'days', 'weeks', 'years'] as const;
+	function isHalfLifeUnit(unit: string): unit is (typeof HALF_LIFE_UNITS)[number] {
+		return (HALF_LIFE_UNITS as readonly string[]).includes(unit);
+	}
 
 	/**
 	 * A pending upload the user must confirm first. `steps` are shown verbatim;
@@ -872,6 +959,42 @@
 		}
 	}
 
+	/**
+	 * Fill in a fission candidate's "uranium in this reference material" value
+	 * from a loaded datasheet's uranium row, when uranium isn't itself one of
+	 * the analysed isotopes (so it has nowhere else to come from) and the field
+	 * hasn't already been hand-filled. Returns true if it filled anything in.
+	 */
+	function applyDatasheetUraniumToFissionEntries(referenceIndex: number, sheet: SavedDatasheet) {
+		if (hasUraniumAnalyzed) {
+			return false;
+		}
+		const uraniumRow = findDatasheetEntryForElement(sheet, 'U');
+		if (!uraniumRow) {
+			return false;
+		}
+		let filled = false;
+		for (const candidate of fissionCandidates) {
+			if (getLinkedReferenceIndex(candidate.index) !== referenceIndex) {
+				continue;
+			}
+			const entry = fissionManualEntryFor(candidate.index);
+			if (!entry || entry.inStandard != null) {
+				continue;
+			}
+			const unit = fissionTargetUnit(candidate.index);
+			if (unit !== 'ppm' && unit !== 'percentage') {
+				continue;
+			}
+			entry.inStandard = massFractionToConcentration(
+				concentrationToMassFraction(uraniumRow.concentration, uraniumRow.unit),
+				unit
+			);
+			filled = true;
+		}
+		return filled;
+	}
+
 	/** Fill this reference material's known concentrations from a picked datasheet. */
 	function loadDatasheetIntoReference(index: number) {
 		const reference = materials.reference[index];
@@ -896,12 +1019,19 @@
 		// Also preselect it for publishing, so it doesn't need to be picked again there.
 		selectedDatasheetId = { ...selectedDatasheetId, [index]: sheet.id };
 
+		// Uranium concentration for the fission correction, when uranium isn't
+		// analysed — the manual entry only exists once a correction is chosen in
+		// Step 1, so this is a no-op until then.
+		const filledUranium = applyDatasheetUraniumToFissionEntries(index, sheet);
+
 		datasheetLoadFeedback = {
 			...datasheetLoadFeedback,
 			[index]:
 				matchedCount > 0
-					? `Loaded known concentrations for ${matchedCount} isotope${matchedCount === 1 ? '' : 's'} from "${sheet.sampleName}".`
-					: `"${sheet.sampleName}" didn't match any of your isotopes by name — nothing was changed.`
+					? `Loaded known concentrations for ${matchedCount} isotope${matchedCount === 1 ? '' : 's'} from "${sheet.sampleName}".${filledUranium ? ' Its uranium concentration was used for the fission correction too.' : ''}`
+					: filledUranium
+						? `"${sheet.sampleName}" didn't match any of your isotopes by name, but its uranium concentration was used for the fission correction.`
+						: `"${sheet.sampleName}" didn't match any of your isotopes by name — nothing was changed.`
 		};
 	}
 
@@ -1093,6 +1223,119 @@
 			publishPanelOpen.add(referenceIndex);
 			void loadDatasheets();
 		}
+	}
+
+	// ---- Fission-interference correction ----------------------------------
+
+	function fissionAnchorId(index: number): string {
+		return `fission-correction-${index}`;
+	}
+
+	/** Jump to an isotope's fission-correction control (from a summary/other step). */
+	async function reviewFissionCorrection(index: number) {
+		if (step !== STEP.SELECT_ISOTOPES) {
+			goToStep(STEP.SELECT_ISOTOPES);
+		}
+		expandedIsotopes.add(index);
+		await tick();
+		if (browser) {
+			requestAnimationFrame(() => {
+				document
+					.getElementById(fissionAnchorId(index))
+					?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			});
+		}
+	}
+
+	/**
+	 * Fill the Step 1 catalog search with "uranium" and scroll the browser into
+	 * view, so the user can add a uranium isotope (the fission correction is only
+	 * applied when uranium is part of the analysis).
+	 */
+	async function findUraniumInCatalog() {
+		isotopeCatalogSearch = 'uranium';
+		await tick();
+		if (browser) {
+			requestAnimationFrame(() => {
+				document
+					.getElementById('isotope-catalog-browser')
+					?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			});
+		}
+	}
+
+	function applyFissionRow(index: number, row: FissionCorrectionRecord) {
+		const key = fissionIsotopeKey(isotopeInfo[index]);
+		fissionChoices = upsertFissionChoice(fissionChoices, key, {
+			isotopeKey: key,
+			factor: row.correctionFactor,
+			uncertainty: row.uncertainty ?? 0,
+			mode: 'table',
+			fissileNuclide: row.fissileNuclide,
+			gammaEnergyKev: row.gammaEnergyKev,
+			irradiationPosition: row.irradiationPosition,
+			irradiationType: row.irradiationType,
+			sourceRowId: row.id,
+			...(isLanthanum140(isotopeInfo[index])
+				? { useSpecialCorrection: fissionDraftUseSpecial[index] ?? true }
+				: {})
+		});
+		// Reviewed — collapse the panel out of its "editing" / warning state.
+		fissionReviewEditing[index] = false;
+	}
+
+	function dismissFissionCorrection(index: number) {
+		const key = fissionIsotopeKey(isotopeInfo[index]);
+		fissionChoices = upsertFissionChoice(fissionChoices, key, {
+			isotopeKey: key,
+			factor: 0,
+			uncertainty: 0,
+			mode: 'none'
+		});
+		fissionReviewEditing[index] = false;
+	}
+
+	function applyManualFissionFactor(index: number) {
+		const factor = fissionDraftFactor[index];
+		if (factor === null || factor === undefined || !Number.isFinite(factor)) {
+			return;
+		}
+		const rawUnc = fissionDraftUncertainty[index];
+		const uncertainty = rawUnc != null && Number.isFinite(rawUnc) && rawUnc >= 0 ? rawUnc : 0;
+		const key = fissionIsotopeKey(isotopeInfo[index]);
+		fissionChoices = upsertFissionChoice(fissionChoices, key, {
+			isotopeKey: key,
+			factor,
+			uncertainty,
+			mode: factor === 0 ? 'none' : 'manual',
+			fissileNuclide: factor === 0 ? undefined : (fissionDraftParent[index] ?? URANIUM_NUCLIDES[0]),
+			...(isLanthanum140(isotopeInfo[index])
+				? { useSpecialCorrection: fissionDraftUseSpecial[index] ?? true }
+				: {})
+		});
+		fissionReviewEditing[index] = false;
+	}
+
+	function clearFissionCorrection(index: number) {
+		fissionChoices = upsertFissionChoice(
+			fissionChoices,
+			fissionIsotopeKey(isotopeInfo[index]),
+			null
+		);
+		delete fissionDraftFactor[index];
+		delete fissionDraftUncertainty[index];
+		delete fissionDraftParent[index];
+		delete fissionDraftUseSpecial[index];
+		delete fissionReviewEditing[index];
+		fissionManualFissile = fissionManualFissile.filter(
+			(entry) => entry.isotopeKey !== fissionIsotopeKey(isotopeInfo[index])
+		);
+	}
+
+	/** The hand-entered fissile-concentration record for a target isotope, if any. */
+	function fissionManualEntryFor(isotopeIndex: number): FissionManualEntry | undefined {
+		const key = fissionIsotopeKey(isotopeInfo[isotopeIndex]);
+		return fissionManualFissile.find((entry) => entry.isotopeKey === key);
 	}
 
 	// ---- Proxy-measurement relationships ("A measures B") ------------------
@@ -1346,6 +1589,28 @@
 
 	let step = $state(0);
 
+	// Shallow-routing (pushState/replaceState) can only be used once SvelteKit's
+	// router is initialized. afterNavigate fires during hydration *just before*
+	// the router flips its internal `started` flag, so defer to a microtask.
+	let routerReady = false;
+	let draftHydrated = false;
+
+	// Seed the current history entry with the current step so browser back/forward
+	// has a target. Only meaningful once the router is ready and the draft has
+	// been restored, and only if we haven't already stamped this entry.
+	function seedStepHistory() {
+		if (browser && routerReady && draftHydrated && page.state.wizardStep === undefined) {
+			replaceState('', { ...page.state, wizardStep: step });
+		}
+	}
+
+	afterNavigate(() => {
+		queueMicrotask(() => {
+			routerReady = true;
+			seedStepHistory();
+		});
+	});
+
 	let title = $state('NAA Analysis');
 
 	// array of isotope information
@@ -1468,6 +1733,158 @@
 			})
 			.filter((w): w is { index: number; text: string } => w !== null)
 	);
+
+	/**
+	 * Selected isotopes that can carry a fission-interference contribution —
+	 * either the `fission-corrections` catalog has a matching row, or the isotope
+	 * is a well-known fission product. Each carries the matching catalog rows and
+	 * the user's current choice (if any).
+	 */
+	let fissionCandidates = $derived(
+		isotopeInfo
+			.map((isotope, index) => {
+				const rows = matchingFissionRows(isotope, fissionRows);
+				if (rows.length === 0 && !isKnownFissionProduct(isotope)) {
+					return null;
+				}
+				return {
+					index,
+					isotope,
+					rows,
+					choice: findFissionChoice(fissionChoices, isotope)
+				};
+			})
+			.filter(
+				(
+					c
+				): c is {
+					index: number;
+					isotope: IsotopeInfoType;
+					rows: FissionCorrectionRecord[];
+					choice: FissionChoice | null;
+				} => c !== null
+			)
+	);
+	/**
+	 * Whether uranium is one of the analysed isotopes — its fissile concentration
+	 * then comes from the normal comparator computation. When it isn't, the same
+	 * correction still applies as long as its concentration is typed in by hand
+	 * on the reference material and unknowns (see `fissionFissileInputGroups`).
+	 */
+	let hasUraniumAnalyzed = $derived(isotopeInfo.some((iso) => isotopeIsElement(iso, 'U')));
+	let unreviewedFissionCount = $derived(
+		fissionCandidates.filter((c) => !isFissionCandidateReviewed(c)).length
+	);
+	/** Fission candidates not yet fully reviewed (picked a factor or dismissed — see {@link isFissionCandidateReviewed}). */
+	let unresolvedFissionCandidates = $derived(
+		fissionCandidates.filter((c) => !isFissionCandidateReviewed(c))
+	);
+	let fissionCandidateByIndex = $derived(new Map(fissionCandidates.map((c) => [c.index, c])));
+
+	function halfLifeSecondsOrNull(halfLife: number, unit: string): number | null {
+		if (!(halfLife > 0)) {
+			return null;
+		}
+		try {
+			const seconds = isoGA({ halfLife, unit } as IsotopeInfoType).halfLifeSeconds;
+			return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Ba-140 half-life auto-resolved from an analysed Ba-140 isotope, else the
+	 * isotope catalog — the two "database" sources for the La-140 precursor
+	 * in-growth term. `null` when neither has it.
+	 */
+	let resolvedBariumHalfLife = $derived.by<{
+		value: number;
+		unit: (typeof HALF_LIFE_UNITS)[number];
+		source: 'isotope' | 'catalog';
+	} | null>(() => {
+		const isoBa = isotopeInfo.find((iso) => isBarium140(iso) && iso.halfLife > 0);
+		if (isoBa && isHalfLifeUnit(isoBa.unit)) {
+			return { value: isoBa.halfLife, unit: isoBa.unit, source: 'isotope' };
+		}
+		const catBa = Object.values(isotopeCatalogById).find(
+			(item) =>
+				item?.shortName?.toLowerCase() === 'ba' &&
+				Number(item?.massNumber) === 140 &&
+				!(item?.suffix ?? '').trim()
+		);
+		if (catBa?.halfLife && catBa.halfLife.number > 0) {
+			return { value: catBa.halfLife.number, unit: catBa.halfLife.unit, source: 'catalog' };
+		}
+		return null;
+	});
+
+	/** True while the Ba-140 half-life field still holds the auto-resolved value (not hand-overridden). */
+	let fissionBariumHalfLifeIsAuto = $derived(
+		resolvedBariumHalfLife !== null &&
+			fissionBariumHalfLife.value === resolvedBariumHalfLife.value &&
+			fissionBariumHalfLife.unit === resolvedBariumHalfLife.unit
+	);
+
+	// Pre-fill the Ba-140 half-life field as soon as it can be resolved, so the
+	// user sees the actual number the correction will use rather than a blank,
+	// seemingly-required field. Only fires while the field is still empty, so a
+	// hand-entered override is never clobbered.
+	$effect(() => {
+		if (resolvedBariumHalfLife && fissionBariumHalfLife.value == null) {
+			fissionBariumHalfLife = {
+				value: resolvedBariumHalfLife.value,
+				unit: resolvedBariumHalfLife.unit
+			};
+		}
+	});
+
+	/**
+	 * Ba-140 decay constant (per second) for the La-140 precursor in-growth:
+	 * the (possibly auto-filled) half-life field, else the resolved isotope /
+	 * catalog value directly. `null` when neither is available.
+	 */
+	let bariumDecayConstant = $derived.by<number | null>(() => {
+		let seconds: number | null = null;
+
+		if (fissionBariumHalfLife.value && fissionBariumHalfLife.value > 0) {
+			seconds = halfLifeSecondsOrNull(fissionBariumHalfLife.value, fissionBariumHalfLife.unit);
+		}
+
+		if (seconds == null && resolvedBariumHalfLife) {
+			seconds = halfLifeSecondsOrNull(resolvedBariumHalfLife.value, resolvedBariumHalfLife.unit);
+		}
+
+		return seconds != null && seconds > 0 ? Math.LN2 / seconds : null;
+	});
+
+	/** Reset the Ba-140 half-life field to the auto-resolved value (clears a hand override). */
+	function resetBariumHalfLifeToDetected() {
+		fissionBariumHalfLife = { value: null, unit: fissionBariumHalfLife.unit };
+	}
+
+	/**
+	 * A fission-interference choice only "counts" as reviewed once it's actually
+	 * complete: dismissed, or a plain factor — or, for the La-140 special
+	 * correction, once the Ba-140 half-life is resolved too. The correction can't
+	 * run without it, so the warning has to stay up until then.
+	 */
+	function isFissionCandidateReviewed(candidate: {
+		isotope: IsotopeInfoType;
+		choice: FissionChoice | null;
+	}): boolean {
+		const choice = candidate.choice;
+		if (!choice) {
+			return false;
+		}
+		if (choice.mode === 'none') {
+			return true;
+		}
+		if (isLanthanum140(candidate.isotope) && choice.useSpecialCorrection !== false) {
+			return bariumDecayConstant !== null;
+		}
+		return true;
+	}
 
 	// computed isotope information
 	let isoComp = $derived(mathIsotopeInfo.map(isoGA));
@@ -1648,6 +2065,76 @@
 				})
 	);
 
+	/**
+	 * Fission-interference correction per (interfering isotope, unknown), keyed
+	 * `"<isotopeIndex>:<unknownIndex>"`. Built from the Step 1 `fissionChoices`
+	 * plus the computed results — no separate approval state. `applied: false`
+	 * with a `note` means the inputs to the formula could not be resolved.
+	 */
+	let fissionResults = $derived(
+		computeFissionResults({
+			// Uranium's concentration comes from an analysed isotope when there is
+			// one, else from the hand-entered value on the reference material /
+			// unknowns (`manualFissile` below) — computeFissionResults tries both.
+			candidates: fissionCandidates.map((c) => ({ index: c.index, choice: c.choice })),
+			isotopeInfo,
+			references: materials.reference,
+			unknowns: materials.unknown,
+			everythingComp,
+			linkedReferenceIndex: getLinkedReferenceIndex,
+			manualFissile: fissionManualFissile,
+			bariumDecayConstant
+		})
+	);
+
+	let appliedFissionResults = $derived(
+		[...fissionResults.values()].filter((result) => result.applied)
+	);
+	let blockedFissionResults = $derived(
+		[...fissionResults.values()].filter((result) => !result.applied && result.note !== '')
+	);
+	/** True when a La-140 correction is blocked purely on the missing Ba-140 half-life. */
+	let fissionNeedsBariumHalfLife = $derived(
+		[...fissionResults.values()].some((result) => result.needsBariumHalfLife)
+	);
+	/** Blocked results grouped by target isotope, for the "enter concentrations" prompt. */
+	let fissionFissileInputGroups = $derived.by(() => {
+		const groups = new Map<
+			number,
+			{ isotopeIndex: number; unit: ConcUnitType; fissileElementLabel: string; note: string }
+		>();
+		for (const result of fissionResults.values()) {
+			if (result.needsFissileInput && !groups.has(result.isotopeIndex)) {
+				groups.set(result.isotopeIndex, {
+					isotopeIndex: result.isotopeIndex,
+					unit: result.unit,
+					fissileElementLabel: result.fissileElementLabel,
+					note: result.note
+				});
+			}
+		}
+		return [...groups.values()];
+	});
+
+	/**
+	 * Fission candidates with an active correction (a factor chosen, not
+	 * dismissed) whose uranium concentration needs typing in on the reference
+	 * material and unknowns, because uranium isn't analysed. Unlike
+	 * `fissionFissileInputGroups` this doesn't wait for the target isotope's own
+	 * comparator result to be computable — the input fields show up as soon as a
+	 * correction is picked, so there's always somewhere to enter the value
+	 * rather than the fields only appearing once everything else is filled in.
+	 */
+	let fissionUraniumEntryTargets = $derived(
+		hasUraniumAnalyzed ? [] : fissionCandidates.filter((c) => c.choice && c.choice.factor > 0)
+	);
+
+	/** The unit the target isotope's own concentration is reported in (from its linked reference). */
+	function fissionTargetUnit(isotopeIndex: number): ConcUnitType {
+		const refIndex = getLinkedReferenceIndex(isotopeIndex);
+		return materials.reference[refIndex]?.concentrationUnits?.[isotopeIndex];
+	}
+
 	/** (unknown, linked-reference) pairs counted in different modes — surfaced on the Review step. */
 	let countingModeMismatches = $derived.by(() => {
 		const modeOf = (m?: { countingMode?: string }) =>
@@ -1700,8 +2187,6 @@
 	// Validation state
 	let validationErrors: string[] = $state([]);
 
-	let draftHydrated = false;
-
 	$effect(() => {
 		if (!browser) {
 			return;
@@ -1712,9 +2197,9 @@
 		untrack(() => {
 			restoreDraft();
 			draftHydrated = true;
+			seedStepHistory();
 			analysisMeta.registerWelcomeHandler(() => {
-				step = 0;
-				window.scrollTo({ top: 0, behavior: 'smooth' });
+				goToStep(0);
 			});
 		});
 		void swaAuth.refresh();
@@ -1742,6 +2227,23 @@
 	// Surface the experiment title in the layout header.
 	$effect(() => {
 		analysisMeta.title = title;
+	});
+
+	// Follow the browser back/forward buttons: SvelteKit restores page.state for
+	// the history entry being navigated to, so mirror its wizardStep back onto
+	// `step`. Our own goToStep() pushes matching state, so this is a no-op then.
+	$effect(() => {
+		const historyStep = page.state.wizardStep;
+		if (!browser || typeof historyStep !== 'number') {
+			return;
+		}
+		untrack(() => {
+			const clamped = Math.min(Math.max(Math.trunc(historyStep), 0), totalSteps);
+			if (clamped !== step) {
+				step = clamped;
+				window.scrollTo({ top: 0, behavior: 'smooth' });
+			}
+		});
 	});
 
 	// Continuously autosave the whole wizard to localStorage. Only "Start new
@@ -1797,6 +2299,78 @@
 		untrack(reconcileIsotopeDependentState);
 	});
 
+	// Drop fission-interference choices / manual inputs whose isotope is gone.
+	$effect(() => {
+		const identities = isotopeInfo.map((iso) => `${iso.elementName}|${iso.isotopeName}`).join(',');
+		void identities;
+		untrack(() => {
+			const pruned = pruneFissionChoices(fissionChoices, isotopeInfo);
+			if (pruned.length !== fissionChoices.length) {
+				fissionChoices = pruned;
+			}
+			const prunedManual = pruneManualFissile(fissionManualFissile, isotopeInfo);
+			if (prunedManual.length !== fissionManualFissile.length) {
+				fissionManualFissile = prunedManual;
+			}
+		});
+	});
+
+	// Create a backing manual-input entry for every target isotope that needs one.
+	$effect(() => {
+		const needed = fissionUraniumEntryTargets.map((candidate) => ({
+			index: candidate.index,
+			unit: fissionTargetUnit(candidate.index)
+		}));
+		const unknownCount = materials.unknown.length;
+		untrack(() => {
+			for (const { index, unit } of needed) {
+				const key = fissionIsotopeKey(isotopeInfo[index]);
+				const existing = fissionManualFissile.find((entry) => entry.isotopeKey === key);
+				if (!existing) {
+					fissionManualFissile = upsertManualFissile(fissionManualFissile, {
+						isotopeKey: key,
+						unit,
+						inStandard: null,
+						inUnknown: Array.from({ length: unknownCount }, () => ({
+							value: null,
+							uncertainty: null
+						}))
+					});
+				} else {
+					if (existing.inUnknown.length < unknownCount) {
+						existing.inUnknown = [
+							...existing.inUnknown,
+							...Array.from({ length: unknownCount - existing.inUnknown.length }, () => ({
+								value: null,
+								uncertainty: null
+							}))
+						];
+					}
+					// The entry can be created before a reference material exists (and
+					// so before its unit is knowable) — keep it in sync once it is.
+					if (unit && existing.unit !== unit) {
+						existing.unit = unit;
+					}
+				}
+			}
+		});
+	});
+
+	// Give the inline "fissile parent" select (and, for La-140, the special vs
+	// standard correction-type choice) a concrete starting value.
+	$effect(() => {
+		const indices = fissionCandidates.map((candidate) => candidate.index);
+		untrack(() => {
+			for (const index of indices) {
+				const existing = fissionChoices.find(
+					(c) => c.isotopeKey === fissionIsotopeKey(isotopeInfo[index])
+				);
+				fissionDraftParent[index] ??= existing?.fissileNuclide ?? URANIUM_NUCLIDES[0];
+				fissionDraftUseSpecial[index] ??= existing?.useSpecialCorrection ?? true;
+			}
+		});
+	});
+
 	$effect(() => {
 		if (!browser || !catalogAvailable) {
 			return;
@@ -1810,6 +2384,11 @@
 		if (!hasRequestedIsotopeMeasurementLinks) {
 			hasRequestedIsotopeMeasurementLinks = true;
 			void loadIsotopeMeasurementLinks();
+		}
+
+		if (!hasRequestedFissionRows) {
+			hasRequestedFissionRows = true;
+			void loadFissionRows();
 		}
 	});
 
@@ -1929,6 +2508,16 @@
 			isotopeMeasurementLinks = Array.isArray(body?.items) ? body.items : [];
 		} catch {
 			// Best effort only. Direct isotope matching still works without proxy links.
+		}
+	}
+
+	async function loadFissionRows() {
+		try {
+			fissionRows = await listFissionCorrections();
+		} catch {
+			// Best effort only — the known-fission-product list still raises the
+			// prompt, and the user can enter a factor by hand.
+			fissionRows = [];
 		}
 	}
 
@@ -2163,10 +2752,28 @@
 		untrack(() => reconcileCatalogReferenceCoverage());
 	});
 
-	function addCustomIsotope() {
-		isotopeInfo = [...isotopeInfo, createIsotopeInfo()];
+	function addCustomIsotope(overrides: Partial<IsotopeInfoType> = {}) {
+		isotopeInfo = [...isotopeInfo, { ...createIsotopeInfo(), ...overrides }];
 		isoRef = [...isoRef, undefined];
 		expandedIsotopes.add(isotopeInfo.length - 1);
+	}
+
+	/**
+	 * Add a custom isotope pre-filled as uranium ("Uranium" / "U-") for the user
+	 * to finish, and scroll its card into view. Used from the fission-interference
+	 * warning when uranium isn't part of the analysis yet.
+	 */
+	async function addCustomUraniumIsotope() {
+		addCustomIsotope({ elementName: 'Uranium', isotopeName: 'U-' });
+		const newIndex = isotopeInfo.length - 1;
+		await tick();
+		if (browser) {
+			requestAnimationFrame(() => {
+				document
+					.getElementById(`isotope-card-${newIndex}`)
+					?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			});
+		}
 	}
 
 	function removeIsotope(isotopeIndex: number) {
@@ -2351,7 +2958,8 @@
 		}
 
 		const energy = getFiniteEnergy(isotope.energy);
-		const energyLabel = energy !== null ? ` @ ${energy.toLocaleString()} keV` : '';
+		// Plain number — no thousands separators.
+		const energyLabel = energy !== null ? ` @ ${energy} keV` : '';
 		const proxy = proxyByIsotope[index];
 		const proxyLabel = proxy ? ` (via ${describeProxyMeasured(proxy)})` : '';
 
@@ -2360,6 +2968,24 @@
 		}
 
 		return `Isotope ${index + 1}${energyLabel}${proxyLabel}`;
+	}
+
+	/**
+	 * Column label for the results table / CSV. An element measured by a single
+	 * isotope row is shown just as the element ("Uranium"); when the same element
+	 * is analysed more than once — two isotopes, or two energies of one isotope —
+	 * every row for it falls back to the full isotope/energy name so they can be
+	 * told apart.
+	 */
+	function getResultColumnName(isotope: IsotopeInfoType | undefined, index: number): string {
+		const element = isotope?.elementName?.trim();
+		if (!element) {
+			return getIsotopeDisplayName(isotope, index);
+		}
+		const sameElementCount = isotopeInfo.filter(
+			(other) => other?.elementName?.trim() === element
+		).length;
+		return sameElementCount > 1 ? getIsotopeDisplayName(isotope, index) : element;
 	}
 
 	function expandIsotope(index: number) {
@@ -2499,6 +3125,36 @@
 		}
 	}
 
+	/**
+	 * Move the wizard to `target`, keeping the browser history in sync so the
+	 * back/forward buttons walk through visited steps. `replace` swaps the current
+	 * history entry instead of adding one (used for restore / reset, not for
+	 * ordinary navigation).
+	 */
+	function goToStep(target: number, { replace = false }: { replace?: boolean } = {}) {
+		const clamped = Math.min(Math.max(Math.trunc(target), 0), totalSteps);
+		const leavingStep = step;
+		step = clamped;
+		if (!browser || !routerReady) {
+			return;
+		}
+		if (replace) {
+			replaceState('', { ...page.state, wizardStep: clamped });
+			return;
+		}
+		if (clamped === leavingStep) {
+			return;
+		}
+		// Every step change starts back at the top of the page.
+		window.scrollTo({ top: 0, behavior: 'smooth' });
+		// Make sure the entry we're leaving carries its own step, so pressing Back
+		// from the new entry restores it rather than falling out of the app.
+		if (page.state.wizardStep === undefined) {
+			replaceState('', { ...page.state, wizardStep: leavingStep });
+		}
+		pushState('', { ...page.state, wizardStep: clamped });
+	}
+
 	const next = async () => {
 		// Prevent navigating beyond the final review step
 		if (step >= totalSteps) return;
@@ -2520,11 +3176,11 @@
 			}
 		}
 
-		step = Math.min(step + 1, totalSteps);
+		goToStep(step + 1);
 	};
 	const prev = () => {
 		if (step <= 0) return;
-		step = Math.max(step - 1, 0);
+		goToStep(step - 1);
 	};
 
 	function downloadTableAsCSV() {
@@ -2546,7 +3202,7 @@
 		const headers = [
 			'',
 			...isotopeInfo.flatMap((iso, index) => {
-				const name = getIsotopeDisplayName(iso, index);
+				const name = getResultColumnName(iso, index);
 				return [escapeCSV(name), escapeCSV(`${name} Uncertainty`)];
 			})
 		];
@@ -2563,17 +3219,21 @@
 		];
 		csvRows.push(unitsRow.join(','));
 
-		// Add data rows for each unknown material
+		// Add data rows for each unknown material (fission-corrected where applied)
 		materials.unknown.forEach((unk, uIndex) => {
 			const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`;
 			const row = [
 				escapeCSV(unknownLabel),
-				...isotopeInfo.flatMap((_, iIndex) => [
-					escapeCSV(roundResult(everythingComp[iIndex][uIndex].unknownConcentration)),
-					escapeCSV(
-						roundResult(everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute)
-					)
-				])
+				...isotopeInfo.flatMap((_, iIndex) => {
+					const comp = everythingComp[iIndex][uIndex];
+					const fission = fissionResults.get(`${iIndex}:${uIndex}`);
+					const applied = Boolean(fission && fission.applied);
+					const shown = applied ? fission!.corrected : comp.unknownConcentration;
+					const shownUnc = applied
+						? fission!.correctedUncertaintyAbsolute
+						: comp.unknownConcentrationUncertaintyAbsolute;
+					return [escapeCSV(roundResult(shown)), escapeCSV(roundToMatch(shownUnc, shown))];
+				})
 			];
 			csvRows.push(row.join(','));
 
@@ -2586,6 +3246,51 @@
 			];
 			csvRows.push(detectionLimitRow.join(','));
 		});
+
+		// Fission-interference correction breakdown
+		const appliedFission = [...fissionResults.values()].filter((r) => r.applied);
+		if (appliedFission.length > 0) {
+			csvRows.push('');
+			csvRows.push('Fission interference corrections');
+			csvRows.push(
+				[
+					'Isotope',
+					'Unknown',
+					'Fissile parent',
+					'f',
+					'k',
+					'C_target^S',
+					'C_fissile^S',
+					'C_fissile^U',
+					'Uncorrected',
+					'Uncorrected uncertainty',
+					'Corrected',
+					'Corrected uncertainty'
+				]
+					.map(escapeCSV)
+					.join(',')
+			);
+			for (const r of appliedFission) {
+				csvRows.push(
+					[
+						getResultColumnName(isotopeInfo[r.isotopeIndex], r.isotopeIndex),
+						materials.unknown[r.unknownIndex]?.NETL_code || `Unknown ${r.unknownIndex + 1}`,
+						r.fissileElementLabel,
+						r.f,
+						r.k.toPrecision(4),
+						roundResult(r.cTargetStandard),
+						roundResult(r.cFissileStandard),
+						roundResult(r.cFissileUnknown),
+						roundResult(r.uncorrected),
+						roundToMatch(r.uncorrectedUncertaintyAbsolute, r.uncorrected),
+						roundResult(r.corrected),
+						roundToMatch(r.correctedUncertaintyAbsolute, r.corrected)
+					]
+						.map(escapeCSV)
+						.join(',')
+				);
+			}
+		}
 
 		// Create CSV string
 		const csvContent = csvRows.join('\n');
@@ -2655,6 +3360,53 @@
 	{/if}
 {/snippet}
 
+{#snippet unreviewedFissionNotice()}
+	{#if unreviewedFissionCount > 0}
+		<div
+			class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded border border-warning-500 preset-tonal-warning p-3 text-sm"
+		>
+			<span>
+				⚠ {unreviewedFissionCount}
+				{unreviewedFissionCount === 1 ? 'isotope has' : 'isotopes have'} unreviewed fission-interference
+				potential. Set a correction factor (or 0) in Step 1.
+			</span>
+			<button
+				type="button"
+				class="btn shrink-0 preset-tonal-surface"
+				onclick={() => goToStep(STEP.SELECT_ISOTOPES)}
+			>
+				Go to Select Isotopes
+			</button>
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet fissionModeBadge(isLanthanumFlag: boolean)}
+	<span
+		class="ml-1 inline-block rounded px-1.5 py-0.5 align-middle text-xs font-semibold {isLanthanumFlag
+			? 'bg-primary-500/20 text-primary-700-300'
+			: 'bg-surface-500/20 text-surface-700-300'}"
+		title={isLanthanumFlag
+			? 'La-140, thermal irradiation only: the factor is computed per sample from the Ba-140 → La-140 in-growth, not a flat number.'
+			: 'A single flat factor, applied the same way to the standard and the unknown — recommended for epithermal/fast irradiation.'}
+	>
+		{isLanthanumFlag
+			? 'Special correction — Ba-140 in-growth'
+			: 'Standard correction — flat factor'}
+	</span>
+{/snippet}
+
+{#snippet stepNavButtons()}
+	<button type="button" class="btn preset-tonal-surface text-xl" onclick={prev}>
+		{backButtonText}
+	</button>
+	{#if stepType !== StepType.REVIEW}
+		<button type="button" class="btn preset-filled-primary-500 text-xl" onclick={next}>
+			{nextButtonText}
+		</button>
+	{/if}
+{/snippet}
+
 <div style="padding: 5%">
 	<h1 class="text-3xl font-bold">NAA Analysis Software - Version {APP_VERSION}</h1>
 	<br />
@@ -2681,6 +3433,12 @@
 			handleSubmit();
 		}}
 	>
+		{#if stepType !== StepType.WELCOME}
+			<div class="mb-6 flex flex-wrap gap-4">
+				{@render stepNavButtons()}
+			</div>
+		{/if}
+
 		{#if stepType === StepType.WELCOME}
 			<p>Welcome to the NAA Analysis software!</p>
 			<br />
@@ -2721,8 +3479,8 @@
 			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
 			<br />
 			<p>
-				In this version (v{APP_VERSION}), the main focus is to work on small bug fixes and
-				improvements after the big 7.0 release.
+				In this version (v{APP_VERSION}), the main focus is to implement fission correction and work
+				on more minor bug fixes and UI changes.
 			</p>
 			<br />
 			<h2 class="text-2xl font-bold">Next planned releases</h2>
@@ -2739,7 +3497,9 @@
 			</ul>
 			<br />
 			<div class="flex flex-wrap items-center gap-3">
-				<button type="button" onclick={next}>Get Started</button>
+				<button type="button" class="btn preset-filled-primary-500 text-xl" onclick={next}>
+					Get Started
+				</button>
 				{#if isotopeInfo.length || materials.reference.length || materials.unknown.length}
 					<button type="button" class="btn preset-tonal-surface" onclick={startNewAnalysis}>
 						Start new analysis
@@ -2758,7 +3518,13 @@
 			<br />
 
 			{#if catalogAvailable}
-				<IsotopeViewer bind:selectedIsotopes={isotopeInfo} showSelectionList={false} />
+				<div id="isotope-catalog-browser" class="scroll-mt-24">
+					<IsotopeViewer
+						bind:selectedIsotopes={isotopeInfo}
+						bind:searchTerm={isotopeCatalogSearch}
+						showSelectionList={false}
+					/>
+				</div>
 				<br />
 			{/if}
 
@@ -2784,6 +3550,39 @@
 				</div>
 			{/if}
 
+			{#if unresolvedFissionCandidates.length > 0}
+				<div class="mt-2 space-y-2 rounded border border-warning-500 preset-tonal-warning p-3">
+					<p class="font-bold">⚠ Possible fission interference</p>
+					<p class="text-sm">
+						{unresolvedFissionCandidates.length}
+						{unresolvedFissionCandidates.length === 1 ? 'isotope is' : 'isotopes are'} also produced by
+						the in-pile fission of uranium. Part of their counts comes from the fission of the uranium
+						in your sample and must be subtracted. Pick a correction factor for each, or set it to 0 if
+						fission interference does not apply — its uranium concentration can come from an analysed
+						uranium isotope, or you'll be able to type it in directly on the reference material and unknowns.
+						This warning goes away once every isotope below has been reviewed.
+					</p>
+					<ul class="space-y-2">
+						{#each unresolvedFissionCandidates as candidate (candidate.index)}
+							<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+								<span>
+									<strong>{getIsotopeDisplayName(candidate.isotope, candidate.index)}</strong>
+									{@render fissionModeBadge(isLanthanum140(candidate.isotope))}
+									— <span class="text-warning-700-300">not reviewed</span>
+								</span>
+								<button
+									type="button"
+									class="btn shrink-0 preset-tonal-surface"
+									onclick={() => reviewFissionCorrection(candidate.index)}
+								>
+									Set correction
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
+
 			{#if isotopeInfo.length === 0}
 				<p>
 					No isotopes yet. {catalogAvailable
@@ -2794,6 +3593,7 @@
 			<div class="mt-2 space-y-2">
 				{#each isotopeInfo as isotope, index (index)}
 					<CollapsibleCard
+						id="isotope-card-{index}"
 						title={getIsotopeDisplayName(isotope, index)}
 						subtitle={isotope.id ? 'From catalog' : 'Custom'}
 						open={expandedIsotopes.has(index)}
@@ -2933,6 +3733,250 @@
 							</div>
 						{/if}
 
+						{#if fissionCandidateByIndex.has(index)}
+							{@const candidate = fissionCandidateByIndex.get(index)!}
+							{@const lanthanum = isLanthanum140(isotope)}
+							{@const effectiveSpecial =
+								lanthanum &&
+								(candidate.choice
+									? candidate.choice.useSpecialCorrection !== false
+									: (fissionDraftUseSpecial[index] ?? true))}
+							{@const reviewed = isFissionCandidateReviewed(candidate)}
+							{@const editing = fissionReviewEditing[index] ?? false}
+							<div
+								id={fissionAnchorId(index)}
+								class="mt-3 scroll-mt-24 space-y-2 rounded border p-3 {reviewed && !editing
+									? 'border-surface-300-700'
+									: 'border-warning-500 preset-tonal-warning'}"
+							>
+								{#if reviewed && !editing}
+									<!-- Reviewed: settled, no warning styling — this is the "auto-dismiss" state. -->
+									<p class="text-sm">
+										<strong>Fission correction</strong>
+										{@render fissionModeBadge(effectiveSpecial)}
+										— {describeFissionChoice(candidate.choice!)}
+										<button
+											type="button"
+											class="ml-2 btn preset-tonal-surface"
+											onclick={() => (fissionReviewEditing[index] = true)}
+										>
+											Change
+										</button>
+									</p>
+								{:else}
+									{@const useSpecial = fissionDraftUseSpecial[index] ?? true}
+									<p class="font-bold">
+										⚠ Possible fission interference
+										{@render fissionModeBadge(effectiveSpecial)}
+										{#if editing}
+											<button
+												type="button"
+												class="ml-2 btn preset-tonal-surface"
+												onclick={() => (fissionReviewEditing[index] = false)}
+											>
+												Cancel
+											</button>
+										{/if}
+									</p>
+									<p class="text-sm">
+										{getIsotopeDisplayName(isotope, index)} is also produced by the in-pile fission of
+										uranium. Part of its signal comes from fission of the uranium in your sample and must
+										be subtracted. Choose a correction factor, or set it to 0 if this does not apply.
+									</p>
+
+									{#if !hasUraniumAnalyzed}
+										<p class="text-xs">
+											Uranium isn't one of your analysed isotopes — its concentration for this
+											correction can be typed in directly on your reference material and unknowns
+											(Steps 2 &amp; 3), or you can
+											<button type="button" class="underline" onclick={addCustomUraniumIsotope}>
+												add it as a custom isotope
+											</button>
+											{#if catalogAvailable}
+												or
+												<button type="button" class="underline" onclick={findUraniumInCatalog}>
+													choose it from the catalog
+												</button>
+											{/if}
+											to measure it directly instead.
+										</p>
+									{/if}
+
+									{#if lanthanum}
+										<fieldset class="space-y-1 text-sm">
+											<legend class="font-semibold">Correction type</legend>
+											<label class="flex items-start gap-2">
+												<input
+													type="radio"
+													name="fission-mode-{index}"
+													class="mt-1"
+													checked={useSpecial}
+													onchange={() => (fissionDraftUseSpecial[index] = true)}
+												/>
+												<span>
+													<strong>Special — Ba-140 in-growth.</strong> Thermal irradiation only — the
+													0.00233 constant this correction uses was derived for thermal-neutron fission.
+													La-140 grows in from its precursor Ba-140, so the factor is computed per sample
+													rather than used as a flat number — needs the Ba-140 half-life below.
+												</span>
+											</label>
+											<label class="flex items-start gap-2">
+												<input
+													type="radio"
+													name="fission-mode-{index}"
+													class="mt-1"
+													checked={!useSpecial}
+													onchange={() => (fissionDraftUseSpecial[index] = false)}
+												/>
+												<span>
+													<strong>Standard — flat factor.</strong> Recommended for epithermal (or fast)
+													irradiation, where the Ba-140 in-growth constant doesn't apply — use a factor
+													from an epithermal row in the catalog table, or your own value.
+												</span>
+											</label>
+										</fieldset>
+									{/if}
+
+									{#if candidate.choice}
+										<p class="text-sm">
+											Current: <strong>{describeFissionChoice(candidate.choice)}</strong>
+											<button
+												type="button"
+												class="ml-2 btn preset-tonal-surface"
+												onclick={() => clearFissionCorrection(index)}
+											>
+												Clear
+											</button>
+										</p>
+									{/if}
+
+									{#if candidate.rows.length > 0}
+										<p class="text-sm font-semibold">From the catalog table:</p>
+										<ul class="space-y-1">
+											{#each candidate.rows as row (row.id)}
+												<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+													<span>{describeFissionRow(row)}</span>
+													<button
+														type="button"
+														class="btn shrink-0 preset-tonal-surface"
+														onclick={() => applyFissionRow(index, row)}
+													>
+														Use this
+													</button>
+												</li>
+											{/each}
+										</ul>
+									{:else}
+										<p class="text-sm">
+											No matching row in the fission-correction table{catalogAvailable
+												? ''
+												: ' (sign in to a deployment with the shared catalog to load it)'}. Enter a
+											factor by hand.
+										</p>
+									{/if}
+
+									<div class="flex flex-wrap items-end gap-2">
+										<label class="label text-sm">
+											<span class="block font-semibold">Fissile parent</span>
+											<select class="select input" bind:value={fissionDraftParent[index]}>
+												{#each URANIUM_NUCLIDES as nuclide (nuclide)}
+													<option value={nuclide}>{nuclide}</option>
+												{/each}
+											</select>
+										</label>
+										<label class="label text-sm">
+											<span class="block font-semibold">Correction factor</span>
+											<input
+												class="input"
+												type="number"
+												step="any"
+												placeholder="e.g. 0.0123"
+												bind:value={fissionDraftFactor[index]}
+											/>
+										</label>
+										<label class="label text-sm">
+											<span class="block font-semibold">Uncertainty</span>
+											<input
+												class="input"
+												type="number"
+												step="any"
+												min="0"
+												placeholder="optional"
+												bind:value={fissionDraftUncertainty[index]}
+											/>
+										</label>
+										<button
+											type="button"
+											class="btn preset-tonal-surface"
+											onclick={() => applyManualFissionFactor(index)}
+										>
+											Apply factor
+										</button>
+										<button
+											type="button"
+											class="btn preset-tonal-surface"
+											onclick={() => dismissFissionCorrection(index)}
+										>
+											No fission interference (0)
+										</button>
+									</div>
+
+									{#if lanthanum && useSpecial}
+										<div class="mt-2 space-y-1 rounded border border-surface-300-700 p-2">
+											<p class="text-sm font-semibold">Ba-140 half-life (La-140 precursor)</p>
+											<p class="text-xs">
+												La-140 from fission grows in from Ba-140, so its correction factor is worked
+												out per sample from the Ba-140 → La-140 in-growth (m = half the irradiation
+												time, t = the decay time), using this special correction instead of a flat
+												factor.
+												{#if resolvedBariumHalfLife}
+													<strong
+														>Pre-filled below with {resolvedBariumHalfLife.value}
+														{resolvedBariumHalfLife.unit}</strong
+													>, {resolvedBariumHalfLife.source === 'isotope'
+														? 'from your Ba-140 isotope'
+														: 'from the catalog'} — change it only to override that value.
+												{:else}
+													Not found in your isotopes or the catalog — enter it here, or add Ba-140
+													as an isotope. It is required for the fission correction.
+												{/if}
+											</p>
+											<div class="flex flex-wrap items-end gap-2">
+												<label class="label text-sm">
+													<span class="block font-semibold">Half-life</span>
+													<input
+														class="input"
+														type="number"
+														step="any"
+														min="0"
+														placeholder="e.g. 12.75"
+														bind:value={fissionBariumHalfLife.value}
+													/>
+												</label>
+												<label class="label text-sm">
+													<span class="block font-semibold">Unit</span>
+													<select class="select input" bind:value={fissionBariumHalfLife.unit}>
+														{#each HALF_LIFE_UNITS as unitOption (unitOption)}
+															<option value={unitOption}>{unitOption}</option>
+														{/each}
+													</select>
+												</label>
+												{#if resolvedBariumHalfLife && !fissionBariumHalfLifeIsAuto}
+													<button
+														type="button"
+														class="btn preset-tonal-surface"
+														onclick={resetBariumHalfLifeToDetected}
+													>
+														Use pre-filled value
+													</button>
+												{/if}
+											</div>
+										</div>
+									{/if}
+								{/if}
+							</div>
+						{/if}
+
 						<details class="mt-3">
 							<summary class="cursor-pointer text-sm">Debug information</summary>
 							<ComputedDisplay
@@ -2960,7 +4004,14 @@
 				{/each}
 			</div>
 			<br />
-			<button type="button" onclick={addCustomIsotope}>Add custom isotope</button>
+			<button
+				type="button"
+				id="add-custom-isotope"
+				class="btn scroll-mt-24 preset-filled-primary-500"
+				onclick={() => addCustomIsotope()}
+			>
+				Add custom isotope
+			</button>
 
 			<div id="isotope-relationships" class="mt-8 scroll-mt-24">
 				<button
@@ -3047,6 +4098,8 @@
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Add reference materials, then assign one to each isotope.</p>
 			<br />
+
+			{@render unreviewedFissionNotice()}
 
 			<section class="rounded-lg border-2 border-primary-500 preset-tonal-primary p-5">
 				<h3 class="text-2xl font-bold">Add your own reference material</h3>
@@ -3156,6 +4209,38 @@
 							bind:refMatInfo={materials.reference[index]}
 							bind:this={matRefs.reference[index]}
 						/>
+						{#if !hasUraniumAnalyzed}
+							{#each fissionUraniumEntryTargets.filter((candidate) => getLinkedReferenceIndex(candidate.index) === index) as candidate (candidate.index)}
+								{@const entry = fissionManualEntryFor(candidate.index)}
+								{@const unit = fissionTargetUnit(candidate.index)}
+								{@const unitLabel =
+									unit === 'ppm' ? 'µg/g' : unit === 'percentage' ? '%' : (unit ?? '')}
+								{#if entry}
+									<div
+										class="mt-3 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3"
+									>
+										<p class="text-sm font-semibold">
+											⚠ Uranium concentration — needed for the
+											{getResultColumnName(isotopeInfo[candidate.index], candidate.index)} fission correction,
+											since uranium isn't one of the isotopes you're analysing.
+										</p>
+										<label class="label text-sm">
+											<span class="block font-semibold"
+												>Uranium in this reference material ({unitLabel})</span
+											>
+											<input
+												class="input"
+												type="number"
+												step="any"
+												min="0"
+												placeholder="C_fissile^S"
+												bind:value={entry.inStandard}
+											/>
+										</label>
+									</div>
+								{/if}
+							{/each}
+						{/if}
 						{#if swaAuth.signInAvailable}
 							{@const fromCatalog = typeof referenceCatalogItemIds[index] === 'string'}
 							{@const refMode = referenceModeFor(index)}
@@ -3471,6 +4556,8 @@
 			<p>Add the unknown materials you want to analyze.</p>
 			<br />
 
+			{@render unreviewedFissionNotice()}
+
 			<h3 class="text-xl font-bold">Unknown materials ({materials.unknown.length})</h3>
 			{#if materials.unknown.length === 0}
 				<p>No unknown materials yet. Add one to continue.</p>
@@ -3490,6 +4577,51 @@
 							bind:this={matRefs.unknown[index]}
 							bind:materialInfo={materials.unknown[index]}
 						/>
+						{#if !hasUraniumAnalyzed}
+							{#each fissionUraniumEntryTargets as candidate (candidate.index)}
+								{@const entry = fissionManualEntryFor(candidate.index)}
+								{@const unit = fissionTargetUnit(candidate.index)}
+								{@const unitLabel =
+									unit === 'ppm' ? 'µg/g' : unit === 'percentage' ? '%' : (unit ?? '')}
+								{#if entry && entry.inUnknown[index]}
+									<div
+										class="mt-3 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3"
+									>
+										<p class="text-sm font-semibold">
+											⚠ Uranium concentration — needed for the
+											{getResultColumnName(isotopeInfo[candidate.index], candidate.index)} fission correction,
+											since uranium isn't one of the isotopes you're analysing.
+										</p>
+										<div class="flex flex-wrap items-end gap-2">
+											<label class="label text-sm">
+												<span class="block font-semibold"
+													>Uranium in this unknown ({unitLabel})</span
+												>
+												<input
+													class="input"
+													type="number"
+													step="any"
+													min="0"
+													placeholder="C_fissile^U"
+													bind:value={entry.inUnknown[index].value}
+												/>
+											</label>
+											<label class="label text-sm">
+												<span class="block font-semibold">± uncertainty</span>
+												<input
+													class="input"
+													type="number"
+													step="any"
+													min="0"
+													placeholder="optional"
+													bind:value={entry.inUnknown[index].uncertainty}
+												/>
+											</label>
+										</div>
+									</div>
+								{/if}
+							{/each}
+						{/if}
 						<details class="mt-3">
 							<summary class="cursor-pointer text-sm">Debug information</summary>
 							<ComputedDisplay
@@ -3505,7 +4637,9 @@
 				{/each}
 			</div>
 			<br />
-			<button type="button" onclick={addUnknown}>Add unknown material</button>
+			<button type="button" class="btn preset-filled-primary-500" onclick={addUnknown}>
+				Add unknown material
+			</button>
 		{:else if stepType === StepType.REVIEW}
 			<h2 class="text-2xl font-bold">{stepTitle}</h2>
 			<p>Review your inputs and the computed results below.</p>
@@ -3528,6 +4662,110 @@
 					</ul>
 				</div>
 			{/if}
+			{#if unreviewedFissionCount > 0}
+				<div
+					class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded border border-warning-500 preset-tonal-warning p-3 text-sm"
+				>
+					<span>
+						⚠ {unreviewedFissionCount}
+						{unreviewedFissionCount === 1 ? 'isotope has' : 'isotopes have'} unreviewed fission-interference
+						potential — set a factor (or 0) in Step 1.
+					</span>
+					<button
+						type="button"
+						class="btn shrink-0 preset-tonal-surface"
+						onclick={() => goToStep(STEP.SELECT_ISOTOPES)}
+					>
+						Go to Select Isotopes
+					</button>
+				</div>
+			{/if}
+			{#each fissionFissileInputGroups as group (group.isotopeIndex)}
+				<div class="mb-4 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3">
+					<p class="font-bold">
+						⚠ {group.fissileElementLabel} concentration needed —
+						<strong
+							>{getResultColumnName(isotopeInfo[group.isotopeIndex], group.isotopeIndex)}</strong
+						>
+					</p>
+					<p class="text-sm">
+						{group.note} Type it in on the reference material (Step 2) and each unknown (Step 3).
+					</p>
+				</div>
+			{/each}
+
+			{#if fissionNeedsBariumHalfLife}
+				<div class="mb-4 space-y-2 rounded border border-error-500 preset-tonal-error p-3">
+					<p class="font-bold">Ba-140 half-life required for the lanthanum fission correction</p>
+					<p class="text-sm">
+						La-140 produced by uranium fission grows in from its precursor Ba-140, so the correction
+						can't be computed without the Ba-140 half-life. It wasn't found among your analysed
+						isotopes or in the catalog — enter it here (or add Ba-140 as an isotope). This is
+						required if you want the fission correction applied.
+					</p>
+					<div class="flex flex-wrap items-end gap-2">
+						<label class="label text-sm">
+							<span class="block font-semibold">Ba-140 half-life</span>
+							<input
+								class="input"
+								type="number"
+								step="any"
+								min="0"
+								placeholder="e.g. 12.75"
+								bind:value={fissionBariumHalfLife.value}
+							/>
+						</label>
+						<label class="label text-sm">
+							<span class="block font-semibold">Unit</span>
+							<select class="select input" bind:value={fissionBariumHalfLife.unit}>
+								{#each HALF_LIFE_UNITS as unitOption (unitOption)}
+									<option value={unitOption}>{unitOption}</option>
+								{/each}
+							</select>
+						</label>
+						<button
+							type="button"
+							class="btn shrink-0 preset-tonal-surface"
+							onclick={() => goToStep(STEP.SELECT_ISOTOPES)}
+						>
+							Go to Select Isotopes
+						</button>
+					</div>
+				</div>
+			{/if}
+
+			{#if blockedFissionResults.some((r) => !r.needsFissileInput && !r.needsBariumHalfLife)}
+				<div class="mb-4 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3">
+					<p class="font-bold">⚠ Fission correction not applied</p>
+					<ul class="ml-4 list-disc text-sm">
+						{#each blockedFissionResults.filter((r) => !r.needsFissileInput && !r.needsBariumHalfLife) as result (result.isotopeIndex + ':' + result.unknownIndex)}
+							<li>
+								<strong
+									>{getResultColumnName(
+										isotopeInfo[result.isotopeIndex],
+										result.isotopeIndex
+									)}</strong
+								>
+								in
+								<strong
+									>{materials.unknown[result.unknownIndex]?.NETL_code ||
+										`Unknown ${result.unknownIndex + 1}`}</strong
+								>
+								— {result.note}
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
+			{#if appliedFissionResults.length > 0}
+				<div class="mb-4 rounded border border-primary-500 preset-tonal-primary p-3 text-sm">
+					Fission-interference corrections applied to {appliedFissionResults.length} result{appliedFissionResults.length ===
+					1
+						? ''
+						: 's'} (marked <sup>†</sup> below). The uncorrected values are in the collapsed table beneath,
+					and the worked calculation is in “Fission interference corrections”.
+				</div>
+			{/if}
 			<!--Display table & header with unit-->
 			<h3 class="text-xl font-bold">Predicted Concentrations</h3>
 			<!--Display a table here with isotopes as the columns and materials as the rows-->
@@ -3536,8 +4774,8 @@
 					<tr>
 						<th class="border border-surface-300-700 px-4 py-2"></th>
 						{#each isotopeInfo as iso, index}
-							<th class="border border-surface-300-700 px-4 py-2">
-								{getIsotopeDisplayName(iso, index)}
+							<th class="border border-surface-300-700 px-4 py-2 text-center">
+								{getResultColumnName(iso, index)}
 							</th>
 						{/each}
 					</tr>
@@ -3546,7 +4784,7 @@
 					<tr>
 						<td class="border border-surface-300-700 px-4 py-2 font-bold"> Units </td>
 						{#each isotopeInfo as _, index}
-							<td class="border border-surface-300-700 px-4 py-2">
+							<td class="border border-surface-300-700 px-4 py-2 text-center">
 								{(() => {
 									const referenceIndex = getLinkedReferenceIndex(index);
 									const unit =
@@ -3565,10 +4803,17 @@
 								{unknownLabel}
 							</td>
 							{#each isotopeInfo as _, iIndex}
-								<td class="border border-surface-300-700 px-4 py-2">
-									{roundResult(everythingComp[iIndex][uIndex].unknownConcentration)} ± {roundResult(
-										everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute
-									)}
+								{@const comp = everythingComp[iIndex][uIndex]}
+								{@const fission = fissionResults.get(`${iIndex}:${uIndex}`)}
+								{@const applied = Boolean(fission && fission.applied)}
+								{@const shown = applied ? fission!.corrected : comp.unknownConcentration}
+								{@const shownUnc = applied
+									? fission!.correctedUncertaintyAbsolute
+									: comp.unknownConcentrationUncertaintyAbsolute}
+								<td class="border border-surface-300-700 px-4 py-2 text-center">
+									{roundResult(shown)}{#if applied}<sup title="Fission-interference corrected"
+											>†</sup
+										>{/if} ± {roundToMatch(shownUnc, shown)}
 								</td>
 							{/each}
 						</tr>
@@ -3577,7 +4822,7 @@
 								{unknownLabel} Conc Det Lim
 							</td>
 							{#each isotopeInfo as _, iIndex}
-								<td class="border border-surface-300-700 px-4 py-2">
+								<td class="border border-surface-300-700 px-4 py-2 text-center">
 									{roundResult(everythingComp[iIndex][uIndex].concentrationDetectionLimit)}
 								</td>
 							{/each}
@@ -3585,8 +4830,132 @@
 					{/each}
 				</tbody>
 			</table>
+			{#if appliedFissionResults.length > 0}
+				<p class="mt-1 text-sm"><sup>†</sup> fission-interference corrected — see below.</p>
+			{/if}
 			<br />
-			<button type="button" class="variant-filled-primary btn" onclick={downloadTableAsCSV}>
+
+			{#if appliedFissionResults.length > 0 || blockedFissionResults.some((r) => !r.needsFissileInput && !r.needsBariumHalfLife)}
+				<h3 class="text-xl font-bold">Fission interference corrections</h3>
+				<p class="mt-1 mb-2 text-sm">
+					C<sub>target</sub><sup>U</sup> = k · (C<sub>target</sub><sup>S</sup> + f<sub>S</sub> · C<sub
+						>fissile</sub
+					><sup>S</sup>) − f<sub>U</sub> · C<sub>fissile</sub><sup>U</sup>. Concentrations shown in
+					the target isotope’s unit; k is the combined correction factor. f is the Step 1 factor (f<sub
+						>S</sub
+					>
+					= f<sub>U</sub>), except for La-140 on the special (thermal-only) correction, where it is
+					computed per sample from the Ba-140 → La-140 in-growth so f<sub>S</sub> and f<sub>U</sub> differ.
+				</p>
+				<div class="overflow-x-auto">
+					<table class="table-auto border-collapse border border-surface-300-700 text-sm">
+						<thead>
+							<tr>
+								{#each ['Isotope', 'Unknown', 'Fissile parent', 'f', 'k', 'C_target^S', 'C_fissile^S', 'C_fissile^U', 'Uncorrected', 'Corrected'] as heading (heading)}
+									<th class="border border-surface-300-700 px-3 py-1 text-center">{heading}</th>
+								{/each}
+							</tr>
+						</thead>
+						<tbody>
+							{#each [...fissionResults.values()].filter((r) => r.applied || !r.needsFissileInput) as result (result.isotopeIndex + ':' + result.unknownIndex)}
+								<tr>
+									<td class="border border-surface-300-700 px-3 py-1">
+										{getResultColumnName(isotopeInfo[result.isotopeIndex], result.isotopeIndex)}
+										{@render fissionModeBadge(result.isLanthanum)}
+									</td>
+									<td class="border border-surface-300-700 px-3 py-1">
+										{materials.unknown[result.unknownIndex]?.NETL_code ||
+											`Unknown ${result.unknownIndex + 1}`}
+									</td>
+									<td class="border border-surface-300-700 px-3 py-1"
+										>{result.fissileElementLabel}</td
+									>
+									<td class="border border-surface-300-700 px-3 py-1 text-right">
+										{#if result.isLanthanum}
+											{result.fStandard.toPrecision(3)} / {result.f.toPrecision(3)}
+										{:else}
+											{result.f}
+										{/if}
+									</td>
+									{#if result.applied}
+										<td class="border border-surface-300-700 px-3 py-1 text-right"
+											>{result.k.toPrecision(4)}</td
+										>
+										<td class="border border-surface-300-700 px-3 py-1 text-right"
+											>{roundResult(result.cTargetStandard)}</td
+										>
+										<td class="border border-surface-300-700 px-3 py-1 text-right"
+											>{roundResult(result.cFissileStandard)}</td
+										>
+										<td class="border border-surface-300-700 px-3 py-1 text-right"
+											>{roundResult(result.cFissileUnknown)}</td
+										>
+										<td class="border border-surface-300-700 px-3 py-1 text-right"
+											>{roundResult(result.uncorrected)} ± {roundToMatch(
+												result.uncorrectedUncertaintyAbsolute,
+												result.uncorrected
+											)}</td
+										>
+										<td class="border border-surface-300-700 px-3 py-1 text-right font-bold"
+											>{roundResult(result.corrected)} ± {roundToMatch(
+												result.correctedUncertaintyAbsolute,
+												result.corrected
+											)}</td
+										>
+									{:else}
+										<td class="border border-surface-300-700 px-3 py-1 text-center" colspan="6"
+											>{result.note}</td
+										>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+				<br />
+
+				<details class="rounded border border-surface-300-700 p-3">
+					<summary class="cursor-pointer font-semibold">Uncorrected concentrations</summary>
+					<div class="mt-3 overflow-x-auto">
+						<table class="table-auto border-collapse border border-surface-300-700">
+							<thead>
+								<tr>
+									<th class="border border-surface-300-700 px-4 py-2"></th>
+									{#each isotopeInfo as iso, index}
+										<th class="border border-surface-300-700 px-4 py-2 text-center"
+											>{getResultColumnName(iso, index)}</th
+										>
+									{/each}
+								</tr>
+							</thead>
+							<tbody>
+								{#each materials.unknown as unk, uIndex}
+									{@const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`}
+									<tr>
+										<td class="border border-surface-300-700 px-4 py-2 font-bold">{unknownLabel}</td
+										>
+										{#each isotopeInfo as _, iIndex}
+											{@const comp = everythingComp[iIndex][uIndex]}
+											<td class="border border-surface-300-700 px-4 py-2 text-center">
+												{roundResult(comp.unknownConcentration)} ± {roundToMatch(
+													comp.unknownConcentrationUncertaintyAbsolute,
+													comp.unknownConcentration
+												)}
+											</td>
+										{/each}
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				</details>
+				<br />
+			{/if}
+			<button
+				type="button"
+				class="btn preset-filled-primary-500 text-xl"
+				onclick={downloadTableAsCSV}
+			>
 				Download Table as CSV
 			</button>
 			<br /><br />
@@ -3660,10 +5029,7 @@
 
 		{#if stepType !== StepType.WELCOME}
 			<div class="mt-6 flex flex-wrap gap-4">
-				<button type="button" onclick={prev}>{backButtonText}</button>
-				{#if stepType !== StepType.REVIEW}
-					<button type="button" onclick={next}>{nextButtonText}</button>
-				{/if}
+				{@render stepNavButtons()}
 			</div>
 		{/if}
 		<br />

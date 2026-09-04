@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { roundResult } from './naaUtils.js';
+import { resultDecimalPlaces, roundResult, roundToMatch } from './naaUtils.js';
 
 describe('roundResult', () => {
 	it('rounds magnitudes below 1 to 2 decimal places', () => {
@@ -33,5 +33,35 @@ describe('roundResult', () => {
 	it('passes non-finite values through', () => {
 		expect(roundResult(Number.NaN)).toBeNaN();
 		expect(roundResult(Number.POSITIVE_INFINITY)).toBe(Number.POSITIVE_INFINITY);
+	});
+});
+
+describe('resultDecimalPlaces', () => {
+	it('buckets by magnitude', () => {
+		expect(resultDecimalPlaces(0.4)).toBe(2);
+		expect(resultDecimalPlaces(-0.99)).toBe(2);
+		expect(resultDecimalPlaces(1)).toBe(1);
+		expect(resultDecimalPlaces(19.9)).toBe(1);
+		expect(resultDecimalPlaces(20)).toBe(0);
+		expect(resultDecimalPlaces(-450)).toBe(0);
+	});
+
+	it('falls back to 0 for non-finite values', () => {
+		expect(resultDecimalPlaces(Number.NaN)).toBe(0);
+	});
+});
+
+describe('roundToMatch', () => {
+	it('rounds the uncertainty to the same places as the value it accompanies', () => {
+		// value 7.234 → 1 dp bucket, so its uncertainty is also shown to 1 dp
+		expect(roundToMatch(0.567, 7.234)).toBe(0.6);
+		// value 0.42 → 2 dp bucket
+		expect(roundToMatch(0.567, 0.42)).toBe(0.57);
+		// value 145 → integer bucket
+		expect(roundToMatch(12.7, 145)).toBe(13);
+	});
+
+	it('passes non-finite values through', () => {
+		expect(roundToMatch(Number.NaN, 5)).toBeNaN();
 	});
 });

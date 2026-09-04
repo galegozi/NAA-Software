@@ -43,6 +43,9 @@ function makeDraft(overrides: Partial<AnalysisDraft> = {}): AnalysisDraft {
 		expandedReferences: [],
 		expandedUnknowns: [],
 		localIsotopeLinks: [],
+		fissionChoices: [],
+		fissionManualFissile: [],
+		fissionBariumHalfLife: { value: null, unit: 'days' },
 		...overrides
 	};
 }
@@ -80,6 +83,54 @@ describe('analysisDraft', () => {
 		});
 		saveDraft(draft);
 		expect(loadDraft()?.localIsotopeLinks).toEqual(draft.localIsotopeLinks);
+	});
+
+	it('round-trips fission-interference choices', () => {
+		const draft = makeDraft({
+			fissionChoices: [
+				{
+					isotopeKey: 'la|140|',
+					factor: 0.0123,
+					uncertainty: 0.0004,
+					mode: 'table',
+					fissileNuclide: 'U-235',
+					gammaEnergyKev: 1596.2,
+					irradiationPosition: '',
+					irradiationType: 'thermal',
+					sourceRowId: 'row-1'
+				},
+				{ isotopeKey: 'mo|99|', factor: 0, uncertainty: 0, mode: 'none' }
+			]
+		});
+		saveDraft(draft);
+		expect(loadDraft()?.fissionChoices).toEqual(draft.fissionChoices);
+	});
+
+	it('round-trips hand-entered fissile concentrations', () => {
+		const draft = makeDraft({
+			fissionManualFissile: [
+				{
+					isotopeKey: 'ce|141|',
+					unit: 'ppm',
+					inStandard: 5,
+					inUnknown: [
+						{ value: 30, uncertainty: 1.5 },
+						{ value: null, uncertainty: null }
+					]
+				}
+			]
+		});
+		saveDraft(draft);
+		expect(loadDraft()?.fissionManualFissile).toEqual(draft.fissionManualFissile);
+	});
+
+	it('defaults new fission fields to [] for drafts written before they existed', () => {
+		const legacy: Record<string, unknown> = { ...makeDraft() };
+		delete legacy.fissionChoices;
+		delete legacy.fissionManualFissile;
+		window.localStorage.setItem(DRAFT_KEY, JSON.stringify(legacy));
+		expect(loadDraft()?.fissionChoices).toEqual([]);
+		expect(loadDraft()?.fissionManualFissile).toEqual([]);
 	});
 
 	it('clearDraft removes the stored draft', () => {
