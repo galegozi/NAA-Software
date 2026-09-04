@@ -2068,6 +2068,25 @@
 		return [...groups.values()];
 	});
 
+	/**
+	 * Fission candidates with an active correction (a factor chosen, not
+	 * dismissed) whose uranium concentration needs typing in on the reference
+	 * material and unknowns, because uranium isn't analysed. Unlike
+	 * `fissionFissileInputGroups` this doesn't wait for the target isotope's own
+	 * comparator result to be computable — the input fields show up as soon as a
+	 * correction is picked, so there's always somewhere to enter the value
+	 * rather than the fields only appearing once everything else is filled in.
+	 */
+	let fissionUraniumEntryTargets = $derived(
+		hasUraniumAnalyzed ? [] : fissionCandidates.filter((c) => c.choice && c.choice.factor > 0)
+	);
+
+	/** The unit the target isotope's own concentration is reported in (from its linked reference). */
+	function fissionTargetUnit(isotopeIndex: number): ConcUnitType {
+		const refIndex = getLinkedReferenceIndex(isotopeIndex);
+		return materials.reference[refIndex]?.concentrationUnits?.[isotopeIndex];
+	}
+
 	/** (unknown, linked-reference) pairs counted in different modes — surfaced on the Review step. */
 	let countingModeMismatches = $derived.by(() => {
 		const modeOf = (m?: { countingMode?: string }) =>
@@ -2250,9 +2269,9 @@
 
 	// Create a backing manual-input entry for every target isotope that needs one.
 	$effect(() => {
-		const needed = fissionFissileInputGroups.map((group) => ({
-			index: group.isotopeIndex,
-			unit: group.unit
+		const needed = fissionUraniumEntryTargets.map((candidate) => ({
+			index: candidate.index,
+			unit: fissionTargetUnit(candidate.index)
 		}));
 		const unknownCount = materials.unknown.length;
 		untrack(() => {
@@ -2269,14 +2288,21 @@
 							uncertainty: null
 						}))
 					});
-				} else if (existing.inUnknown.length < unknownCount) {
-					existing.inUnknown = [
-						...existing.inUnknown,
-						...Array.from({ length: unknownCount - existing.inUnknown.length }, () => ({
-							value: null,
-							uncertainty: null
-						}))
-					];
+				} else {
+					if (existing.inUnknown.length < unknownCount) {
+						existing.inUnknown = [
+							...existing.inUnknown,
+							...Array.from({ length: unknownCount - existing.inUnknown.length }, () => ({
+								value: null,
+								uncertainty: null
+							}))
+						];
+					}
+					// The entry can be created before a reference material exists (and
+					// so before its unit is knowable) — keep it in sync once it is.
+					if (unit && existing.unit !== unit) {
+						existing.unit = unit;
+					}
 				}
 			}
 		});
@@ -4136,27 +4162,23 @@
 							bind:this={matRefs.reference[index]}
 						/>
 						{#if !hasUraniumAnalyzed}
-							{#each fissionFissileInputGroups.filter((group) => getLinkedReferenceIndex(group.isotopeIndex) === index) as group (group.isotopeIndex)}
-								{@const entry = fissionManualEntryFor(group.isotopeIndex)}
+							{#each fissionUraniumEntryTargets.filter((candidate) => getLinkedReferenceIndex(candidate.index) === index) as candidate (candidate.index)}
+								{@const entry = fissionManualEntryFor(candidate.index)}
+								{@const unit = fissionTargetUnit(candidate.index)}
 								{@const unitLabel =
-									group.unit === 'ppm'
-										? 'µg/g'
-										: group.unit === 'percentage'
-											? '%'
-											: (group.unit ?? '')}
+									unit === 'ppm' ? 'µg/g' : unit === 'percentage' ? '%' : (unit ?? '')}
 								{#if entry}
 									<div
 										class="mt-3 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3"
 									>
 										<p class="text-sm font-semibold">
-											⚠ {group.fissileElementLabel} concentration — needed for the
-											{getResultColumnName(isotopeInfo[group.isotopeIndex], group.isotopeIndex)} fission
-											correction, since {group.fissileElementLabel.toLowerCase()} isn't one of the isotopes
-											you're analysing.
+											⚠ Uranium concentration — needed for the
+											{getResultColumnName(isotopeInfo[candidate.index], candidate.index)} fission correction,
+											since uranium isn't one of the isotopes you're analysing.
 										</p>
 										<label class="label text-sm">
 											<span class="block font-semibold"
-												>{group.fissileElementLabel} in this reference material ({unitLabel})</span
+												>Uranium in this reference material ({unitLabel})</span
 											>
 											<input
 												class="input"
@@ -4508,28 +4530,24 @@
 							bind:materialInfo={materials.unknown[index]}
 						/>
 						{#if !hasUraniumAnalyzed}
-							{#each fissionFissileInputGroups as group (group.isotopeIndex)}
-								{@const entry = fissionManualEntryFor(group.isotopeIndex)}
+							{#each fissionUraniumEntryTargets as candidate (candidate.index)}
+								{@const entry = fissionManualEntryFor(candidate.index)}
+								{@const unit = fissionTargetUnit(candidate.index)}
 								{@const unitLabel =
-									group.unit === 'ppm'
-										? 'µg/g'
-										: group.unit === 'percentage'
-											? '%'
-											: (group.unit ?? '')}
+									unit === 'ppm' ? 'µg/g' : unit === 'percentage' ? '%' : (unit ?? '')}
 								{#if entry && entry.inUnknown[index]}
 									<div
 										class="mt-3 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3"
 									>
 										<p class="text-sm font-semibold">
-											⚠ {group.fissileElementLabel} concentration — needed for the
-											{getResultColumnName(isotopeInfo[group.isotopeIndex], group.isotopeIndex)} fission
-											correction, since {group.fissileElementLabel.toLowerCase()} isn't one of the isotopes
-											you're analysing.
+											⚠ Uranium concentration — needed for the
+											{getResultColumnName(isotopeInfo[candidate.index], candidate.index)} fission correction,
+											since uranium isn't one of the isotopes you're analysing.
 										</p>
 										<div class="flex flex-wrap items-end gap-2">
 											<label class="label text-sm">
 												<span class="block font-semibold"
-													>{group.fissileElementLabel} in this unknown ({unitLabel})</span
+													>Uranium in this unknown ({unitLabel})</span
 												>
 												<input
 													class="input"

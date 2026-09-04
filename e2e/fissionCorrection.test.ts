@@ -138,40 +138,27 @@ test('fission correction applies from hand-typed uranium concentrations when ura
 		.first()
 		.click();
 
-	// Step 2: reference material. The "Uranium concentration" prompt needs a
-	// computed Ce result first (from both the reference and an unknown), so it
-	// isn't visible yet — fill in Ce here, come back to it after Step 3.
+	// Step 2: reference material. The "Uranium concentration" prompt is visible
+	// right away — it doesn't wait for a computed Ce result first.
 	await page.getByRole('button', { name: '+ Add custom reference material' }).click();
+	await expect(page.getByLabel(/Uranium in this reference material/)).toBeVisible();
 	await fillMaterial(page, { netl: 'REF-A', sample: 'Standard A' });
 	await setCounts(page, 0, 1000);
 	await page.getByLabel('Known Concentration').fill('4');
 	await page.getByLabel('Reference Material Concentration Units').selectOption('ppm');
-	await expect(page.getByLabel(/Uranium in this reference material/)).toHaveCount(0);
+	await page.getByLabel(/Uranium in this reference material/).fill('5');
 	await page
 		.getByRole('button', { name: /^Next:/ })
 		.first()
 		.click();
 
-	// Step 3: the unknown. Once its own Ce counts are in, the prompt appears
-	// right here.
+	// Step 3: the unknown. Same immediate visibility.
 	await page.getByRole('button', { name: 'Add unknown material' }).click();
+	await expect(page.getByText(/Uranium concentration/).first()).toBeVisible();
 	await fillMaterial(page, { netl: 'UNK-1', sample: 'Unknown 1' });
 	await setCounts(page, 0, 1250);
-	await expect(page.getByText(/Uranium concentration/).first()).toBeVisible();
 	await page.getByLabel(/Uranium in this unknown/).fill('30');
 
-	// Back to Step 2 — the reference-material prompt is visible now.
-	await page
-		.getByRole('button', { name: /^Back:/ })
-		.first()
-		.click();
-	await expect(page.getByLabel(/Uranium in this reference material/)).toBeVisible();
-	await page.getByLabel(/Uranium in this reference material/).fill('5');
-
-	await page
-		.getByRole('button', { name: /^Next:/ })
-		.first()
-		.click();
 	await page
 		.getByRole('button', { name: /^Next:/ })
 		.first()
