@@ -279,16 +279,9 @@ test('Ba-140 half-life pre-fills from an analysed Ba-140 isotope', async ({ page
 	await page.getByLabel('Energy (in KeV)').nth(1).fill('74');
 	await page.getByLabel('Half Life', { exact: true }).nth(1).fill('1500');
 
-	await page.locator('select').filter({ hasText: 'U-235' }).first().selectOption('U-235');
-	await page.getByLabel('Correction factor').fill('0.00233');
-	await page.getByRole('button', { name: 'Apply factor' }).click();
-
-	// Reviewed — reopen it to see the Ba-140 half-life field.
-	await page.getByRole('button', { name: 'Change' }).click();
-
 	// Not yet resolved — no Ba-140 isotope or catalog entry.
 	await expect(page.getByText(/Not found in your isotopes or the catalog/).first()).toBeVisible();
-	await expect(page.getByLabel('Half-life')).toHaveValue('');
+	await expect(page.getByLabel('Half-life', { exact: true })).toHaveValue('');
 
 	// Add Ba-140 with its real half-life — the field pre-fills automatically.
 	await page.getByRole('button', { name: 'Add custom isotope' }).click();
@@ -298,12 +291,22 @@ test('Ba-140 half-life pre-fills from an analysed Ba-140 isotope', async ({ page
 	await page.getByLabel('Half Life', { exact: true }).nth(2).fill('12.75');
 	await page.getByLabel('Half Life Unit').nth(2).selectOption('days');
 
-	await expect(page.getByLabel('Half-life')).toHaveValue('12.75');
+	await expect(page.getByLabel('Half-life', { exact: true })).toHaveValue('12.75');
 	// String matching (not regex) — Playwright normalizes whitespace across the
 	// line-wraps in the source template; a regex would not.
 	await expect(page.getByText('Pre-filled below with 12.75 days').first()).toBeVisible();
 	await expect(page.getByText('from your Ba-140 isotope').first()).toBeVisible();
 	await expect(page.getByText(/Not found in your isotopes or the catalog/)).toHaveCount(0);
+
+	// Applying the factor now settles straight to "reviewed" — the special
+	// correction is already complete, nothing left to review. Scoped to the
+	// La-140 panel — Ba-140 is itself a known fission product and gets its own.
+	const lanthanumPanel = page.locator('#fission-correction-0');
+	await lanthanumPanel.locator('select').filter({ hasText: 'U-235' }).selectOption('U-235');
+	await lanthanumPanel.getByLabel('Correction factor').fill('0.00233');
+	await lanthanumPanel.getByRole('button', { name: 'Apply factor' }).click();
+	await expect(lanthanumPanel.getByRole('button', { name: 'Change' })).toBeVisible();
+	await expect(lanthanumPanel.getByText('Special correction — Ba-140 in-growth')).toBeVisible();
 
 	// No manual entry needed downstream: the Review step never blocks.
 	await page

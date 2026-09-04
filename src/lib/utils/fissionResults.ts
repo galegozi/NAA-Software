@@ -162,8 +162,9 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 		const manual = findManualFissile(ctx.manualFissile, fissionIsotopeKey(ctx.isotopeInfo[ti]));
 
 		// La-140 is fed by its precursor Ba-140, so the flat catalog constant is
-		// shaped by the Ba-140 → La-140 in-growth, evaluated per sample.
-		const lanthanum = isLanthanum140(ctx.isotopeInfo[ti]);
+		// shaped by the Ba-140 → La-140 in-growth, evaluated per sample — unless
+		// the user explicitly opted out in favour of a plain flat factor.
+		const lanthanum = isLanthanum140(ctx.isotopeInfo[ti]) && choice.useSpecialCorrection !== false;
 		const lambdaLa = lanthanum
 			? decayConstantFromHalfLife(ctx.isotopeInfo[ti].halfLife, ctx.isotopeInfo[ti].unit)
 			: 0;

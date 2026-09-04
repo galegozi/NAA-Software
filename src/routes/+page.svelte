@@ -439,6 +439,8 @@
 		fissionDraftFactor = {};
 		fissionDraftUncertainty = {};
 		fissionDraftParent = {};
+		fissionDraftUseSpecial = {};
+		fissionReviewEditing = {};
 		relationshipFeedback = '';
 		relationshipConfirm = null;
 		relationshipPanelOpen = false;
@@ -533,6 +535,9 @@
 	let fissionDraftFactor = $state<Record<number, number | null>>({});
 	let fissionDraftUncertainty = $state<Record<number, number | null>>({});
 	let fissionDraftParent = $state<Record<number, string>>({});
+	// For La-140 only: whether to use the special Ba-140 in-growth correction
+	// (true, the default) or a plain flat factor like every other isotope.
+	let fissionDraftUseSpecial = $state<Record<number, boolean>>({});
 	// Whether the per-isotope fission panel is reopened for editing after being
 	// reviewed (it otherwise collapses to a settled, non-warning summary once a
 	// choice is recorded — see the "reviewed" derivation below).
@@ -1212,8 +1217,9 @@
 	}
 
 	function applyFissionRow(index: number, row: FissionCorrectionRecord) {
-		fissionChoices = upsertFissionChoice(fissionChoices, fissionIsotopeKey(isotopeInfo[index]), {
-			isotopeKey: fissionIsotopeKey(isotopeInfo[index]),
+		const key = fissionIsotopeKey(isotopeInfo[index]);
+		fissionChoices = upsertFissionChoice(fissionChoices, key, {
+			isotopeKey: key,
 			factor: row.correctionFactor,
 			uncertainty: row.uncertainty ?? 0,
 			mode: 'table',
@@ -1221,7 +1227,10 @@
 			gammaEnergyKev: row.gammaEnergyKev,
 			irradiationPosition: row.irradiationPosition,
 			irradiationType: row.irradiationType,
-			sourceRowId: row.id
+			sourceRowId: row.id,
+			...(isLanthanum140(isotopeInfo[index])
+				? { useSpecialCorrection: fissionDraftUseSpecial[index] ?? true }
+				: {})
 		});
 		// Reviewed — collapse the panel out of its "editing" / warning state.
 		fissionReviewEditing[index] = false;
@@ -1251,7 +1260,10 @@
 			factor,
 			uncertainty,
 			mode: factor === 0 ? 'none' : 'manual',
-			fissileNuclide: factor === 0 ? undefined : (fissionDraftParent[index] ?? URANIUM_NUCLIDES[0])
+			fissileNuclide: factor === 0 ? undefined : (fissionDraftParent[index] ?? URANIUM_NUCLIDES[0]),
+			...(isLanthanum140(isotopeInfo[index])
+				? { useSpecialCorrection: fissionDraftUseSpecial[index] ?? true }
+				: {})
 		});
 		fissionReviewEditing[index] = false;
 	}
@@ -1265,6 +1277,7 @@
 		delete fissionDraftFactor[index];
 		delete fissionDraftUncertainty[index];
 		delete fissionDraftParent[index];
+		delete fissionDraftUseSpecial[index];
 		delete fissionReviewEditing[index];
 		fissionManualFissile = fissionManualFissile.filter(
 			(entry) => entry.isotopeKey !== fissionIsotopeKey(isotopeInfo[index])
@@ -1711,10 +1724,12 @@
 	 */
 	let hasUraniumAnalyzed = $derived(isotopeInfo.some((iso) => isotopeIsElement(iso, 'U')));
 	let unreviewedFissionCount = $derived(
-		hasUraniumAnalyzed ? fissionCandidates.filter((c) => c.choice === null).length : 0
+		hasUraniumAnalyzed ? fissionCandidates.filter((c) => !isFissionCandidateReviewed(c)).length : 0
 	);
-	/** Fission candidates the user has not yet acted on (picked a factor or dismissed). */
-	let unresolvedFissionCandidates = $derived(fissionCandidates.filter((c) => c.choice === null));
+	/** Fission candidates not yet fully reviewed (picked a factor or dismissed — see {@link isFissionCandidateReviewed}). */
+	let unresolvedFissionCandidates = $derived(
+		fissionCandidates.filter((c) => !isFissionCandidateReviewed(c))
+	);
 	let fissionCandidateByIndex = $derived(new Map(fissionCandidates.map((c) => [c.index, c])));
 
 	function halfLifeSecondsOrNull(halfLife: number, unit: string): number | null {
@@ -1797,6 +1812,29 @@
 	/** Reset the Ba-140 half-life field to the auto-resolved value (clears a hand override). */
 	function resetBariumHalfLifeToDetected() {
 		fissionBariumHalfLife = { value: null, unit: fissionBariumHalfLife.unit };
+	}
+
+	/**
+	 * A fission-interference choice only "counts" as reviewed once it's actually
+	 * complete: dismissed, or a plain factor — or, for the La-140 special
+	 * correction, once the Ba-140 half-life is resolved too. The correction can't
+	 * run without it, so the warning has to stay up until then.
+	 */
+	function isFissionCandidateReviewed(candidate: {
+		isotope: IsotopeInfoType;
+		choice: FissionChoice | null;
+	}): boolean {
+		const choice = candidate.choice;
+		if (!choice) {
+			return false;
+		}
+		if (choice.mode === 'none') {
+			return true;
+		}
+		if (isLanthanum140(candidate.isotope) && choice.useSpecialCorrection !== false) {
+			return bariumDecayConstant !== null;
+		}
+		return true;
 	}
 
 	// computed isotope information
@@ -2244,14 +2282,17 @@
 		});
 	});
 
-	// Give the inline "fissile parent" select a concrete starting value.
+	// Give the inline "fissile parent" select (and, for La-140, the special vs
+	// standard correction-type choice) a concrete starting value.
 	$effect(() => {
 		const indices = fissionCandidates.map((candidate) => candidate.index);
 		untrack(() => {
 			for (const index of indices) {
-				fissionDraftParent[index] ??=
-					fissionChoices.find((c) => c.isotopeKey === fissionIsotopeKey(isotopeInfo[index]))
-						?.fissileNuclide ?? URANIUM_NUCLIDES[0];
+				const existing = fissionChoices.find(
+					(c) => c.isotopeKey === fissionIsotopeKey(isotopeInfo[index])
+				);
+				fissionDraftParent[index] ??= existing?.fissileNuclide ?? URANIUM_NUCLIDES[0];
+				fissionDraftUseSpecial[index] ??= existing?.useSpecialCorrection ?? true;
 			}
 		});
 	});
@@ -3664,7 +3705,12 @@
 						{#if fissionCandidateByIndex.has(index)}
 							{@const candidate = fissionCandidateByIndex.get(index)!}
 							{@const lanthanum = isLanthanum140(isotope)}
-							{@const reviewed = candidate.choice !== null}
+							{@const effectiveSpecial =
+								lanthanum &&
+								(candidate.choice
+									? candidate.choice.useSpecialCorrection !== false
+									: (fissionDraftUseSpecial[index] ?? true))}
+							{@const reviewed = isFissionCandidateReviewed(candidate)}
 							{@const editing = fissionReviewEditing[index] ?? false}
 							<div
 								id={fissionAnchorId(index)}
@@ -3676,7 +3722,7 @@
 									<!-- Reviewed: settled, no warning styling — this is the "auto-dismiss" state. -->
 									<p class="text-sm">
 										<strong>Fission correction</strong>
-										{@render fissionModeBadge(lanthanum)}
+										{@render fissionModeBadge(effectiveSpecial)}
 										— {describeFissionChoice(candidate.choice!)}
 										<button
 											type="button"
@@ -3689,7 +3735,7 @@
 								{:else}
 									<p class="font-bold">
 										⚠ Possible fission interference
-										{@render fissionModeBadge(lanthanum)}
+										{@render fissionModeBadge(effectiveSpecial)}
 										{#if editing}
 											<button
 												type="button"
@@ -3732,16 +3778,47 @@
 											</button>
 										</div>
 									{:else}
+										{@const useSpecial = fissionDraftUseSpecial[index] ?? true}
 										<p class="text-sm">
 											{getIsotopeDisplayName(isotope, index)} is also produced by the in-pile fission
 											of uranium. Part of its signal comes from fission of the uranium in your sample
 											and must be subtracted. Choose a correction factor, or set it to 0 if this does
 											not apply.
-											{#if lanthanum}
-												Because it's La-140, the factor isn't a flat number — it's computed per
-												sample from the Ba-140 → La-140 in-growth below.
-											{/if}
 										</p>
+
+										{#if lanthanum}
+											<fieldset class="space-y-1 text-sm">
+												<legend class="font-semibold">Correction type</legend>
+												<label class="flex items-start gap-2">
+													<input
+														type="radio"
+														name="fission-mode-{index}"
+														class="mt-1"
+														checked={useSpecial}
+														onchange={() => (fissionDraftUseSpecial[index] = true)}
+													/>
+													<span>
+														<strong>Special — Ba-140 in-growth</strong> (recommended). La-140 from fission
+														grows in from its precursor Ba-140, so the factor is computed per sample rather
+														than used as a flat number — needs the Ba-140 half-life below.
+													</span>
+												</label>
+												<label class="flex items-start gap-2">
+													<input
+														type="radio"
+														name="fission-mode-{index}"
+														class="mt-1"
+														checked={!useSpecial}
+														onchange={() => (fissionDraftUseSpecial[index] = false)}
+													/>
+													<span>
+														<strong>Standard — flat factor.</strong> Use the entered factor as-is, like
+														any other isotope. Only accurate if you don't have (or don't want to account
+														for) the Ba-140 in-growth.
+													</span>
+												</label>
+											</fieldset>
+										{/if}
 
 										{#if candidate.choice}
 											<p class="text-sm">
@@ -3827,7 +3904,7 @@
 											</button>
 										</div>
 
-										{#if lanthanum}
+										{#if lanthanum && useSpecial}
 											<div class="mt-2 space-y-1 rounded border border-surface-300-700 p-2">
 												<p class="text-sm font-semibold">Ba-140 half-life (La-140 precursor)</p>
 												<p class="text-xs">

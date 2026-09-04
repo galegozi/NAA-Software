@@ -37,6 +37,13 @@ export type FissionChoice = {
 	irradiationType?: IrradiationType;
 	/** Catalog row id the factor came from, when available. */
 	sourceRowId?: string;
+	/**
+	 * La-140 only: whether to use the special Ba-140 → La-140 in-growth
+	 * correction (`true`, the default when unset) instead of treating `factor`
+	 * as a plain flat number like every other isotope. Ignored for anything
+	 * that isn't La-140.
+	 */
+	useSpecialCorrection?: boolean;
 };
 
 /**

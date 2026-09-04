@@ -231,6 +231,20 @@ describe('computeFissionResults', () => {
 		expect(result?.note).toMatch(/irradiation time/i);
 	});
 
+	it('falls back to a flat factor when useSpecialCorrection is false — no Ba-140 half-life needed', () => {
+		const result = computeFissionResults(
+			lanthanumContext({
+				candidates: [{ index: 0, choice: { ...lanthanumChoice, useSpecialCorrection: false } }],
+				bariumDecayConstant: null // would block the special path, but it's opted out
+			})
+		).get('0:0');
+		expect(result?.applied).toBe(true);
+		expect(result?.isLanthanum).toBe(false);
+		expect(result?.needsBariumHalfLife).toBe(false);
+		expect(result?.f).toBe(lanthanumChoice.factor);
+		expect(result?.fStandard).toBe(lanthanumChoice.factor);
+	});
+
 	it('prompts (needsFissileInput) when the reference has no known fissile concentration', () => {
 		const result = computeFissionResults(
 			baseContext({
