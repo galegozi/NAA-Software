@@ -2033,21 +2033,30 @@
 	/**
 	 * Should reference material `referenceIndex` show the hand-entered
 	 * "uranium in this reference material" box for fission target `isotopeIndex`?
-	 * Shown on every reference material that covers the isotope — not just the one
-	 * it's currently linked to — so it always appears on the reference the user
-	 * thinks of as "the one for this isotope", even before they've resolved an
-	 * ambiguous assignment. Falls back to the linked reference when nothing
-	 * explicitly covers the isotope yet.
+	 *
+	 * When exactly one reference material both covers the isotope *and* has a
+	 * certified value or counts for it, the box lives only there. Otherwise the
+	 * box is shown on *every* reference material (all bound to the one value) so
+	 * it can never go missing when coverage is ambiguous, unset, or a catalog
+	 * reference's match set just doesn't list the isotope; the note beside it
+	 * explains how to narrow it down.
 	 */
+	function fissionReferenceOwnersForIsotope(isotopeIndex: number): number[] {
+		return materials.reference
+			.map((ref, i) =>
+				referenceCoversIsotope(i, isotopeIndex) || (ref.counts?.[isotopeIndex]?.netCounts ?? 0) > 0
+					? i
+					: -1
+			)
+			.filter((i) => i >= 0);
+	}
+
 	function fissionStandardEntryShowsOnReference(
 		isotopeIndex: number,
 		referenceIndex: number
 	): boolean {
-		const covering = getCoveringReferenceIndicesForIsotope(isotopeIndex);
-		if (covering.length === 0) {
-			return getLinkedReferenceIndex(isotopeIndex) === referenceIndex;
-		}
-		return covering.includes(referenceIndex);
+		const owners = fissionReferenceOwnersForIsotope(isotopeIndex);
+		return owners.length === 1 ? owners[0] === referenceIndex : true;
 	}
 
 	$effect(() => {
@@ -2079,6 +2088,23 @@
 
 			if (coveringRefs.length > 0) {
 				return coveringRefs[0];
+			}
+
+			// Nothing "covers" it by the checkbox rules — fall back to a reference
+			// that clearly still has data for this isotope (a certified value, or
+			// counts), so e.g. a fission target whose reference wasn't explicitly
+			// ticked still lines up with the standard that actually measured it.
+			const withConcentration = materials.reference.findIndex(
+				(ref) => (ref.knownConcentration?.[index] ?? 0) > 0
+			);
+			if (withConcentration >= 0) {
+				return withConcentration;
+			}
+			const withCounts = materials.reference.findIndex(
+				(ref) => (ref.counts?.[index]?.netCounts ?? 0) > 0
+			);
+			if (withCounts >= 0) {
+				return withCounts;
 			}
 
 			const fallback = isotopeInfo[index]?.linkedReference ?? 0;
@@ -2182,7 +2208,11 @@
 	 * rather than the fields only appearing once everything else is filled in.
 	 */
 	let fissionUraniumEntryTargets = $derived(
-		hasUraniumAnalyzed ? [] : fissionCandidates.filter((c) => c.choice && c.choice.factor > 0)
+		hasUraniumAnalyzed
+			? []
+			: fissionCandidates.filter(
+					(c) => c.choice && c.choice.mode !== 'none' && Number(c.choice.factor) > 0
+				)
 	);
 
 	/** The unit the target isotope's own concentration is reported in (from its linked reference). */
@@ -4283,7 +4313,8 @@
 									unit === 'ppm' ? 'µg/g' : unit === 'percentage' ? '%' : (unit ?? '')}
 								{#if entry}
 									{@const ambiguousReference =
-										getCoveringReferenceIndicesForIsotope(candidate.index).length > 1}
+										materials.reference.length > 1 &&
+										fissionReferenceOwnersForIsotope(candidate.index).length !== 1}
 									<div
 										class="mt-3 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3"
 									>

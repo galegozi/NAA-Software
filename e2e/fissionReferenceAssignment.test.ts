@@ -51,6 +51,8 @@ test('every reference material covering a fission isotope shows its uranium box'
 		.click();
 
 	// --- Step 2: two reference materials, coverage not set yet --------------
+	// REF-La is counted for lanthanum only, REF-Ce for cerium only (each card
+	// filled fully before the next is added so the nth() locators stay simple).
 	await page.getByRole('button', { name: '+ Add custom reference material' }).click();
 	await fillMaterial(page, { netl: 'REF-La', sample: 'La standard' });
 	await setCounts(page, 0, 1000);
@@ -59,26 +61,27 @@ test('every reference material covering a fission isotope shows its uranium box'
 
 	await page.getByRole('button', { name: '+ Add custom reference material' }).click();
 	await fillMaterial(page, { netl: 'REF-Ce', sample: 'Ce standard' });
-	await setCounts(page, 1, 1000);
-	await page.getByLabel('Known Concentration').nth(1).fill('4');
-	await page.getByLabel('Reference Material Concentration Units').nth(1).selectOption('ppm');
+	// REF-Ce is the second card: its Cerium counting is the 4th count block.
+	await setCounts(page, 3, 1000);
+	await page.getByLabel('Known Concentration').nth(3).fill('4');
+	await page.getByLabel('Reference Material Concentration Units').nth(3).selectOption('ppm');
 
 	const laBox = page.getByText(
 		'Uranium concentration — needed for the Lanthanum fission correction'
 	);
 	const ceBox = page.getByText('Uranium concentration — needed for the Cerium fission correction');
 
-	// Both isotopes are still covered by both reference materials, so each box
-	// shows on both cards (not just one) and carries the "narrow the coverage"
-	// note. String matching (not regex) so Playwright normalizes the template's
-	// line-wraps.
+	// Neither reference material's coverage is set, so both still own both
+	// isotopes — each box shows on both cards (not just one) with the "narrow
+	// the coverage" note. String matching (not regex) so Playwright normalizes
+	// the template's line-wraps.
 	await expect(laBox).toHaveCount(2);
 	await expect(ceBox).toHaveCount(2);
 	await expect(
 		page.getByText('More than one reference material covers this isotope').first()
 	).toBeVisible();
 
-	// Set each reference material's coverage to its one isotope.
+	// Point each reference material at its one isotope by ticking its coverage.
 	await page.getByRole('checkbox', { name: 'Lanthanum' }).first().check();
 	await page.getByRole('checkbox', { name: 'Cerium' }).nth(1).check();
 
