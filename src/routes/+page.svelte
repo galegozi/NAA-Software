@@ -2030,6 +2030,26 @@
 		return selection.has(getIsotopeSelectionKey(isotopeIndex));
 	}
 
+	/**
+	 * Should reference material `referenceIndex` show the hand-entered
+	 * "uranium in this reference material" box for fission target `isotopeIndex`?
+	 * Shown on every reference material that covers the isotope — not just the one
+	 * it's currently linked to — so it always appears on the reference the user
+	 * thinks of as "the one for this isotope", even before they've resolved an
+	 * ambiguous assignment. Falls back to the linked reference when nothing
+	 * explicitly covers the isotope yet.
+	 */
+	function fissionStandardEntryShowsOnReference(
+		isotopeIndex: number,
+		referenceIndex: number
+	): boolean {
+		const covering = getCoveringReferenceIndicesForIsotope(isotopeIndex);
+		if (covering.length === 0) {
+			return getLinkedReferenceIndex(isotopeIndex) === referenceIndex;
+		}
+		return covering.includes(referenceIndex);
+	}
+
 	$effect(() => {
 		const currentMap = isotopeReferenceMap ?? [];
 		const nextMap = Array.from({ length: isotopeCount }, (_, index) => {
@@ -4256,14 +4276,14 @@
 							bind:this={matRefs.reference[index]}
 						/>
 						{#if !hasUraniumAnalyzed}
-							{#each fissionUraniumEntryTargets.filter((candidate) => getLinkedReferenceIndex(candidate.index) === index) as candidate (candidate.index)}
+							{#each fissionUraniumEntryTargets.filter( (candidate) => fissionStandardEntryShowsOnReference(candidate.index, index) ) as candidate (candidate.index)}
 								{@const entry = fissionManualEntryFor(candidate.index)}
 								{@const unit = fissionTargetUnit(candidate.index)}
 								{@const unitLabel =
 									unit === 'ppm' ? 'µg/g' : unit === 'percentage' ? '%' : (unit ?? '')}
 								{#if entry}
 									{@const ambiguousReference =
-										getCoveringReferenceIndicesForIsotope(candidate.index).length !== 1}
+										getCoveringReferenceIndicesForIsotope(candidate.index).length > 1}
 									<div
 										class="mt-3 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3"
 									>
@@ -4274,10 +4294,9 @@
 										</p>
 										{#if ambiguousReference}
 											<p class="text-xs">
-												With more than one reference material, this isotope isn't uniquely assigned
-												to this one yet — check its row under
-												<strong>Isotope assignment</strong> below so this value lands on the reference
-												it's actually being compared against.
+												More than one reference material covers this isotope, so the same value
+												shows on each — set the isotope's coverage with the checkboxes above, or its
+												<strong>Isotope assignment</strong> row below, so it's compared against just one.
 											</p>
 										{/if}
 										<label class="label text-sm">

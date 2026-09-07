@@ -1,15 +1,16 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * Two separate reference materials, each covering a different fission
- * candidate isotope (La-140 and Ce-141), with neither uranium analysed. Both
- * reference materials get their own "Uranium concentration" box — this
- * regression-tests the earlier bug where only one of them showed it — and
- * while the isotope→reference assignment is still ambiguous (more than one
- * reference covers a given isotope) each box carries a note pointing at the
- * "Isotope assignment" panel. Resolving the assignment there clears the note.
+ * Two separate reference materials, one meant for La-140 and one for Ce-141,
+ * with uranium not analysed. Regression test for the report that only one of
+ * the two reference materials showed its "Uranium concentration" box:
+ *
+ *  - while both reference materials still cover both isotopes, each isotope's
+ *    box shows on *both* cards (with a note to narrow the coverage), and
+ *  - once each reference material's coverage is set to its one isotope, that
+ *    isotope's box shows on exactly that card.
  */
-test('each reference material gets its own uranium box, with an ambiguity note until assigned', async ({
+test('every reference material covering a fission isotope shows its uranium box', async ({
 	page
 }) => {
 	const pageErrors: string[] = [];
@@ -19,8 +20,7 @@ test('each reference material gets its own uranium box, with an ambiguity note u
 	await page.getByRole('button', { name: 'Get Started' }).click();
 
 	// La-140 (idx 0) + Ce-141 (idx 1) — both known fission products, uranium
-	// not analysed. Use the standard (flat-factor) correction for both so
-	// neither needs a Ba-140 half-life.
+	// not analysed. Standard (flat-factor) correction for both.
 	await page.getByRole('button', { name: 'Add custom isotope' }).click();
 	await page.getByLabel('Element Name').nth(0).fill('Lanthanum');
 	await page.getByLabel('Isotope', { exact: true }).nth(0).fill('La-140');
@@ -34,23 +34,23 @@ test('each reference material gets its own uranium box, with an ambiguity note u
 	await page.getByLabel('Energy (in KeV)').nth(1).fill('145');
 	await page.getByLabel('Half Life', { exact: true }).nth(1).fill('3000');
 
-	const lanthanumPanel = page.locator('#fission-correction-0');
-	await lanthanumPanel.getByText('Standard — flat factor.').click();
-	await lanthanumPanel.locator('select').filter({ hasText: 'U-235' }).selectOption('U-235');
-	await lanthanumPanel.getByLabel('Correction factor').fill('0.00233');
-	await lanthanumPanel.getByRole('button', { name: 'Apply factor' }).click();
+	const laPanel = page.locator('#fission-correction-0');
+	await laPanel.getByText('Standard — flat factor.').click();
+	await laPanel.locator('select').filter({ hasText: 'U-235' }).selectOption('U-235');
+	await laPanel.getByLabel('Correction factor').fill('0.00233');
+	await laPanel.getByRole('button', { name: 'Apply factor' }).click();
 
-	const ceriumPanel = page.locator('#fission-correction-1');
-	await ceriumPanel.locator('select').filter({ hasText: 'U-235' }).selectOption('U-235');
-	await ceriumPanel.getByLabel('Correction factor').fill('0.08');
-	await ceriumPanel.getByRole('button', { name: 'Apply factor' }).click();
+	const cePanel = page.locator('#fission-correction-1');
+	await cePanel.locator('select').filter({ hasText: 'U-235' }).selectOption('U-235');
+	await cePanel.getByLabel('Correction factor').fill('0.08');
+	await cePanel.getByRole('button', { name: 'Apply factor' }).click();
 
 	await page
 		.getByRole('button', { name: /^Next:/ })
 		.first()
 		.click();
 
-	// --- Step 2: two reference materials, neither isotope assigned yet -------
+	// --- Step 2: two reference materials, coverage not set yet --------------
 	await page.getByRole('button', { name: '+ Add custom reference material' }).click();
 	await fillMaterial(page, { netl: 'REF-La', sample: 'La standard' });
 	await setCounts(page, 0, 1000);
@@ -63,41 +63,47 @@ test('each reference material gets its own uranium box, with an ambiguity note u
 	await page.getByLabel('Known Concentration').nth(1).fill('4');
 	await page.getByLabel('Reference Material Concentration Units').nth(1).selectOption('ppm');
 
-	// Both reference materials show their own uranium box — the original bug
-	// report was that only one of the two did. String matching (not regex) —
-	// Playwright normalizes whitespace across the template's line-wraps; a
-	// regex would not.
+	const laBox = page.getByText(
+		'Uranium concentration — needed for the Lanthanum fission correction'
+	);
+	const ceBox = page.getByText('Uranium concentration — needed for the Cerium fission correction');
+
+	// Both isotopes are still covered by both reference materials, so each box
+	// shows on both cards (not just one) and carries the "narrow the coverage"
+	// note. String matching (not regex) so Playwright normalizes the template's
+	// line-wraps.
+	await expect(laBox).toHaveCount(2);
+	await expect(ceBox).toHaveCount(2);
 	await expect(
-		page.getByText('Uranium concentration — needed for the Lanthanum fission correction')
-	).toBeVisible();
-	await expect(
-		page.getByText('Uranium concentration — needed for the Cerium fission correction')
+		page.getByText('More than one reference material covers this isotope').first()
 	).toBeVisible();
 
-	// Neither reference material's isotope coverage is explicit yet, so each
-	// isotope is still covered by both — the ambiguity note points at the
-	// "Isotope assignment" panel to resolve it.
-	await expect(page.getByText("this isotope isn't uniquely assigned").first()).toBeVisible();
-	await expect(page.getByRole('heading', { name: 'Isotope assignment' })).toBeVisible();
-
-	// Checking the isotope each material actually covers resolves the
-	// assignment — the other checkbox becomes disabled (already claimed
-	// elsewhere), and the ambiguity note goes away.
+	// Set each reference material's coverage to its one isotope.
 	await page.getByRole('checkbox', { name: 'Lanthanum' }).first().check();
 	await page.getByRole('checkbox', { name: 'Cerium' }).nth(1).check();
-	await expect(page.getByText("this isotope isn't uniquely assigned")).toHaveCount(0);
-	await expect(page.getByRole('heading', { name: 'Isotope assignment' })).toHaveCount(0);
 
-	// Both boxes are still there, still independently addressable.
-	await expect(
-		page.getByText('Uranium concentration — needed for the Lanthanum fission correction')
-	).toBeVisible();
-	await expect(
-		page.getByText('Uranium concentration — needed for the Cerium fission correction')
-	).toBeVisible();
+	// Now each box shows exactly once, on the right card, and the note is gone.
+	await expect(laBox).toHaveCount(1);
+	await expect(ceBox).toHaveCount(1);
+	await expect(page.getByText('More than one reference material covers this isotope')).toHaveCount(
+		0
+	);
+	await expect(refCard(page, 'REF-La')).toContainText(
+		'Uranium concentration — needed for the Lanthanum fission correction'
+	);
+	await expect(refCard(page, 'REF-Ce')).toContainText(
+		'Uranium concentration — needed for the Cerium fission correction'
+	);
 
 	expect(pageErrors).toEqual([]);
 });
+
+function refCard(page: import('@playwright/test').Page, netl: string) {
+	return page
+		.locator('div.scroll-mt-24')
+		.filter({ has: page.locator('strong').filter({ hasText: new RegExp(`^${netl}$`) }) })
+		.last();
+}
 
 async function fillMaterial(
 	page: import('@playwright/test').Page,
