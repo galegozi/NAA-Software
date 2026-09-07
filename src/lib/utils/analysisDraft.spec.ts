@@ -37,6 +37,7 @@ function makeDraft(overrides: Partial<AnalysisDraft> = {}): AnalysisDraft {
 		],
 		materials: { reference: [], unknown: [] },
 		referenceIsotopeSelections: [['isotope:0']],
+		unknownIsotopeSelections: [],
 		isotopeReferenceMap: [0],
 		referenceCatalogItemIds: [null],
 		expandedIsotopes: [0],

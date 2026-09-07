@@ -44,6 +44,8 @@ export type AnalysisDraft = {
 		unknown: UnknownMaterial[];
 	};
 	referenceIsotopeSelections: string[][];
+	/** Which isotopes each unknown was measured for; empty per-unknown means "all". */
+	unknownIsotopeSelections: string[][];
 	isotopeReferenceMap: number[];
 	referenceCatalogItemIds: (string | null)[];
 	expandedIsotopes: number[];
@@ -129,6 +131,9 @@ function parseDraft(raw: string | null, expectedVersion: number): AnalysisDraft 
 			},
 			referenceIsotopeSelections: Array.isArray(parsed.referenceIsotopeSelections)
 				? parsed.referenceIsotopeSelections
+				: [],
+			unknownIsotopeSelections: Array.isArray(parsed.unknownIsotopeSelections)
+				? parsed.unknownIsotopeSelections
 				: [],
 			isotopeReferenceMap: Array.isArray(parsed.isotopeReferenceMap)
 				? parsed.isotopeReferenceMap

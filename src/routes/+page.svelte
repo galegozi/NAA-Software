@@ -312,6 +312,9 @@
 			referenceIsotopeSelections: referenceIsotopeSelections.map((selection) =>
 				Array.from(selection ?? [])
 			),
+			unknownIsotopeSelections: unknownIsotopeSelections.map((selection) =>
+				Array.from(selection ?? [])
+			),
 			isotopeReferenceMap,
 			referenceCatalogItemIds,
 			expandedIsotopes: Array.from(expandedIsotopes),
@@ -384,6 +387,10 @@
 			const selection = saved.referenceIsotopeSelections?.[index];
 			return new Set<string>(Array.isArray(selection) ? selection : []);
 		});
+		unknownIsotopeSelections = materials.unknown.map((_, index) => {
+			const selection = saved.unknownIsotopeSelections?.[index];
+			return new Set<string>(Array.isArray(selection) ? selection : []);
+		});
 		referenceCatalogItemIds = materials.reference.map(
 			(_, index) => saved.referenceCatalogItemIds?.[index] ?? null
 		);
@@ -421,6 +428,7 @@
 		materials = { reference: [], unknown: [] };
 		matRefs = { reference: [], unknown: [] };
 		referenceIsotopeSelections = [];
+		unknownIsotopeSelections = [];
 		referenceCatalogItemIds = [];
 		catalogReferenceSources.clear();
 		isotopeReferenceMap = [];
@@ -1627,6 +1635,13 @@
 		unknown: [] as (MaterialInfo | undefined)[]
 	});
 	let referenceIsotopeSelections = $state<Set<string>[]>([]);
+	/**
+	 * Which isotopes each unknown was actually measured for — empty means "all"
+	 * (the historical default, so existing drafts are unaffected). Lets an
+	 * unknown skip an isotope it wasn't counted for instead of forcing 1:1
+	 * coverage across every unknown.
+	 */
+	let unknownIsotopeSelections = $state<Set<string>[]>([]);
 	let referenceCatalogItemIds = $state<(string | null)[]>([]);
 	/**
 	 * The catalog item + counting each catalog-sourced reference was built from,
@@ -2001,6 +2016,20 @@
 		);
 	}
 
+	/**
+	 * Was isotope `isotopeIndex` actually measured on unknown `unknownIndex`?
+	 * An unknown with no explicit isotope selection covers every isotope (the
+	 * historical default, so untouched unknowns are unaffected) — matches
+	 * `materialInfo.svelte`'s own "empty selection = all shown" semantics.
+	 */
+	function unknownCoversIsotope(unknownIndex: number, isotopeIndex: number): boolean {
+		const selection = unknownIsotopeSelections[unknownIndex];
+		if (!(selection instanceof Set) || selection.size === 0) {
+			return true;
+		}
+		return selection.has(getIsotopeSelectionKey(isotopeIndex));
+	}
+
 	$effect(() => {
 		const currentMap = isotopeReferenceMap ?? [];
 		const nextMap = Array.from({ length: isotopeCount }, (_, index) => {
@@ -2055,13 +2084,20 @@
 		}
 	});
 
+	/**
+	 * `undefined` at [isotopeIndex][unknownIndex] means that unknown wasn't
+	 * measured for that isotope (see `unknownCoversIsotope`) — not every
+	 * unknown has to cover every isotope.
+	 */
 	let everythingComp = $derived(
 		materials.reference.length === 0
-			? isotopeInfo.map(() => [] as ReturnType<typeof EGA>[])
+			? isotopeInfo.map(() => [] as (ReturnType<typeof EGA> | undefined)[])
 			: mathIsotopeInfo.map((iso, index) => {
 					const referenceIndex = getLinkedReferenceIndex(index);
 					const reference = materials.reference[referenceIndex] ?? materials.reference[0];
-					return materials.unknown.map((unk) => EGA(reference, unk, iso, index));
+					return materials.unknown.map((unk, unknownIndex) =>
+						unknownCoversIsotope(unknownIndex, index) ? EGA(reference, unk, iso, index) : undefined
+					);
 				})
 	);
 
@@ -2800,23 +2836,26 @@
 			}))
 		};
 
-		referenceIsotopeSelections = referenceIsotopeSelections.map((selection) => {
-			const next = new Set<string>();
-			if (selection instanceof Set) {
-				for (const key of selection) {
-					const index = Number(key.slice('isotope:'.length));
-					if (Number.isNaN(index)) {
-						continue;
-					}
-					if (index < isotopeIndex) {
-						next.add(key);
-					} else if (index > isotopeIndex) {
-						next.add(getIsotopeSelectionKey(index - 1));
+		const reindexSelections = (selections: Set<string>[]) =>
+			selections.map((selection) => {
+				const next = new Set<string>();
+				if (selection instanceof Set) {
+					for (const key of selection) {
+						const index = Number(key.slice('isotope:'.length));
+						if (Number.isNaN(index)) {
+							continue;
+						}
+						if (index < isotopeIndex) {
+							next.add(key);
+						} else if (index > isotopeIndex) {
+							next.add(getIsotopeSelectionKey(index - 1));
+						}
 					}
 				}
-			}
-			return next;
-		});
+				return next;
+			});
+		referenceIsotopeSelections = reindexSelections(referenceIsotopeSelections);
+		unknownIsotopeSelections = reindexSelections(unknownIsotopeSelections);
 
 		remapExpandedAfterRemoval(expandedIsotopes, isotopeIndex);
 		updateIsotopeReferenceMap(isotopeInfo.length, materials.reference.length);
@@ -2895,6 +2934,7 @@
 			unknown: [...materials.unknown, createUnknownMaterial(isotopeCount)]
 		};
 		matRefs.unknown = [...matRefs.unknown, undefined];
+		unknownIsotopeSelections = [...unknownIsotopeSelections, new Set<string>()];
 		expandedUnknowns.add(materials.unknown.length - 1);
 	}
 
@@ -2908,6 +2948,9 @@
 			unknown: materials.unknown.filter((_, index) => index !== unknownIndex)
 		};
 		matRefs.unknown = matRefs.unknown.filter((_, index) => index !== unknownIndex);
+		unknownIsotopeSelections = unknownIsotopeSelections.filter(
+			(_, index) => index !== unknownIndex
+		);
 		remapExpandedAfterRemoval(expandedUnknowns, unknownIndex);
 	}
 
@@ -3226,6 +3269,9 @@
 				escapeCSV(unknownLabel),
 				...isotopeInfo.flatMap((_, iIndex) => {
 					const comp = everythingComp[iIndex][uIndex];
+					if (!comp) {
+						return ['', ''];
+					}
 					const fission = fissionResults.get(`${iIndex}:${uIndex}`);
 					const applied = Boolean(fission && fission.applied);
 					const shown = applied ? fission!.corrected : comp.unknownConcentration;
@@ -3239,10 +3285,10 @@
 
 			const detectionLimitRow = [
 				escapeCSV(`${unknownLabel} Conc Det Lim`),
-				...isotopeInfo.flatMap((_, iIndex) => [
-					escapeCSV(roundResult(everythingComp[iIndex][uIndex].concentrationDetectionLimit)),
-					escapeCSV('')
-				])
+				...isotopeInfo.flatMap((_, iIndex) => {
+					const comp = everythingComp[iIndex][uIndex];
+					return [comp ? escapeCSV(roundResult(comp.concentrationDetectionLimit)) : '', ''];
+				})
 			];
 			csvRows.push(detectionLimitRow.join(','));
 		});
@@ -4216,6 +4262,8 @@
 								{@const unitLabel =
 									unit === 'ppm' ? 'µg/g' : unit === 'percentage' ? '%' : (unit ?? '')}
 								{#if entry}
+									{@const ambiguousReference =
+										getCoveringReferenceIndicesForIsotope(candidate.index).length !== 1}
 									<div
 										class="mt-3 space-y-1 rounded border border-warning-500 preset-tonal-warning p-3"
 									>
@@ -4224,6 +4272,14 @@
 											{getResultColumnName(isotopeInfo[candidate.index], candidate.index)} fission correction,
 											since uranium isn't one of the isotopes you're analysing.
 										</p>
+										{#if ambiguousReference}
+											<p class="text-xs">
+												With more than one reference material, this isotope isn't uniquely assigned
+												to this one yet — check its row under
+												<strong>Isotope assignment</strong> below so this value lands on the reference
+												it's actually being compared against.
+											</p>
+										{/if}
 										<label class="label text-sm">
 											<span class="block font-semibold"
 												>Uranium in this reference material ({unitLabel})</span
@@ -4576,9 +4632,11 @@
 							getRoiIndex={getRoiIndexFn}
 							bind:this={matRefs.unknown[index]}
 							bind:materialInfo={materials.unknown[index]}
+							canEditToggles={true}
+							bind:selected={unknownIsotopeSelections[index]}
 						/>
 						{#if !hasUraniumAnalyzed}
-							{#each fissionUraniumEntryTargets as candidate (candidate.index)}
+							{#each fissionUraniumEntryTargets.filter( (candidate) => unknownCoversIsotope(index, candidate.index) ) as candidate (candidate.index)}
 								{@const entry = fissionManualEntryFor(candidate.index)}
 								{@const unit = fissionTargetUnit(candidate.index)}
 								{@const unitLabel =
@@ -4804,17 +4862,23 @@
 							</td>
 							{#each isotopeInfo as _, iIndex}
 								{@const comp = everythingComp[iIndex][uIndex]}
-								{@const fission = fissionResults.get(`${iIndex}:${uIndex}`)}
-								{@const applied = Boolean(fission && fission.applied)}
-								{@const shown = applied ? fission!.corrected : comp.unknownConcentration}
-								{@const shownUnc = applied
-									? fission!.correctedUncertaintyAbsolute
-									: comp.unknownConcentrationUncertaintyAbsolute}
-								<td class="border border-surface-300-700 px-4 py-2 text-center">
-									{roundResult(shown)}{#if applied}<sup title="Fission-interference corrected"
-											>†</sup
-										>{/if} ± {roundToMatch(shownUnc, shown)}
-								</td>
+								{#if !comp}
+									<td class="border border-surface-300-700 px-4 py-2 text-center text-surface-500"
+										>— not measured</td
+									>
+								{:else}
+									{@const fission = fissionResults.get(`${iIndex}:${uIndex}`)}
+									{@const applied = Boolean(fission && fission.applied)}
+									{@const shown = applied ? fission!.corrected : comp.unknownConcentration}
+									{@const shownUnc = applied
+										? fission!.correctedUncertaintyAbsolute
+										: comp.unknownConcentrationUncertaintyAbsolute}
+									<td class="border border-surface-300-700 px-4 py-2 text-center">
+										{roundResult(shown)}{#if applied}<sup title="Fission-interference corrected"
+												>†</sup
+											>{/if} ± {roundToMatch(shownUnc, shown)}
+									</td>
+								{/if}
 							{/each}
 						</tr>
 						<tr>
@@ -4822,8 +4886,9 @@
 								{unknownLabel} Conc Det Lim
 							</td>
 							{#each isotopeInfo as _, iIndex}
+								{@const comp = everythingComp[iIndex][uIndex]}
 								<td class="border border-surface-300-700 px-4 py-2 text-center">
-									{roundResult(everythingComp[iIndex][uIndex].concentrationDetectionLimit)}
+									{comp ? roundResult(comp.concentrationDetectionLimit) : '—'}
 								</td>
 							{/each}
 						</tr>
@@ -4937,10 +5002,14 @@
 										{#each isotopeInfo as _, iIndex}
 											{@const comp = everythingComp[iIndex][uIndex]}
 											<td class="border border-surface-300-700 px-4 py-2 text-center">
-												{roundResult(comp.unknownConcentration)} ± {roundToMatch(
-													comp.unknownConcentrationUncertaintyAbsolute,
-													comp.unknownConcentration
-												)}
+												{#if comp}
+													{roundResult(comp.unknownConcentration)} ± {roundToMatch(
+														comp.unknownConcentrationUncertaintyAbsolute,
+														comp.unknownConcentration
+													)}
+												{:else}
+													<span class="text-surface-500">— not measured</span>
+												{/if}
 											</td>
 										{/each}
 									</tr>

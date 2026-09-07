@@ -349,6 +349,88 @@ test('Ba-140 half-life pre-fills from an analysed Ba-140 isotope', async ({ page
 	expect(pageErrors).toEqual([]);
 });
 
+/**
+ * La-140 (special correction) with uranium NOT analysed: the Ba-140 half-life
+ * and the uranium concentration are both hand-typed (half-life on the isotope
+ * panel, uranium concentration on the reference material and unknown) — the
+ * same "type it in" path as any other isotope, feeding the same standard
+ * equation with the per-sample f_S / f_U factors.
+ */
+test('La-140 correction applies from hand-typed uranium concentrations when uranium is not analysed', async ({
+	page
+}) => {
+	const pageErrors: string[] = [];
+	page.on('pageerror', (e) => pageErrors.push(e.message));
+
+	await page.goto('/');
+	await page.getByRole('button', { name: 'Get Started' }).click();
+
+	await page.getByRole('button', { name: 'Add custom isotope' }).click();
+	await page.getByLabel('Element Name').fill('Lanthanum');
+	await page.getByLabel('Isotope', { exact: true }).fill('La-140');
+	await page.getByLabel('Energy (in KeV)').fill('1596');
+	await page.getByLabel('Half Life', { exact: true }).fill('1.678');
+	await page.getByLabel('Half Life Unit').selectOption('days');
+
+	await page.locator('select').filter({ hasText: 'U-235' }).first().selectOption('U-235');
+	await page.getByLabel('Correction factor').fill('0.00233');
+	await page.getByRole('button', { name: 'Apply factor' }).click();
+	// Not reviewed yet (Ba-140 half-life still missing) — the panel stays open.
+	await expect(page.getByRole('button', { name: 'Change' })).toHaveCount(0);
+	await page.getByLabel('Half-life', { exact: true }).fill('12.75');
+
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
+
+	// The uranium prompt is offered right on the reference material, same as
+	// for any other target isotope.
+	await page.getByRole('button', { name: '+ Add custom reference material' }).click();
+	await expect(page.getByLabel(/Uranium in this reference material/)).toBeVisible();
+	await fillMaterial(page, { netl: 'REF-A', sample: 'Standard A' });
+	await setCounts(page, 0, 1000);
+	await page.getByLabel('Known Concentration').fill('4');
+	await page.getByLabel('Reference Material Concentration Units').selectOption('ppm');
+	await page.getByLabel(/Uranium in this reference material/).fill('5');
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
+
+	await page.getByRole('button', { name: 'Add unknown material' }).click();
+	await expect(page.getByText(/Uranium concentration/).first()).toBeVisible();
+	await fillMaterial(page, { netl: 'UNK-1', sample: 'Unknown 1' });
+	await setCounts(page, 0, 1250);
+	await page.getByLabel(/Uranium in this unknown/).fill('30');
+	await page
+		.getByRole('button', { name: /^Next:/ })
+		.first()
+		.click();
+
+	// Review: applied, using the special (per-sample) factor with the
+	// hand-typed concentrations — not scaled wrong (the concentrations must
+	// read back as 5 and 30, not some unit-conversion artefact).
+	await expect(page.getByRole('heading', { name: 'Step 4: Review' })).toBeVisible();
+	await expect(page.getByText(/Ba-140 half-life required/i)).toHaveCount(0);
+	await expect(page.getByText(/concentration needed/i)).toHaveCount(0);
+	await expect(
+		page.getByText('Fission-interference corrections applied to 1 result')
+	).toBeVisible();
+
+	const breakdown = page.locator('table', {
+		has: page.getByRole('columnheader', { name: 'Corrected' })
+	});
+	const breakdownRow = breakdown.getByRole('row').filter({ hasText: 'Lanthanum' });
+	await expect(breakdownRow).toContainText('Special correction — Ba-140 in-growth');
+	await expect(breakdownRow).toContainText('5'); // C_fissile^S
+	await expect(breakdownRow).toContainText('30'); // C_fissile^U
+	await expect(breakdownRow).not.toContainText('5000000');
+	await expect(breakdownRow).not.toContainText('30000000');
+
+	expect(pageErrors).toEqual([]);
+});
+
 async function fillMaterial(
 	page: import('@playwright/test').Page,
 	{ netl, sample }: { netl: string; sample: string }

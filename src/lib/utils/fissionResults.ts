@@ -82,8 +82,12 @@ export type FissionResultsContext = {
 	isotopeInfo: IsotopeInfo[];
 	references: ReferenceMaterial[];
 	unknowns: UnknownMaterial[];
-	/** `everythingComp[isotopeIndex][unknownIndex]`. */
-	everythingComp: EverythingComputed[][];
+	/**
+	 * `everythingComp[isotopeIndex][unknownIndex]`; `undefined` when that
+	 * unknown wasn't measured for that isotope (correction skipped for it, same
+	 * as any other unresolvable input).
+	 */
+	everythingComp: (EverythingComputed | undefined)[][];
 	/** Reference index linked to an isotope (must return a valid index). */
 	linkedReferenceIndex: (isotopeIndex: number) => number;
 	/** Hand-entered fissile concentrations (fallback when the element isn't analysed). */
@@ -178,8 +182,11 @@ export function computeFissionResults(ctx: FissionResultsContext): Map<string, F
 
 		for (let ui = 0; ui < ctx.unknowns.length; ui++) {
 			const comp = ctx.everythingComp[ti]?.[ui];
-			const k = comp?.combinedCorrectionFactor;
-			const uncorrected = comp?.unknownConcentration;
+			if (!comp) {
+				continue;
+			}
+			const k = comp.combinedCorrectionFactor;
+			const uncorrected = comp.unknownConcentration;
 			if (
 				k === undefined ||
 				!Number.isFinite(k) ||
