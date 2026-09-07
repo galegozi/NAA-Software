@@ -443,6 +443,37 @@ function datasheetEntryMatchScore(entry: DatasheetEntryInput, isotope: IsotopeIn
 }
 
 /**
+ * Find a datasheet row for a given element symbol (e.g. "U" for uranium),
+ * regardless of whether the row is a bare element ("Uranium", "U") or a
+ * specific isotope's ("U-238") — prefers an element-level row when both exist.
+ * Used to pick up a fissile element's certified concentration for the fission
+ * correction even when it isn't one of the analysed isotopes.
+ */
+export function findDatasheetEntryForElement(
+	datasheet: SavedDatasheet,
+	symbol: string
+): DatasheetEntryInput | null {
+	const target = normalizeElementSymbol(symbol);
+	if (!target) {
+		return null;
+	}
+	let best: DatasheetEntryInput | null = null;
+	let bestScore = -1;
+	for (const row of datasheet.entries) {
+		const ref = parseNuclideRef(row.label);
+		if (!ref || ref.symbol !== target) {
+			continue;
+		}
+		const score = ref.mass === null ? 1 : 0;
+		if (score > bestScore) {
+			bestScore = score;
+			best = row;
+		}
+	}
+	return best;
+}
+
+/**
  * Fill a reference material's known-concentration fields from an existing
  * datasheet, matching rows to isotopes by element/isotope name — the reverse of
  * `datasheetEntriesFromReference`. Isotopes with no matching row are left as-is.

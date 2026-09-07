@@ -6,6 +6,7 @@ import {
 	describeIsotope,
 	findCatalogIsotope,
 	findCatalogReferenceMaterial,
+	findDatasheetEntryForElement,
 	findIsotopeMeasurementLink,
 	isotopeElementMismatch,
 	knownProxyHint,
@@ -453,5 +454,50 @@ describe('applyDatasheetToReference', () => {
 			datasheet
 		);
 		expect(matchedCount).toBe(0);
+	});
+});
+
+describe('findDatasheetEntryForElement', () => {
+	it('finds a bare element row', () => {
+		const datasheet: SavedDatasheet = {
+			id: 'ds1',
+			sampleName: 'SRM 1633c',
+			entries: [
+				{ label: 'Gold', concentration: 81.5, uncertainty: 1.2, unit: 'ppm' },
+				{ label: 'Uranium', concentration: 10.2, uncertainty: 0.4, unit: 'ppm' }
+			]
+		};
+		const entry = findDatasheetEntryForElement(datasheet, 'U');
+		expect(entry).toEqual({ label: 'Uranium', concentration: 10.2, uncertainty: 0.4, unit: 'ppm' });
+	});
+
+	it('falls back to a specific isotope row when there is no element-level one', () => {
+		const datasheet: SavedDatasheet = {
+			id: 'ds2',
+			sampleName: 'isotope-only sheet',
+			entries: [{ label: 'U-238', concentration: 10.2, uncertainty: 0.4, unit: 'ppm' }]
+		};
+		expect(findDatasheetEntryForElement(datasheet, 'U')?.concentration).toBe(10.2);
+	});
+
+	it('prefers the element-level row over a specific isotope row', () => {
+		const datasheet: SavedDatasheet = {
+			id: 'ds3',
+			sampleName: 'both',
+			entries: [
+				{ label: 'U-238', concentration: 9.9, uncertainty: 0.4, unit: 'ppm' },
+				{ label: 'U', concentration: 10.2, uncertainty: 0.4, unit: 'ppm' }
+			]
+		};
+		expect(findDatasheetEntryForElement(datasheet, 'U')?.concentration).toBe(10.2);
+	});
+
+	it('returns null when the element has no matching row', () => {
+		const datasheet: SavedDatasheet = {
+			id: 'ds4',
+			sampleName: 'no uranium',
+			entries: [{ label: 'Gold', concentration: 81.5, uncertainty: 1.2, unit: 'ppm' }]
+		};
+		expect(findDatasheetEntryForElement(datasheet, 'U')).toBeNull();
 	});
 });

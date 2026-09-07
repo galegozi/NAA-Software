@@ -176,10 +176,11 @@ npm start            # Azure Functions Core Tools (func start)</code
 				<li><code>GET</code> / <code>POST /api/reference-materials</code></li>
 				<li><code>GET</code> / <code>POST /api/reference-datasheets</code></li>
 				<li><code>GET</code> / <code>POST /api/isotope-measurements</code></li>
+				<li><code>GET</code> / <code>POST /api/fission-corrections</code> (7.2 WIP)</li>
 			</ul>
 			<p>
 				<strong>Every <code>GET</code> is public</strong> — it's all shared catalog data. Only the
-				<code>POST</code>s need the writer role, and all four are guarded twice: a
+				<code>POST</code>s need the writer role, and all five are guarded twice: a
 				<code>POST</code>-only route rule in <code>staticwebapp.config.json</code> plus an
 				in-function <code>x-ms-client-principal</code> check on the <code>POST</code> path. Only
 				<code>GET</code> and <code>POST</code> are registered — other methods 404.
@@ -192,6 +193,11 @@ npm start            # Azure Functions Core Tools (func start)</code
 					>targetCountingId</code
 				>
 				swaps one counting on a document by id.
+			</p>
+			<p class="guide__why">
+				Full request / response shapes, query params and status codes for every endpoint are on the
+				<a class="underline" href={resolve('/help/api')}>API reference</a> page (linked from the user
+				Help page too).
 			</p>
 		</div>
 	</details>
@@ -206,8 +212,8 @@ npm start            # Azure Functions Core Tools (func start)</code
 			<ol class="ml-5 list-decimal space-y-1">
 				<li>
 					<code>staticwebapp.config.json</code> has a <code>POST</code>-only route rule for
-					<strong>all four</strong> endpoints restricting them to the <code>isotope_writer</code> role
-					(with <code>responseOverrides</code> for 401 → login and 403 → SPA). <code>GET</code> matches
+					<strong>all five</strong> endpoints restricting them to the <code>isotope_writer</code>
+					role (with <code>responseOverrides</code> for 401 → login and 403 → SPA). <code>GET</code> matches
 					no rule.
 				</li>
 				<li>
@@ -219,8 +225,8 @@ npm start            # Azure Functions Core Tools (func start)</code
 			</ol>
 			<p class="guide__why">
 				<strong>Why both:</strong> the in-function check is the backstop against a config regression
-				silently opening write access. Only <code>GET</code> and <code>POST</code> are registered on any
-				function; other methods 404. Auth is required <em>only</em> to write.
+				silently opening write access. Only <code>GET</code> and <code>POST</code> are registered on
+				any function; other methods 404. Auth is required <em>only</em> to write.
 			</p>
 			<p>
 				The role name is <code>isotope_writer</code> unless overridden by
@@ -256,11 +262,11 @@ npm start            # Azure Functions Core Tools (func start)</code
 				it's torn down when the PR closes.
 			</p>
 			<p class="guide__why">
-				<strong>Preview environments do not inherit production app settings.</strong> A fresh preview
-				env has no <code>COSMOSDB_*</code> values, so the API can't reach the database and falls back
-				to a handful of built-in sample isotopes / reference materials (the app shows an amber
-				"sample data" banner). Add the settings to that environment's Configuration, or just test on
-				production. The real catalog is never touched by this.
+				<strong>Preview environments do not inherit production app settings.</strong> A fresh
+				preview env has no <code>COSMOSDB_*</code> values, so the API can't reach the database and falls
+				back to a handful of built-in sample isotopes / reference materials (the app shows an amber "sample
+				data" banner). Add the settings to that environment's Configuration, or just test on production.
+				The real catalog is never touched by this.
 			</p>
 		</div>
 	</details>

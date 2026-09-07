@@ -77,8 +77,7 @@
 	"keywords": [
 		"svelte"
 	],
-	"dependencies": {
-		"@azure/cosmos": "^4.9.2",
-		"cosmos": "^0.1.2"
+	"overrides": {
+		"cookie": "^0.7.0"
 	}
 }

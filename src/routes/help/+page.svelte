@@ -415,6 +415,10 @@
 		<a class="underline" href={resolve('/help/admin')}>Admin guide</a>.
 	</p>
 	<p class="mt-2 text-sm">
+		Scripting or building against the shared catalog? See the
+		<a class="underline" href={resolve('/help/api')}>API reference</a>.
+	</p>
+	<p class="mt-2 text-sm">
 		Source code, issues and releases:
 		<a
 			class="underline"

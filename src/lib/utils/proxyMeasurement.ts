@@ -108,7 +108,8 @@ function fromCatalogItem(item: IsotopeCatalogItem): ProxyMeasured {
 }
 
 function describeParts(name: string, energy: number | null): string {
-	return energy !== null ? `${name} @ ${energy.toLocaleString()} keV` : name;
+	// Plain number — no thousands separators.
+	return energy !== null ? `${name} @ ${energy} keV` : name;
 }
 
 /**

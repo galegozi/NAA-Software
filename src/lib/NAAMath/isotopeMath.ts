@@ -7,7 +7,7 @@ function getDecayConstant(halfLife: number): number {
 	return Math.log(2) / halfLife;
 }
 
-function convertHalfLifeToSeconds(halfLife: number, unit: string): number {
+export function convertHalfLifeToSeconds(halfLife: number, unit: string): number {
 	switch (unit) {
 		case 'seconds':
 			return halfLife;

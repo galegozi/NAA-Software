@@ -5,7 +5,10 @@ declare global {
 		// interface Error {}
 		// interface Locals {}
 		// interface PageData {}
-		// interface PageState {}
+		interface PageState {
+			/** Which wizard step the current history entry represents (see +page.svelte). */
+			wizardStep?: number;
+		}
 		// interface Platform {}
 	}
 }
