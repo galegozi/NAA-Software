@@ -12,7 +12,7 @@
 		"test": "node --test"
 	},
 	"dependencies": {
-		"@azure/cosmos": "^4.9.2",
-		"@azure/functions": "^4.7.3"
+		"@azure/cosmos": "^4.10.1",
+		"@azure/functions": "^4.16.5"
 		}
 }
