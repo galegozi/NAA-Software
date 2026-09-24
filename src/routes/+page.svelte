@@ -82,6 +82,8 @@
 		type ManualFissileField
 	} from '$lib/utils/fissionInterference.js';
 	import { computeFissionResults } from '$lib/utils/fissionResults.js';
+	import { diagonalResultOrder } from '$lib/utils/resultOrder.js';
+	import { lookupElementSymbol } from '$lib/utils/elementNames.js';
 	import { swaAuth, redirectToSignIn } from '$lib/utils/swaAuth.svelte.js';
 	import { catalogStatus } from '$lib/utils/catalogStatus.svelte.js';
 	import { analysisMeta } from '$lib/utils/analysisMeta.svelte.js';
@@ -2194,6 +2196,21 @@
 	);
 
 	/**
+	 * Column (isotope) and row (unknown) order for the results table and CSV:
+	 * grouped by element, with each unknown's measured values on a top-left →
+	 * bottom-right diagonal (see `diagonalResultOrder`).
+	 */
+	let resultOrder = $derived(
+		diagonalResultOrder(
+			materials.unknown.map((_, u) => isotopeInfo.map((_, i) => Boolean(everythingComp[i]?.[u]))),
+			isotopeInfo.map(
+				(iso) =>
+					lookupElementSymbol(iso.elementName ?? '') || (iso.elementName ?? '').trim().toLowerCase()
+			)
+		)
+	);
+
+	/**
 	 * Fission-interference correction per (interfering isotope, unknown), keyed
 	 * `"<isotopeIndex>:<unknownIndex>"`. Built from the Step 1 `fissionChoices`
 	 * plus the computed results — no separate approval state. `applied: false`
@@ -3363,8 +3380,8 @@
 		// Create CSV header row with concentration and uncertainty columns
 		const headers = [
 			'',
-			...isotopeInfo.flatMap((iso, index) => {
-				const name = getResultColumnName(iso, index);
+			...resultOrder.columns.flatMap((index) => {
+				const name = getResultColumnName(isotopeInfo[index], index);
 				return [escapeCSV(name), escapeCSV(`${name} Uncertainty`)];
 			})
 		];
@@ -3373,7 +3390,7 @@
 		// Add units row
 		const unitsRow = [
 			'Units',
-			...isotopeInfo.flatMap((_, index) => {
+			...resultOrder.columns.flatMap((index) => {
 				const referenceIndex = getLinkedReferenceIndex(index);
 				const reference = materials.reference[referenceIndex] ?? materials.reference[0];
 				return [escapeCSV(reference?.concentrationUnits[index] || ''), '%'];
@@ -3382,11 +3399,12 @@
 		csvRows.push(unitsRow.join(','));
 
 		// Add data rows for each unknown material (fission-corrected where applied)
-		materials.unknown.forEach((unk, uIndex) => {
+		resultOrder.rows.forEach((uIndex) => {
+			const unk = materials.unknown[uIndex];
 			const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`;
 			const row = [
 				escapeCSV(unknownLabel),
-				...isotopeInfo.flatMap((_, iIndex) => {
+				...resultOrder.columns.flatMap((iIndex) => {
 					const comp = everythingComp[iIndex][uIndex];
 					if (!comp) {
 						return ['', ''];
@@ -3404,7 +3422,7 @@
 
 			const detectionLimitRow = [
 				escapeCSV(`${unknownLabel} Conc Det Lim`),
-				...isotopeInfo.flatMap((_, iIndex) => {
+				...resultOrder.columns.flatMap((iIndex) => {
 					const comp = everythingComp[iIndex][uIndex];
 					return [comp ? escapeCSV(roundResult(comp.concentrationDetectionLimit)) : '', ''];
 				})
@@ -4990,9 +5008,9 @@
 				<thead>
 					<tr>
 						<th class="border border-surface-300-700 px-4 py-2"></th>
-						{#each isotopeInfo as iso, index}
+						{#each resultOrder.columns as index (index)}
 							<th class="border border-surface-300-700 px-4 py-2 text-center">
-								{getResultColumnName(iso, index)}
+								{getResultColumnName(isotopeInfo[index], index)}
 							</th>
 						{/each}
 					</tr>
@@ -5000,7 +5018,7 @@
 				<tbody>
 					<tr>
 						<td class="border border-surface-300-700 px-4 py-2 font-bold"> Units </td>
-						{#each isotopeInfo as _, index}
+						{#each resultOrder.columns as index (index)}
 							<td class="border border-surface-300-700 px-4 py-2 text-center">
 								{(() => {
 									const referenceIndex = getLinkedReferenceIndex(index);
@@ -5013,13 +5031,14 @@
 							</td>
 						{/each}
 					</tr>
-					{#each materials.unknown as unk, uIndex}
+					{#each resultOrder.rows as uIndex (uIndex)}
+						{@const unk = materials.unknown[uIndex]}
 						{@const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`}
 						<tr>
 							<td class="border border-surface-300-700 px-4 py-2 font-bold">
 								{unknownLabel}
 							</td>
-							{#each isotopeInfo as _, iIndex}
+							{#each resultOrder.columns as iIndex (iIndex)}
 								{@const comp = everythingComp[iIndex][uIndex]}
 								{#if !comp}
 									<td class="border border-surface-300-700 px-4 py-2 text-center text-surface-500"
@@ -5044,7 +5063,7 @@
 							<td class="border border-surface-300-700 px-4 py-2 font-bold">
 								{unknownLabel} Conc Det Lim
 							</td>
-							{#each isotopeInfo as _, iIndex}
+							{#each resultOrder.columns as iIndex (iIndex)}
 								{@const comp = everythingComp[iIndex][uIndex]}
 								<td class="border border-surface-300-700 px-4 py-2 text-center">
 									{comp ? roundResult(comp.concentrationDetectionLimit) : '—'}
@@ -5145,20 +5164,21 @@
 							<thead>
 								<tr>
 									<th class="border border-surface-300-700 px-4 py-2"></th>
-									{#each isotopeInfo as iso, index}
+									{#each resultOrder.columns as index (index)}
 										<th class="border border-surface-300-700 px-4 py-2 text-center"
-											>{getResultColumnName(iso, index)}</th
+											>{getResultColumnName(isotopeInfo[index], index)}</th
 										>
 									{/each}
 								</tr>
 							</thead>
 							<tbody>
-								{#each materials.unknown as unk, uIndex}
+								{#each resultOrder.rows as uIndex (uIndex)}
+									{@const unk = materials.unknown[uIndex]}
 									{@const unknownLabel = unk.NETL_code || `Unknown ${uIndex + 1}`}
 									<tr>
 										<td class="border border-surface-300-700 px-4 py-2 font-bold">{unknownLabel}</td
 										>
-										{#each isotopeInfo as _, iIndex}
+										{#each resultOrder.columns as iIndex (iIndex)}
 											{@const comp = everythingComp[iIndex][uIndex]}
 											<td class="border border-surface-300-700 px-4 py-2 text-center">
 												{#if comp}
