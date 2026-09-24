@@ -66,15 +66,20 @@
 		isKnownFissionProduct,
 		isLanthanum140,
 		isotopeIsElement,
+		lanthanumSpecialChoice,
 		matchingFissionRows,
 		pruneFissionChoices,
+		prefillManualFissile,
 		pruneManualFissile,
+		sameLanthanumSpecialChoice,
+		setManualFissileValue,
 		upsertFissionChoice,
 		upsertManualFissile,
 		DEFAULT_FISSION_BARIUM_HALF_LIFE,
 		type FissionBariumHalfLife,
 		type FissionChoice,
-		type FissionManualEntry
+		type FissionManualEntry,
+		type ManualFissileField
 	} from '$lib/utils/fissionInterference.js';
 	import { computeFissionResults } from '$lib/utils/fissionResults.js';
 	import { swaAuth, redirectToSignIn } from '$lib/utils/swaAuth.svelte.js';
@@ -1303,6 +1308,33 @@
 		fissionReviewEditing[index] = false;
 	}
 
+	/**
+	 * La-140 "Special — Ba-140 in-growth": the special correction *is* the
+	 * factor, so choosing it applies the constant straight away (catalog thermal
+	 * row, else the built-in 0.00233 ± 0.00012) — no factor to type. This is what
+	 * makes lanthanum a fission target, so its uranium fields appear on Steps 2/3.
+	 */
+	function applyLanthanumSpecial(index: number) {
+		const key = fissionIsotopeKey(isotopeInfo[index]);
+		fissionDraftUseSpecial[index] = true;
+		fissionChoices = upsertFissionChoice(
+			fissionChoices,
+			key,
+			lanthanumSpecialChoice(key, matchingFissionRows(isotopeInfo[index], fissionRows))
+		);
+		fissionReviewEditing[index] = false;
+	}
+
+	/** La-140 "Standard — flat factor": drop the special constant; the user picks a flat factor. */
+	function chooseLanthanumStandard(index: number) {
+		fissionDraftUseSpecial[index] = false;
+		const key = fissionIsotopeKey(isotopeInfo[index]);
+		const existing = fissionChoices.find((c) => c.isotopeKey === key);
+		if (existing && existing.mode !== 'none' && existing.useSpecialCorrection !== false) {
+			fissionChoices = upsertFissionChoice(fissionChoices, key, null);
+		}
+	}
+
 	function applyManualFissionFactor(index: number) {
 		const factor = fissionDraftFactor[index];
 		if (factor === null || factor === undefined || !Number.isFinite(factor)) {
@@ -1344,6 +1376,20 @@
 	function fissionManualEntryFor(isotopeIndex: number): FissionManualEntry | undefined {
 		const key = fissionIsotopeKey(isotopeInfo[isotopeIndex]);
 		return fissionManualFissile.find((entry) => entry.isotopeKey === key);
+	}
+
+	/** Write a hand-typed uranium value, pre-filling it on the other fission targets' fields. */
+	function setFissionUranium(
+		isotopeIndex: number,
+		field: ManualFissileField,
+		value: number | null
+	) {
+		setManualFissileValue(
+			fissionManualFissile,
+			fissionIsotopeKey(isotopeInfo[isotopeIndex]),
+			field,
+			value
+		);
 	}
 
 	// ---- Proxy-measurement relationships ("A measures B") ------------------
@@ -2413,7 +2459,9 @@
 				const key = fissionIsotopeKey(isotopeInfo[index]);
 				const existing = fissionManualFissile.find((entry) => entry.isotopeKey === key);
 				if (!existing) {
-					fissionManualFissile = upsertManualFissile(fissionManualFissile, {
+					// Uranium is per sample, so a new target (Ce after La, say)
+					// starts with whatever was already typed for another one.
+					const entry: FissionManualEntry = {
 						isotopeKey: key,
 						unit,
 						inStandard: null,
@@ -2421,9 +2469,12 @@
 							value: null,
 							uncertainty: null
 						}))
-					});
+					};
+					prefillManualFissile(entry, fissionManualFissile);
+					fissionManualFissile = upsertManualFissile(fissionManualFissile, entry);
 				} else {
 					if (existing.inUnknown.length < unknownCount) {
+						const firstNew = existing.inUnknown.length;
 						existing.inUnknown = [
 							...existing.inUnknown,
 							...Array.from({ length: unknownCount - existing.inUnknown.length }, () => ({
@@ -2431,6 +2482,7 @@
 								uncertainty: null
 							}))
 						];
+						prefillManualFissile(existing, fissionManualFissile, firstNew);
 					}
 					// The entry can be created before a reference material exists (and
 					// so before its unit is knowable) — keep it in sync once it is.
@@ -2453,6 +2505,23 @@
 				);
 				fissionDraftParent[index] ??= existing?.fissileNuclide ?? URANIUM_NUCLIDES[0];
 				fissionDraftUseSpecial[index] ??= existing?.useSpecialCorrection ?? true;
+
+				// La-140 on the special correction needs no typed factor: keep its
+				// choice equal to the constant (re-resolved when catalog rows load).
+				if (
+					isLanthanum140(isotopeInfo[index]) &&
+					fissionDraftUseSpecial[index] &&
+					existing?.mode !== 'none'
+				) {
+					const key = fissionIsotopeKey(isotopeInfo[index]);
+					const special = lanthanumSpecialChoice(
+						key,
+						matchingFissionRows(isotopeInfo[index], fissionRows)
+					);
+					if (!existing || !sameLanthanumSpecialChoice(existing, special)) {
+						fissionChoices = upsertFissionChoice(fissionChoices, key, special);
+					}
+				}
 			}
 		});
 	});
@@ -3907,13 +3976,13 @@
 													name="fission-mode-{index}"
 													class="mt-1"
 													checked={useSpecial}
-													onchange={() => (fissionDraftUseSpecial[index] = true)}
+													onchange={() => applyLanthanumSpecial(index)}
 												/>
 												<span>
 													<strong>Special — Ba-140 in-growth.</strong> Thermal irradiation only — the
 													0.00233 constant this correction uses was derived for thermal-neutron fission.
 													La-140 grows in from its precursor Ba-140, so the factor is computed per sample
-													rather than used as a flat number — needs the Ba-140 half-life below.
+													from that constant — nothing to type here beyond the Ba-140 half-life below.
 												</span>
 											</label>
 											<label class="flex items-start gap-2">
@@ -3922,7 +3991,7 @@
 													name="fission-mode-{index}"
 													class="mt-1"
 													checked={!useSpecial}
-													onchange={() => (fissionDraftUseSpecial[index] = false)}
+													onchange={() => chooseLanthanumStandard(index)}
 												/>
 												<span>
 													<strong>Standard — flat factor.</strong> Recommended for epithermal (or fast)
@@ -3933,89 +4002,110 @@
 										</fieldset>
 									{/if}
 
-									{#if candidate.choice}
+									{#if lanthanum && useSpecial}
 										<p class="text-sm">
-											Current: <strong>{describeFissionChoice(candidate.choice)}</strong>
+											Uses <strong
+												>{candidate.choice && candidate.choice.useSpecialCorrection === true
+													? describeFissionChoice(candidate.choice)
+													: 'the special correction constant'}</strong
+											>. Your uranium concentrations are still needed — enter them on the reference
+											material and unknowns (Steps 2 &amp; 3), unless uranium is one of your
+											analysed isotopes.
+										</p>
+										<div class="flex flex-wrap items-end gap-2">
 											<button
 												type="button"
-												class="ml-2 btn preset-tonal-surface"
-												onclick={() => clearFissionCorrection(index)}
+												class="btn preset-tonal-surface"
+												onclick={() => dismissFissionCorrection(index)}
 											>
-												Clear
+												No fission interference (0)
 											</button>
-										</p>
-									{/if}
-
-									{#if candidate.rows.length > 0}
-										<p class="text-sm font-semibold">From the catalog table:</p>
-										<ul class="space-y-1">
-											{#each candidate.rows as row (row.id)}
-												<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
-													<span>{describeFissionRow(row)}</span>
-													<button
-														type="button"
-														class="btn shrink-0 preset-tonal-surface"
-														onclick={() => applyFissionRow(index, row)}
-													>
-														Use this
-													</button>
-												</li>
-											{/each}
-										</ul>
+										</div>
 									{:else}
-										<p class="text-sm">
-											No matching row in the fission-correction table{catalogAvailable
-												? ''
-												: ' (sign in to a deployment with the shared catalog to load it)'}. Enter a
-											factor by hand.
-										</p>
-									{/if}
+										{#if candidate.choice}
+											<p class="text-sm">
+												Current: <strong>{describeFissionChoice(candidate.choice)}</strong>
+												<button
+													type="button"
+													class="ml-2 btn preset-tonal-surface"
+													onclick={() => clearFissionCorrection(index)}
+												>
+													Clear
+												</button>
+											</p>
+										{/if}
 
-									<div class="flex flex-wrap items-end gap-2">
-										<label class="label text-sm">
-											<span class="block font-semibold">Fissile parent</span>
-											<select class="select input" bind:value={fissionDraftParent[index]}>
-												{#each URANIUM_NUCLIDES as nuclide (nuclide)}
-													<option value={nuclide}>{nuclide}</option>
+										{#if candidate.rows.length > 0}
+											<p class="text-sm font-semibold">From the catalog table:</p>
+											<ul class="space-y-1">
+												{#each candidate.rows as row (row.id)}
+													<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
+														<span>{describeFissionRow(row)}</span>
+														<button
+															type="button"
+															class="btn shrink-0 preset-tonal-surface"
+															onclick={() => applyFissionRow(index, row)}
+														>
+															Use this
+														</button>
+													</li>
 												{/each}
-											</select>
-										</label>
-										<label class="label text-sm">
-											<span class="block font-semibold">Correction factor</span>
-											<input
-												class="input"
-												type="number"
-												step="any"
-												placeholder="e.g. 0.0123"
-												bind:value={fissionDraftFactor[index]}
-											/>
-										</label>
-										<label class="label text-sm">
-											<span class="block font-semibold">Uncertainty</span>
-											<input
-												class="input"
-												type="number"
-												step="any"
-												min="0"
-												placeholder="optional"
-												bind:value={fissionDraftUncertainty[index]}
-											/>
-										</label>
-										<button
-											type="button"
-											class="btn preset-tonal-surface"
-											onclick={() => applyManualFissionFactor(index)}
-										>
-											Apply factor
-										</button>
-										<button
-											type="button"
-											class="btn preset-tonal-surface"
-											onclick={() => dismissFissionCorrection(index)}
-										>
-											No fission interference (0)
-										</button>
-									</div>
+											</ul>
+										{:else}
+											<p class="text-sm">
+												No matching row in the fission-correction table{catalogAvailable
+													? ''
+													: ' (sign in to a deployment with the shared catalog to load it)'}. Enter
+												a factor by hand.
+											</p>
+										{/if}
+
+										<div class="flex flex-wrap items-end gap-2">
+											<label class="label text-sm">
+												<span class="block font-semibold">Fissile parent</span>
+												<select class="select input" bind:value={fissionDraftParent[index]}>
+													{#each URANIUM_NUCLIDES as nuclide (nuclide)}
+														<option value={nuclide}>{nuclide}</option>
+													{/each}
+												</select>
+											</label>
+											<label class="label text-sm">
+												<span class="block font-semibold">Correction factor</span>
+												<input
+													class="input"
+													type="number"
+													step="any"
+													placeholder="e.g. 0.0123"
+													bind:value={fissionDraftFactor[index]}
+												/>
+											</label>
+											<label class="label text-sm">
+												<span class="block font-semibold">Uncertainty</span>
+												<input
+													class="input"
+													type="number"
+													step="any"
+													min="0"
+													placeholder="optional"
+													bind:value={fissionDraftUncertainty[index]}
+												/>
+											</label>
+											<button
+												type="button"
+												class="btn preset-tonal-surface"
+												onclick={() => applyManualFissionFactor(index)}
+											>
+												Apply factor
+											</button>
+											<button
+												type="button"
+												class="btn preset-tonal-surface"
+												onclick={() => dismissFissionCorrection(index)}
+											>
+												No fission interference (0)
+											</button>
+										</div>
+									{/if}
 
 									{#if lanthanum && useSpecial}
 										<div class="mt-2 space-y-1 rounded border border-surface-300-700 p-2">
@@ -4340,7 +4430,10 @@
 												step="any"
 												min="0"
 												placeholder="C_fissile^S"
-												bind:value={entry.inStandard}
+												bind:value={
+													() => entry.inStandard,
+													(v) => setFissionUranium(candidate.index, { kind: 'standard' }, v)
+												}
 											/>
 										</label>
 									</div>
@@ -4711,7 +4804,15 @@
 													step="any"
 													min="0"
 													placeholder="C_fissile^U"
-													bind:value={entry.inUnknown[index].value}
+													bind:value={
+														() => entry.inUnknown[index].value,
+														(v) =>
+															setFissionUranium(
+																candidate.index,
+																{ kind: 'unknown', unknownIndex: index, part: 'value' },
+																v
+															)
+													}
 												/>
 											</label>
 											<label class="label text-sm">
@@ -4722,7 +4823,15 @@
 													step="any"
 													min="0"
 													placeholder="optional"
-													bind:value={entry.inUnknown[index].uncertainty}
+													bind:value={
+														() => entry.inUnknown[index].uncertainty,
+														(v) =>
+															setFissionUranium(
+																candidate.index,
+																{ kind: 'unknown', unknownIndex: index, part: 'uncertainty' },
+																v
+															)
+													}
 												/>
 											</label>
 										</div>

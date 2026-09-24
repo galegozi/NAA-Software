@@ -206,10 +206,11 @@ test('La-140 correction is blocked until the Ba-140 half-life is given', async (
 	await expect(page.getByText('Special correction — Ba-140 in-growth').first()).toBeVisible();
 	await expect(page.getByText(/Not found in your isotopes or the catalog/).first()).toBeVisible();
 
-	// La-140 fission factor: the flat constant A = 0.00233.
-	await page.locator('select').filter({ hasText: 'U-235' }).first().selectOption('U-235');
-	await page.getByLabel('Correction factor').fill('0.00233');
-	await page.getByRole('button', { name: 'Apply factor' }).click();
+	// The special correction IS the factor: the constant A = 0.00233 is applied
+	// on its own — no factor field to fill in.
+	const lanthanumPanel = page.locator('#fission-correction-0');
+	await expect(lanthanumPanel.getByLabel('Correction factor')).toHaveCount(0);
+	await expect(lanthanumPanel.getByText(/constant 0\.00233 ± 0\.00012/)).toBeVisible();
 
 	await page
 		.getByRole('button', { name: /^Next:/ })
@@ -292,22 +293,22 @@ test('Ba-140 half-life pre-fills from an analysed Ba-140 isotope', async ({ page
 	await page.getByLabel('Half Life', { exact: true }).nth(2).fill('12.75');
 	await page.getByLabel('Half Life Unit').nth(2).selectOption('days');
 
-	await expect(page.getByLabel('Half-life', { exact: true })).toHaveValue('12.75');
-	// String matching (not regex) — Playwright normalizes whitespace across the
-	// line-wraps in the source template; a regex would not.
-	await expect(page.getByText('Pre-filled below with 12.75 days').first()).toBeVisible();
-	await expect(page.getByText('from your Ba-140 isotope').first()).toBeVisible();
-	await expect(page.getByText(/Not found in your isotopes or the catalog/)).toHaveCount(0);
-
-	// Applying the factor now settles straight to "reviewed" — the special
-	// correction is already complete, nothing left to review. Scoped to the
+	// With the half-life resolved the special correction is complete on its own
+	// (no factor to type) and settles straight to "reviewed". Scoped to the
 	// La-140 panel — Ba-140 is itself a known fission product and gets its own.
 	const lanthanumPanel = page.locator('#fission-correction-0');
-	await lanthanumPanel.locator('select').filter({ hasText: 'U-235' }).selectOption('U-235');
-	await lanthanumPanel.getByLabel('Correction factor').fill('0.00233');
-	await lanthanumPanel.getByRole('button', { name: 'Apply factor' }).click();
 	await expect(lanthanumPanel.getByRole('button', { name: 'Change' })).toBeVisible();
 	await expect(lanthanumPanel.getByText('Special correction — Ba-140 in-growth')).toBeVisible();
+
+	// Reopening it shows the half-life pre-filled from the Ba-140 isotope.
+	await lanthanumPanel.getByRole('button', { name: 'Change' }).click();
+	await expect(lanthanumPanel.getByLabel('Half-life', { exact: true })).toHaveValue('12.75');
+	// String matching (not regex) — Playwright normalizes whitespace across the
+	// line-wraps in the source template; a regex would not.
+	await expect(lanthanumPanel.getByText('Pre-filled below with 12.75 days')).toBeVisible();
+	await expect(lanthanumPanel.getByText('from your Ba-140 isotope')).toBeVisible();
+	await expect(page.getByText(/Not found in your isotopes or the catalog/)).toHaveCount(0);
+	await lanthanumPanel.getByRole('button', { name: 'Cancel' }).click();
 
 	// No manual entry needed downstream: the Review step never blocks.
 	await page
@@ -372,9 +373,7 @@ test('La-140 correction applies from hand-typed uranium concentrations when uran
 	await page.getByLabel('Half Life', { exact: true }).fill('1.678');
 	await page.getByLabel('Half Life Unit').selectOption('days');
 
-	await page.locator('select').filter({ hasText: 'U-235' }).first().selectOption('U-235');
-	await page.getByLabel('Correction factor').fill('0.00233');
-	await page.getByRole('button', { name: 'Apply factor' }).click();
+	// Special is the default and needs no factor typed in.
 	// Not reviewed yet (Ba-140 half-life still missing) — the panel stays open.
 	await expect(page.getByRole('button', { name: 'Change' })).toHaveCount(0);
 	await page.getByLabel('Half-life', { exact: true }).fill('12.75');

@@ -8,7 +8,12 @@ import {
 	fissionIsotopeKey,
 	isKnownFissionProduct,
 	isotopeIsElement,
+	lanthanumSpecialChoice,
+	LANTHANUM_SPECIAL_CONSTANT,
 	matchingFissionRows,
+	prefillManualFissile,
+	setManualFissileValue,
+	type FissionManualEntry,
 	pruneFissionChoices,
 	upsertFissionChoice,
 	type FissionChoice
@@ -133,5 +138,83 @@ describe('describe helpers', () => {
 		expect(
 			describeFissionChoice({ isotopeKey: 'x', factor: 0, uncertainty: 0, mode: 'none' })
 		).toBe('No fission interference (0)');
+	});
+});
+
+describe('lanthanumSpecialChoice', () => {
+	it('uses the built-in constant when the catalog has no thermal La-140 row', () => {
+		const choice = lanthanumSpecialChoice('la-140', [row({ irradiationType: 'epithermal' })]);
+		expect(choice).toMatchObject({
+			factor: LANTHANUM_SPECIAL_CONSTANT.factor,
+			uncertainty: LANTHANUM_SPECIAL_CONSTANT.uncertainty,
+			fissileNuclide: 'U-235',
+			mode: 'manual',
+			useSpecialCorrection: true
+		});
+	});
+
+	it('prefers a thermal uranium row from the catalog', () => {
+		const choice = lanthanumSpecialChoice('la-140', [
+			row({ id: 'pu', fissileNuclide: 'Pu-239', correctionFactor: 0.009 }),
+			row({ id: 'u', correctionFactor: 0.0024, uncertainty: 0.0001 })
+		]);
+		expect(choice).toMatchObject({
+			factor: 0.0024,
+			uncertainty: 0.0001,
+			mode: 'table',
+			sourceRowId: 'u',
+			useSpecialCorrection: true
+		});
+		expect(describeFissionChoice(choice)).toContain('Special correction — constant 0.0024');
+	});
+});
+
+describe('uranium sharing between fission targets', () => {
+	function entry(isotopeKey: string, unit: FissionManualEntry['unit'] = 'ppm'): FissionManualEntry {
+		return {
+			isotopeKey,
+			unit,
+			inStandard: null,
+			inUnknown: [{ value: null, uncertainty: null }]
+		};
+	}
+
+	it('typing uranium for one target pre-fills the empty field on the other', () => {
+		const entries = [entry('la'), entry('ce')];
+		setManualFissileValue(entries, 'la', { kind: 'standard' }, 5);
+		setManualFissileValue(entries, 'la', { kind: 'unknown', unknownIndex: 0, part: 'value' }, 30);
+		expect(entries[1].inStandard).toBe(5);
+		expect(entries[1].inUnknown[0].value).toBe(30);
+	});
+
+	it('keeps following while in sync, but never overwrites a value typed separately', () => {
+		const entries = [entry('la'), entry('ce')];
+		setManualFissileValue(entries, 'la', { kind: 'standard' }, 5);
+		setManualFissileValue(entries, 'la', { kind: 'standard' }, 6);
+		expect(entries[1].inStandard).toBe(6);
+
+		setManualFissileValue(entries, 'ce', { kind: 'standard' }, 9);
+		expect(entries[0].inStandard).toBe(9); // La was in sync with Ce
+
+		entries[0].inStandard = 4; // typed differently for La…
+		entries[1].inStandard = 9;
+		setManualFissileValue(entries, 'ce', { kind: 'standard' }, 10);
+		expect(entries[0].inStandard).toBe(4); // …so Ce's edit leaves it alone
+	});
+
+	it("converts between the two targets' units", () => {
+		const entries = [entry('la', 'ppm'), entry('ce', 'percentage')];
+		setManualFissileValue(entries, 'la', { kind: 'standard' }, 50);
+		expect(entries[1].inStandard).toBeCloseTo(0.005);
+	});
+
+	it('a newly appearing target starts with the uranium already typed', () => {
+		const la = entry('la');
+		la.inStandard = 5;
+		la.inUnknown[0] = { value: 30, uncertainty: 2 };
+		const ce = entry('ce');
+		prefillManualFissile(ce, [la]);
+		expect(ce.inStandard).toBe(5);
+		expect(ce.inUnknown[0]).toEqual({ value: 30, uncertainty: 2 });
 	});
 });

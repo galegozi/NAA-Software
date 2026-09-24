@@ -11,7 +11,7 @@
  * position, irradiation type).
  *
  * This module only wires up the *choice* (which factor, or an explicit 0 for
- * "no interference"). The subtraction math is not implemented yet.
+ * "no interference"); the subtraction math is in `fissionResults.ts`.
  */
 import type { ConcUnitType, HalfLife, IsotopeInfo } from '$lib/types.js';
 import { parseIsotopeName, isotopeIdentityKey } from '$lib/utils/catalogWrite.js';
@@ -89,6 +89,116 @@ export function upsertManualFissile(
 	entry: FissionManualEntry
 ): FissionManualEntry[] {
 	return [...entries.filter((e) => e.isotopeKey !== entry.isotopeKey), entry];
+}
+
+/** One hand-typed fissile value: the standard's, or an unknown's value / uncertainty. */
+export type ManualFissileField =
+	{ kind: 'standard' } | { kind: 'unknown'; unknownIndex: number; part: 'value' | 'uncertainty' };
+
+function readManualField(entry: FissionManualEntry, field: ManualFissileField): number | null {
+	if (field.kind === 'standard') {
+		return entry.inStandard;
+	}
+	return entry.inUnknown[field.unknownIndex]?.[field.part] ?? null;
+}
+
+function writeManualField(
+	entry: FissionManualEntry,
+	field: ManualFissileField,
+	value: number | null
+): void {
+	if (field.kind === 'standard') {
+		entry.inStandard = value;
+	} else if (entry.inUnknown[field.unknownIndex]) {
+		entry.inUnknown[field.unknownIndex][field.part] = value;
+	}
+}
+
+const MASS_FRACTION_PER_UNIT: Record<string, number> = { ppm: 1e-6, percentage: 1e-2 };
+
+/** Re-express a concentration from one unit in another (unknown units pass through). */
+function convertConcentration(value: number, from: ConcUnitType, to: ConcUnitType): number {
+	const f = MASS_FRACTION_PER_UNIT[from ?? ''];
+	const t = MASS_FRACTION_PER_UNIT[to ?? ''];
+	return f && t ? (value * f) / t : value;
+}
+
+function sameNumber(a: number, b: number): boolean {
+	return Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
+}
+
+/**
+ * Set one hand-typed uranium value on `sourceKey`'s entry and pre-fill the same
+ * field on every other target isotope's entry — uranium is a property of the
+ * sample, so typing it once for La fills it in for Ce too. Another entry is only
+ * overwritten while it is empty or still holds the value this one had (i.e. it
+ * was pre-filled, not typed separately), so a deliberately different value is
+ * kept. Values are converted between the entries' units. Mutates in place.
+ */
+export function setManualFissileValue(
+	entries: FissionManualEntry[],
+	sourceKey: string,
+	field: ManualFissileField,
+	value: number | null
+): void {
+	const source = entries.find((entry) => entry.isotopeKey === sourceKey);
+	if (!source) {
+		return;
+	}
+	const clean = typeof value === 'number' && Number.isFinite(value) ? value : null;
+	const previous = readManualField(source, field);
+	writeManualField(source, field, clean);
+	for (const other of entries) {
+		if (other === source) {
+			continue;
+		}
+		const current = readManualField(other, field);
+		const inSync =
+			current === null ||
+			(previous !== null &&
+				sameNumber(current, convertConcentration(previous, source.unit, other.unit)));
+		if (!inSync) {
+			continue;
+		}
+		writeManualField(
+			other,
+			field,
+			clean === null ? null : convertConcentration(clean, source.unit, other.unit)
+		);
+	}
+}
+
+/**
+ * Fill `target`'s empty fields (standard, and unknowns from `fromUnknownIndex`
+ * on) from the other entries' values — used when a new fission target's
+ * uranium fields first appear after uranium was already typed for another.
+ * Mutates `target` in place.
+ */
+export function prefillManualFissile(
+	target: FissionManualEntry,
+	entries: FissionManualEntry[],
+	fromUnknownIndex = 0
+): void {
+	const others = entries.filter((entry) => entry.isotopeKey !== target.isotopeKey);
+	const fill = (field: ManualFissileField) => {
+		if (readManualField(target, field) !== null) {
+			return;
+		}
+		for (const other of others) {
+			const value = readManualField(other, field);
+			if (value !== null) {
+				writeManualField(target, field, convertConcentration(value, other.unit, target.unit));
+				return;
+			}
+		}
+	};
+	if (fromUnknownIndex === 0) {
+		fill({ kind: 'standard' });
+	}
+	for (let i = fromUnknownIndex; i < target.inUnknown.length; i++) {
+		fill({ kind: 'unknown', unknownIndex: i, part: 'value' });
+		fill({ kind: 'unknown', unknownIndex: i, part: 'uncertainty' });
+	}
 }
 
 /** Drop manual entries whose target isotope is no longer in the analysis. */
@@ -237,12 +347,79 @@ export function describeFissionRow(row: FissionCorrectionRecord): string {
 	return `${parts.join(' · ')} → factor ${row.correctionFactor}${unc}`;
 }
 
+/**
+ * Built-in constant for the La-140 special correction (thermal U-235 fission),
+ * used when the catalog table has no thermal La-140 row.
+ */
+export const LANTHANUM_SPECIAL_CONSTANT = {
+	factor: 0.00233,
+	uncertainty: 0.00012,
+	fissileNuclide: 'U-235'
+} as const;
+
+/**
+ * The complete choice for La-140's special correction. The special correction
+ * *is* the factor — the constant `A` fed into the Ba-140 in-growth formula — so
+ * nothing needs to be typed: it comes from a thermal La-140 row in the catalog
+ * (U-235 preferred) or, failing that, {@link LANTHANUM_SPECIAL_CONSTANT}.
+ * `rows` are the catalog rows already matched to the isotope.
+ */
+export function lanthanumSpecialChoice(
+	isotopeKey: string,
+	rows: FissionCorrectionRecord[]
+): FissionChoice {
+	const thermal = rows.filter(
+		(row) => row.irradiationType === 'thermal' && Number(row.correctionFactor) > 0
+	);
+	const row =
+		thermal.find((candidate) => fissileParentSymbol(candidate.fissileNuclide) === 'U') ??
+		thermal[0];
+	if (row) {
+		return {
+			isotopeKey,
+			factor: row.correctionFactor,
+			uncertainty: row.uncertainty ?? 0,
+			mode: 'table',
+			fissileNuclide: row.fissileNuclide,
+			gammaEnergyKev: row.gammaEnergyKev,
+			irradiationPosition: row.irradiationPosition,
+			irradiationType: row.irradiationType,
+			sourceRowId: row.id,
+			useSpecialCorrection: true
+		};
+	}
+	return {
+		isotopeKey,
+		factor: LANTHANUM_SPECIAL_CONSTANT.factor,
+		uncertainty: LANTHANUM_SPECIAL_CONSTANT.uncertainty,
+		mode: 'manual',
+		fissileNuclide: LANTHANUM_SPECIAL_CONSTANT.fissileNuclide,
+		useSpecialCorrection: true
+	};
+}
+
+/** True when two La-140 special choices resolve to the same constant and source. */
+export function sameLanthanumSpecialChoice(a: FissionChoice, b: FissionChoice): boolean {
+	return (
+		a.mode === b.mode &&
+		a.factor === b.factor &&
+		a.uncertainty === b.uncertainty &&
+		a.fissileNuclide === b.fissileNuclide &&
+		(a.sourceRowId ?? null) === (b.sourceRowId ?? null) &&
+		a.useSpecialCorrection === true
+	);
+}
+
 /** One-line summary of a saved choice, for the warning-box status column. */
 export function describeFissionChoice(choice: FissionChoice): string {
 	if (choice.mode === 'none') {
 		return 'No fission interference (0)';
 	}
 	const unc = choice.uncertainty ? ` ± ${choice.uncertainty}` : '';
+	if (choice.useSpecialCorrection === true) {
+		const from = choice.sourceRowId ? 'from the catalog' : 'built-in';
+		return `Special correction — constant ${choice.factor}${unc} (${choice.fissileNuclide ?? 'U-235'}, thermal, ${from})`;
+	}
 	if (choice.mode === 'table') {
 		const from = [choice.fissileNuclide, choice.irradiationType].filter(Boolean).join(', ');
 		return `Factor ${choice.factor}${unc}${from ? ` (${from})` : ''}`;
