@@ -112,12 +112,40 @@ export function findRoiIndices(
 }
 
 /**
- * Rounding applied to the final computed results (concentration, uncertainty,
- * detection limit) for display and CSV export:
+ * Number of decimal places a final result of the given magnitude is shown to:
  *
  *  - |x| < 1   → 2 decimal places
  *  - |x| < 20  → 1 decimal place
- *  - otherwise → nearest integer
+ *  - otherwise → 0 (nearest integer)
+ *
+ * Non-finite values fall back to 0.
+ */
+export function resultDecimalPlaces(value: number): number {
+	if (!Number.isFinite(value)) {
+		return 0;
+	}
+	const magnitude = Math.abs(value);
+	if (magnitude < 1) {
+		return 2;
+	}
+	if (magnitude < 20) {
+		return 1;
+	}
+	return 0;
+}
+
+/** Rounds `value` to `decimals` decimal places. Always rounds, never truncates. */
+function roundToPlaces(value: number, decimals: number): number {
+	if (decimals <= 0) {
+		return Math.round(value);
+	}
+	return Number(value.toFixed(decimals));
+}
+
+/**
+ * Rounding applied to the final computed results (concentration, detection
+ * limit) for display and CSV export. Precision is chosen from the value's own
+ * magnitude — see {@link resultDecimalPlaces}.
  *
  * Always rounds (never truncates). Non-finite values pass through unchanged.
  */
@@ -125,12 +153,19 @@ export function roundResult(value: number): number {
 	if (!Number.isFinite(value)) {
 		return value;
 	}
-	const magnitude = Math.abs(value);
-	if (magnitude < 1) {
-		return Number(value.toFixed(2));
+	return roundToPlaces(value, resultDecimalPlaces(value));
+}
+
+/**
+ * Rounds a companion quantity (an uncertainty) to the same number of decimal
+ * places as the value it is displayed next to, per the usual convention:
+ * `7.234 ± 0.567` is shown as `7.2 ± 0.6`, not `7.2 ± 0.57`.
+ *
+ * Non-finite values pass through unchanged.
+ */
+export function roundToMatch(value: number, reference: number): number {
+	if (!Number.isFinite(value)) {
+		return value;
 	}
-	if (magnitude < 20) {
-		return Number(value.toFixed(1));
-	}
-	return Math.round(value);
+	return roundToPlaces(value, resultDecimalPlaces(reference));
 }

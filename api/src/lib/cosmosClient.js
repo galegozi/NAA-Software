@@ -66,3 +66,18 @@ export function getIsotopeMeasurementLinksContainer() {
 
 	return cachedClient.database(databaseName).container(containerName);
 }
+
+export function getFissionCorrectionsContainer() {
+	if (!cachedClient) {
+		cachedClient = new CosmosClient({
+			endpoint: getRequiredSetting('COSMOSDB_ENDPOINT'),
+			key: getRequiredSetting('COSMOSDB_KEY')
+		});
+	}
+
+	const databaseName = process.env.COSMOSDB_DATABASE?.trim() || 'NAA-db';
+	const containerName =
+		process.env.COSMOSDB_FISSION_CORRECTIONS_CONTAINER?.trim() || 'fission-corrections';
+
+	return cachedClient.database(databaseName).container(containerName);
+}

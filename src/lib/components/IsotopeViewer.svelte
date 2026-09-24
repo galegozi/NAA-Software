@@ -9,12 +9,12 @@
 		selectedIsotopes = $bindable<IsotopeInfo[]>([]),
 		singleEntryPerIsotope = false,
 		allowedElementNames = [] as string[],
-		showSelectionList = true
+		showSelectionList = true,
+		searchTerm = $bindable('')
 	} = $props();
 
 	let isLoading = $state(false);
 	let errorMessage = $state('');
-	let searchTerm = $state('');
 	let lastFetchedSearch = '';
 	let lastFetchSequence = 0;
 	let cachedItems: IsotopeCatalogItem[] = $state([]);
@@ -448,7 +448,13 @@
 									<div>Energy: {isotope.energy} keV</div>
 									<div>Half-life: {isotope.halfLife} {isotope.unit}</div>
 								</div>
-								<button type="button" onclick={() => removeSelectedIsotope(index)}>Remove</button>
+								<button
+									type="button"
+									class="btn preset-tonal-surface"
+									onclick={() => removeSelectedIsotope(index)}
+								>
+									Remove
+								</button>
 							</div>
 						</div>
 					{/each}

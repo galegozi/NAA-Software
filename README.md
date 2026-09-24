@@ -64,8 +64,16 @@ This project now includes an integrated Azure Functions backend under `api/` for
   ("isotope A is measured to quantify isotope B"). `POST` body:
   `{ "measuredIsotope": { "isotopeId": "<catalog id>" }, "targetIsotope": { "isotopeId": "<catalog id>" }, "notes": "" }`.
   Upserts by the (measured, target) pair.
+- `GET` / `POST /api/fission-corrections` — fission-interference correction
+  factors. `POST` body:
+  `{ "fissileNuclide": "U-235", "interferingIsotope": "La-140", "gammaEnergyKev": 1596.2, "irradiationPosition": "", "irradiationType": "thermal|epithermal|fast", "correctionFactor": 0.0123, "uncertainty": 0, "notes": "" }`
+  (`gammaEnergyKev`, `irradiationPosition`, `uncertainty`, `notes` optional;
+  `irradiationType` defaults to `thermal`). Upserts by the
+  (fissile, interferent, energy, position, irradiation type) tuple. Populated
+  through the temporary, unlinked data-entry screen at
+  `/admin/fission-corrections`.
 
-`GET` on all four resources is **public** (shared catalog data). Only the `POST`
+`GET` on all five resources is **public** (shared catalog data). Only the `POST`
 endpoints require the `isotope_writer` role — enforced twice for each: a
 `staticwebapp.config.json` route rule (`{ "methods": ["POST"], "allowedRoles":
 ["isotope_writer"] }`) and an in-function `x-ms-client-principal` check on the
@@ -86,7 +94,7 @@ When no `COSMOSDB_*` settings are present (or `MOCK_COSMOS=true`), both endpoint
 
 The integrated Azure Functions endpoint stays at `authLevel: 'anonymous'`, because Azure Static Web Apps is the layer that authenticates and authorizes requests before forwarding them to the function.
 
-Every `POST` (`/api/isotopes`, `/api/reference-materials`, `/api/reference-datasheets`, `/api/isotope-measurements`) is locked down in two places:
+Every `POST` (`/api/isotopes`, `/api/reference-materials`, `/api/reference-datasheets`, `/api/isotope-measurements`, `/api/fission-corrections`) is locked down in two places:
 
 - `staticwebapp.config.json` has a `POST`-only route rule allowing only the custom `isotope_writer` role.
 - The function independently validates the forwarded `x-ms-client-principal` header on its `POST` path and rejects callers without the role.
@@ -195,6 +203,7 @@ Set these application settings in Azure Static Web Apps:
 - `COSMOSDB_REFERENCE_CONTAINER` (optional, defaults to `reference-materials`)
 - `COSMOSDB_DATASHEET_CONTAINER` (optional, defaults to `reference-datasheets`)
 - `COSMOSDB_ISOTOPE_MEASUREMENTS_CONTAINER` (optional, defaults to `isotope-measurements`)
+- `COSMOSDB_FISSION_CORRECTIONS_CONTAINER` (optional, defaults to `fission-corrections`)
 - `MOCK_COSMOS` (optional, defaults to `false`; when `true`, GET/POST isotope endpoints and POST reference-materials use mock in-memory behavior and log payloads instead of calling Cosmos DB)
 - `ISOTOPE_WRITE_ROLE` (optional, defaults to `isotope_writer`)
 - `COSMOSDB_QUERY` (optional, defaults to `SELECT * FROM c`)

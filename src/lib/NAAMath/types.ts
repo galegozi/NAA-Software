@@ -53,6 +53,8 @@ export interface MultiMaterialComputed {
  * Result from everything computation
  */
 export interface EverythingComputed {
+	/** Combined correction factor `k`: `unknownConcentration = k * knownConcentration`. */
+	combinedCorrectionFactor: number;
 	saturationFactorRatio: number;
 	deadTimeCorrectionRatio: number;
 	decayCorrectionFactorRatio: number;

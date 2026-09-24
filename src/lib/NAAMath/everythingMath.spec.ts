@@ -14,7 +14,10 @@ function createIsotope(): IsotopeInfo {
 	};
 }
 
-function createReferenceMaterial(unit: 'percentage' | 'ppm', concentration: number): ReferenceMaterial {
+function createReferenceMaterial(
+	unit: 'percentage' | 'ppm',
+	concentration: number
+): ReferenceMaterial {
 	return {
 		NETL_code: 'REF-1',
 		sampleName: 'Reference',
@@ -85,12 +88,30 @@ describe('everythingMath concentration unit handling', () => {
 			0
 		).unknownConcentration;
 
-		const ppmResult = getEverything(createReferenceMaterial('ppm', 10_000), unknown, isotope, 0)
-			.unknownConcentration;
+		const ppmResult = getEverything(
+			createReferenceMaterial('ppm', 10_000),
+			unknown,
+			isotope,
+			0
+		).unknownConcentration;
 
 		expect(percentResult).toBeCloseTo(1, 10);
 		expect(ppmResult).toBeCloseTo(10_000, 6);
 		expect(ppmResult / percentResult).toBeCloseTo(10_000, 4);
+	});
+
+	it('exposes k such that unknownConcentration === k * knownConcentration', () => {
+		const isotope = createIsotope();
+		const unknown = createUnknownMaterial(37);
+
+		for (const [unit, conc] of [
+			['percentage', 1],
+			['ppm', 250]
+		] as const) {
+			const result = getEverything(createReferenceMaterial(unit, conc), unknown, isotope, 0);
+			expect(result.combinedCorrectionFactor).not.toBe(1);
+			expect(result.combinedCorrectionFactor * conc).toBeCloseTo(result.unknownConcentration, 8);
+		}
 	});
 
 	it('preserves unit scaling when count-ratio corrections change the concentration', () => {
@@ -104,8 +125,12 @@ describe('everythingMath concentration unit handling', () => {
 			0
 		).unknownConcentration;
 
-		const ppmResult = getEverything(createReferenceMaterial('ppm', 10_000), unknown, isotope, 0)
-			.unknownConcentration;
+		const ppmResult = getEverything(
+			createReferenceMaterial('ppm', 10_000),
+			unknown,
+			isotope,
+			0
+		).unknownConcentration;
 
 		expect(percentResult).toBeCloseTo(0.2, 10);
 		expect(ppmResult).toBeCloseTo(2_000, 6);

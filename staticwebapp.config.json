@@ -19,6 +19,11 @@
 			"route": "/api/reference-datasheets",
 			"methods": ["POST"],
 			"allowedRoles": ["isotope_writer"]
+		},
+		{
+			"route": "/api/fission-corrections",
+			"methods": ["POST"],
+			"allowedRoles": ["isotope_writer"]
 		}
 	],
 	"responseOverrides": {
@@ -32,7 +37,7 @@
 		}
 	},
 	"navigationFallback": {
-		"rewrite": "/index.html",
+		"rewrite": "/404.html",
 		"exclude": ["/api/*", "/app/*", "/favicon.svg"]
 	}
 }

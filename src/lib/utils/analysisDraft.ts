@@ -6,6 +6,12 @@
  * draft is only cleared explicitly ("Start new analysis").
  */
 import type { IsotopeInfo, ReferenceMaterial, UnknownMaterial } from '$lib/types.js';
+import {
+	DEFAULT_FISSION_BARIUM_HALF_LIFE,
+	type FissionBariumHalfLife,
+	type FissionChoice,
+	type FissionManualEntry
+} from '$lib/utils/fissionInterference.js';
 
 export const DRAFT_KEY = 'naa-analysis-draft';
 export const DRAFT_VERSION = 3;
@@ -38,13 +44,42 @@ export type AnalysisDraft = {
 		unknown: UnknownMaterial[];
 	};
 	referenceIsotopeSelections: string[][];
+	/** Which isotopes each unknown was measured for; empty per-unknown means "all". */
+	unknownIsotopeSelections: string[][];
 	isotopeReferenceMap: number[];
 	referenceCatalogItemIds: (string | null)[];
 	expandedIsotopes: number[];
 	expandedReferences: number[];
 	expandedUnknowns: number[];
 	localIsotopeLinks: LocalIsotopeLink[];
+	/** Per-isotope fission-interference correction choices (7.2 WIP). */
+	fissionChoices: FissionChoice[];
+	/** Hand-entered fissile concentrations, when the fissile element isn't analysed. */
+	fissionManualFissile: FissionManualEntry[];
+	/** Hand-entered Ba-140 half-life for the La-140 fission correction. */
+	fissionBariumHalfLife: FissionBariumHalfLife;
 };
+
+const HALF_LIFE_UNITS: FissionBariumHalfLife['unit'][] = [
+	'seconds',
+	'minutes',
+	'hours',
+	'days',
+	'weeks',
+	'years'
+];
+
+function parseBariumHalfLife(value: unknown): FissionBariumHalfLife {
+	if (value && typeof value === 'object') {
+		const raw = value as Partial<FissionBariumHalfLife>;
+		const num = typeof raw.value === 'number' && Number.isFinite(raw.value) ? raw.value : null;
+		const unit = HALF_LIFE_UNITS.includes(raw.unit as FissionBariumHalfLife['unit'])
+			? (raw.unit as FissionBariumHalfLife['unit'])
+			: DEFAULT_FISSION_BARIUM_HALF_LIFE.unit;
+		return { value: num, unit };
+	}
+	return { ...DEFAULT_FISSION_BARIUM_HALF_LIFE };
+}
 
 function hasLocalStorage(): boolean {
 	try {
@@ -97,6 +132,9 @@ function parseDraft(raw: string | null, expectedVersion: number): AnalysisDraft 
 			referenceIsotopeSelections: Array.isArray(parsed.referenceIsotopeSelections)
 				? parsed.referenceIsotopeSelections
 				: [],
+			unknownIsotopeSelections: Array.isArray(parsed.unknownIsotopeSelections)
+				? parsed.unknownIsotopeSelections
+				: [],
 			isotopeReferenceMap: Array.isArray(parsed.isotopeReferenceMap)
 				? parsed.isotopeReferenceMap
 				: [],
@@ -106,7 +144,12 @@ function parseDraft(raw: string | null, expectedVersion: number): AnalysisDraft 
 			expandedIsotopes: Array.isArray(parsed.expandedIsotopes) ? parsed.expandedIsotopes : [],
 			expandedReferences: Array.isArray(parsed.expandedReferences) ? parsed.expandedReferences : [],
 			expandedUnknowns: Array.isArray(parsed.expandedUnknowns) ? parsed.expandedUnknowns : [],
-			localIsotopeLinks: Array.isArray(parsed.localIsotopeLinks) ? parsed.localIsotopeLinks : []
+			localIsotopeLinks: Array.isArray(parsed.localIsotopeLinks) ? parsed.localIsotopeLinks : [],
+			fissionChoices: Array.isArray(parsed.fissionChoices) ? parsed.fissionChoices : [],
+			fissionManualFissile: Array.isArray(parsed.fissionManualFissile)
+				? parsed.fissionManualFissile
+				: [],
+			fissionBariumHalfLife: parseBariumHalfLife(parsed.fissionBariumHalfLife)
 		};
 	} catch {
 		return null;

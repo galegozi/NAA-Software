@@ -8,6 +8,7 @@
 		subtitle = '',
 		open = false,
 		editLabel = 'Edit',
+		id = undefined,
 		onToggle,
 		onRemove,
 		children
@@ -16,13 +17,14 @@
 		subtitle?: string;
 		open?: boolean;
 		editLabel?: string;
+		id?: string;
 		onToggle: () => void;
 		onRemove: () => void;
 		children: Snippet;
 	} = $props();
 </script>
 
-<div class="rounded border border-gray-300 p-3">
+<div {id} class="scroll-mt-24 rounded border border-gray-300 p-3">
 	<div class="flex items-center justify-between gap-3">
 		<div class="min-w-0">
 			<strong class="block truncate">{title}</strong>

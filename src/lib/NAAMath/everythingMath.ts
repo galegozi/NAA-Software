@@ -22,7 +22,7 @@ function getUnitAtIndex(
 	return values?.[index];
 }
 
-function concentrationToMassFraction(
+export function concentrationToMassFraction(
 	concentration: number,
 	unit: ReferenceMaterial['concentrationUnits'][number]
 ): number {
@@ -41,7 +41,7 @@ function concentrationToMassFraction(
 	return concentration;
 }
 
-function massFractionToConcentration(
+export function massFractionToConcentration(
 	massFraction: number,
 	unit: ReferenceMaterial['concentrationUnits'][number]
 ): number {
@@ -111,13 +111,36 @@ function getDeadTimeCorrectionRatio(
 	return isoMat.unknown.funcDeadTimeCorrection / isoMat.reference.funcDeadTimeCorrection;
 }
 
-function getUnknownConcentration(
+/**
+ * The combined correction factor `k` for one (reference, unknown, isotope): the
+ * product of the count ratio (dead-time / live-time normalised) and every
+ * physics ratio between the two materials. The comparative-NAA result is
+ * `unknownConcentration = k * knownConcentration`, and `k` does not depend on
+ * the known concentration — it is the factor the fission-interference
+ * correction multiplies the standard's *apparent* concentration by.
+ */
+function getCombinedCorrectionFactor(
 	refMaterial: ReferenceMaterial,
 	unkMaterial: UnknownMaterial,
 	isotope: IsotopeInfo,
 	isotopeIndex: number
 ): number {
 	const multimaterial = MMGA(refMaterial, unkMaterial);
+	return (
+		getDeadTimeCorrectionRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
+		getSaturationFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
+		getDecayCorrectionFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
+		multimaterial.massCorrection *
+		multimaterial.fluenceCorrection
+	);
+}
+
+function getUnknownConcentration(
+	refMaterial: ReferenceMaterial,
+	unkMaterial: UnknownMaterial,
+	isotope: IsotopeInfo,
+	isotopeIndex: number
+): number {
 	const outputUnit = getUnitAtIndex(refMaterial.concentrationUnits, isotopeIndex);
 	const knownConcentrationMassFraction = concentrationToMassFraction(
 		getNumberAtIndex(refMaterial.knownConcentration, isotopeIndex),
@@ -125,11 +148,7 @@ function getUnknownConcentration(
 	);
 	const resultMassFraction =
 		knownConcentrationMassFraction *
-		getDeadTimeCorrectionRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
-		getSaturationFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
-		getDecayCorrectionFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
-		multimaterial.massCorrection *
-		multimaterial.fluenceCorrection;
+		getCombinedCorrectionFactor(refMaterial, unkMaterial, isotope, isotopeIndex);
 
 	return massFractionToConcentration(resultMassFraction, outputUnit);
 }
@@ -153,8 +172,8 @@ function getUnknownConcentrationUncertainty(
 
 	return Math.sqrt(
 		Math.pow(getNumberAtIndex(refComp.countUncertaintyPercent, isotopeIndex), 2) +
-		Math.pow(getNumberAtIndex(unkComp.countUncertaintyPercent, isotopeIndex), 2) +
-		Math.pow(knownConcentrationUncertaintyPercent, 2)
+			Math.pow(getNumberAtIndex(unkComp.countUncertaintyPercent, isotopeIndex), 2) +
+			Math.pow(knownConcentrationUncertaintyPercent, 2)
 	);
 }
 
@@ -163,8 +182,13 @@ function getNumUnknownConcUncertainty(
 	unkMaterial: UnknownMaterial,
 	isotope: IsotopeInfo,
 	isotopeIndex: number
-) : number {
-	const percUncertainty = getUnknownConcentrationUncertainty(refMaterial, unkMaterial, isotope, isotopeIndex);
+): number {
+	const percUncertainty = getUnknownConcentrationUncertainty(
+		refMaterial,
+		unkMaterial,
+		isotope,
+		isotopeIndex
+	);
 	const unkConc = getUnknownConcentration(refMaterial, unkMaterial, isotope, isotopeIndex);
 	return (percUncertainty / 100) * unkConc;
 }
@@ -191,6 +215,12 @@ export function getAll(
 	isotopeIndex: number
 ): EverythingComputed {
 	return {
+		combinedCorrectionFactor: getCombinedCorrectionFactor(
+			refMaterial,
+			unkMaterial,
+			isotope,
+			isotopeIndex
+		),
 		saturationFactorRatio: getSaturationFactorRatio(
 			refMaterial,
 			unkMaterial,
