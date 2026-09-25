@@ -17,6 +17,7 @@ import type { ConcUnitType, HalfLife, IsotopeInfo } from '$lib/types.js';
 import { parseIsotopeName, isotopeIdentityKey } from '$lib/utils/catalogWrite.js';
 import { lookupElementSymbol, normalizeElementSymbol } from '$lib/utils/elementNames.js';
 import type { FissionCorrectionRecord, IrradiationType } from '$lib/utils/fissionCorrections.js';
+import { BUILTIN_FISSION_ROW_PREFIX, isBuiltinFissionRow } from '$lib/utils/landsbergerFission.js';
 
 type IsotopeIdentity = Pick<IsotopeInfo, 'elementName' | 'isotopeName'>;
 
@@ -344,7 +345,8 @@ export function describeFissionRow(row: FissionCorrectionRecord): string {
 	}
 	parts.push(row.irradiationType);
 	const unc = row.uncertainty ? ` ± ${row.uncertainty}` : '';
-	return `${parts.join(' · ')} → factor ${row.correctionFactor}${unc}`;
+	const source = isBuiltinFissionRow(row) ? ` — ${row.notes}` : '';
+	return `${parts.join(' · ')} → factor ${row.correctionFactor}${unc}${source}`;
 }
 
 /**
@@ -421,7 +423,12 @@ export function describeFissionChoice(choice: FissionChoice): string {
 		return `Special correction — constant ${choice.factor}${unc} (${choice.fissileNuclide ?? 'U-235'}, thermal, ${from})`;
 	}
 	if (choice.mode === 'table') {
-		const from = [choice.fissileNuclide, choice.irradiationType].filter(Boolean).join(', ');
+		const builtin = choice.sourceRowId?.startsWith(BUILTIN_FISSION_ROW_PREFIX)
+			? 'Landsberger 1989'
+			: '';
+		const from = [choice.fissileNuclide, choice.irradiationType, builtin]
+			.filter(Boolean)
+			.join(', ');
 		return `Factor ${choice.factor}${unc}${from ? ` (${from})` : ''}`;
 	}
 	return `Factor ${choice.factor}${unc} (custom)`;

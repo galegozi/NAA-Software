@@ -82,6 +82,7 @@
 		type ManualFissileField
 	} from '$lib/utils/fissionInterference.js';
 	import { computeFissionResults } from '$lib/utils/fissionResults.js';
+	import { landsbergerFissionRows } from '$lib/utils/landsbergerFission.js';
 	import { diagonalResultOrder } from '$lib/utils/resultOrder.js';
 	import { lookupElementSymbol } from '$lib/utils/elementNames.js';
 	import { swaAuth, redirectToSignIn } from '$lib/utils/swaAuth.svelte.js';
@@ -1806,7 +1807,10 @@
 	let fissionCandidates = $derived(
 		isotopeInfo
 			.map((isotope, index) => {
-				const rows = matchingFissionRows(isotope, fissionRows);
+				const rows = [
+					...matchingFissionRows(isotope, fissionRows),
+					...landsbergerFissionRows(isotope)
+				];
 				if (rows.length === 0 && !isKnownFissionProduct(isotope)) {
 					return null;
 				}
@@ -4054,7 +4058,7 @@
 										{/if}
 
 										{#if candidate.rows.length > 0}
-											<p class="text-sm font-semibold">From the catalog table:</p>
+											<p class="text-sm font-semibold">Available factors:</p>
 											<ul class="space-y-1">
 												{#each candidate.rows as row (row.id)}
 													<li class="flex flex-wrap items-center justify-between gap-2 text-sm">
