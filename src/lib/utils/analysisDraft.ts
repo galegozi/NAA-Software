@@ -6,6 +6,7 @@
  * draft is only cleared explicitly ("Start new analysis").
  */
 import type { IsotopeInfo, ReferenceMaterial, UnknownMaterial } from '$lib/types.js';
+import type { InterferenceSetting } from '$lib/utils/interferenceCorrection.js';
 
 export const DRAFT_KEY = 'naa-analysis-draft';
 export const DRAFT_VERSION = 3;
@@ -44,6 +45,8 @@ export type AnalysisDraft = {
 	expandedReferences: number[];
 	expandedUnknowns: number[];
 	localIsotopeLinks: LocalIsotopeLink[];
+	/** Step 1 interference corrections (absent in drafts from before 8.0). */
+	interferenceSettings: InterferenceSetting[];
 };
 
 function hasLocalStorage(): boolean {
@@ -76,6 +79,38 @@ export function clearDraft(): void {
 	}
 }
 
+const numberOrNull = (value: unknown): number | null =>
+	typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+/** Defensive parse — a malformed entry is dropped rather than failing the whole draft. */
+function parseInterferenceSettings(value: unknown): InterferenceSetting[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	return value
+		.filter(
+			(s): s is InterferenceSetting =>
+				!!s && typeof s.isotopeKey === 'string' && Array.isArray(s.interferents)
+		)
+		.map((s) => ({
+			isotopeKey: s.isotopeKey,
+			interferents: s.interferents
+				.filter((i) => !!i && typeof i.element === 'string')
+				.map((i) => ({
+					element: i.element,
+					reaction: typeof i.reaction === 'string' ? i.reaction : '',
+					enabled: i.enabled === true,
+					factor: numberOrNull(i.factor),
+					uncertainty: numberOrNull(i.uncertainty),
+					unit: i.unit === 'percentage' ? 'percentage' : 'ppm',
+					manualInStandard: numberOrNull(i.manualInStandard),
+					manualInUnknown: Array.isArray(i.manualInUnknown)
+						? i.manualInUnknown.map(numberOrNull)
+						: []
+				}))
+		}));
+}
+
 function parseDraft(raw: string | null, expectedVersion: number): AnalysisDraft | null {
 	if (!raw) {
 		return null;
@@ -106,7 +141,8 @@ function parseDraft(raw: string | null, expectedVersion: number): AnalysisDraft 
 			expandedIsotopes: Array.isArray(parsed.expandedIsotopes) ? parsed.expandedIsotopes : [],
 			expandedReferences: Array.isArray(parsed.expandedReferences) ? parsed.expandedReferences : [],
 			expandedUnknowns: Array.isArray(parsed.expandedUnknowns) ? parsed.expandedUnknowns : [],
-			localIsotopeLinks: Array.isArray(parsed.localIsotopeLinks) ? parsed.localIsotopeLinks : []
+			localIsotopeLinks: Array.isArray(parsed.localIsotopeLinks) ? parsed.localIsotopeLinks : [],
+			interferenceSettings: parseInterferenceSettings(parsed.interferenceSettings)
 		};
 	} catch {
 		return null;
