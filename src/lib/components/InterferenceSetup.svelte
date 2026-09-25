@@ -81,9 +81,6 @@
 		on its own and read off the apparent target concentration). For example, a factor of 0.01 means
 		1 % aluminium reads as 0.01 % magnesium.
 	</p>
-	<p class="text-xs text-surface-600-400">
-		The suggested reactions are a provisional list, not yet checked against the Landsberger papers.
-	</p>
 
 	{#if rows.length === 0}
 		<p class="text-sm">
