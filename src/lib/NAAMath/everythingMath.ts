@@ -22,7 +22,7 @@ function getUnitAtIndex(
 	return values?.[index];
 }
 
-function concentrationToMassFraction(
+export function concentrationToMassFraction(
 	concentration: number,
 	unit: ReferenceMaterial['concentrationUnits'][number]
 ): number {
@@ -41,7 +41,7 @@ function concentrationToMassFraction(
 	return concentration;
 }
 
-function massFractionToConcentration(
+export function massFractionToConcentration(
 	massFraction: number,
 	unit: ReferenceMaterial['concentrationUnits'][number]
 ): number {
@@ -111,13 +111,33 @@ function getDeadTimeCorrectionRatio(
 	return isoMat.unknown.funcDeadTimeCorrection / isoMat.reference.funcDeadTimeCorrection;
 }
 
-function getUnknownConcentration(
+/**
+ * `k`: the product of every correction ratio, so that
+ * `unknownConcentration = k * knownConcentration`. The interference correction
+ * needs it on its own.
+ */
+function getCombinedCorrectionFactor(
 	refMaterial: ReferenceMaterial,
 	unkMaterial: UnknownMaterial,
 	isotope: IsotopeInfo,
 	isotopeIndex: number
 ): number {
 	const multimaterial = MMGA(refMaterial, unkMaterial);
+	return (
+		getDeadTimeCorrectionRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
+		getSaturationFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
+		getDecayCorrectionFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
+		multimaterial.massCorrection *
+		multimaterial.fluenceCorrection
+	);
+}
+
+function getUnknownConcentration(
+	refMaterial: ReferenceMaterial,
+	unkMaterial: UnknownMaterial,
+	isotope: IsotopeInfo,
+	isotopeIndex: number
+): number {
 	const outputUnit = getUnitAtIndex(refMaterial.concentrationUnits, isotopeIndex);
 	const knownConcentrationMassFraction = concentrationToMassFraction(
 		getNumberAtIndex(refMaterial.knownConcentration, isotopeIndex),
@@ -125,11 +145,7 @@ function getUnknownConcentration(
 	);
 	const resultMassFraction =
 		knownConcentrationMassFraction *
-		getDeadTimeCorrectionRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
-		getSaturationFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
-		getDecayCorrectionFactorRatio(refMaterial, unkMaterial, isotope, isotopeIndex) *
-		multimaterial.massCorrection *
-		multimaterial.fluenceCorrection;
+		getCombinedCorrectionFactor(refMaterial, unkMaterial, isotope, isotopeIndex);
 
 	return massFractionToConcentration(resultMassFraction, outputUnit);
 }
@@ -204,6 +220,12 @@ export function getAll(
 			isotopeIndex
 		),
 		decayCorrectionFactorRatio: getDecayCorrectionFactorRatio(
+			refMaterial,
+			unkMaterial,
+			isotope,
+			isotopeIndex
+		),
+		combinedCorrectionFactor: getCombinedCorrectionFactor(
 			refMaterial,
 			unkMaterial,
 			isotope,

@@ -111,4 +111,14 @@ describe('everythingMath concentration unit handling', () => {
 		expect(ppmResult).toBeCloseTo(2_000, 6);
 		expect(ppmResult / percentResult).toBeCloseTo(10_000, 4);
 	});
+
+	it('exposes k so that unknownConcentration = k * knownConcentration', () => {
+		const result = getEverything(
+			createReferenceMaterial('ppm', 10_000),
+			createUnknownMaterial(200),
+			createIsotope(),
+			0
+		);
+		expect(result.combinedCorrectionFactor * 10_000).toBeCloseTo(result.unknownConcentration, 6);
+	});
 });

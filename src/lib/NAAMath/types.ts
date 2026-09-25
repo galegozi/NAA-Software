@@ -56,6 +56,8 @@ export interface EverythingComputed {
 	saturationFactorRatio: number;
 	deadTimeCorrectionRatio: number;
 	decayCorrectionFactorRatio: number;
+	/** `k`: unknownConcentration = k * knownConcentration. */
+	combinedCorrectionFactor: number;
 	unknownConcentration: number;
 	unknownConcentrationUncertainty: number;
 	unknownConcentrationUncertaintyAbsolute: number;

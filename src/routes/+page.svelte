@@ -78,6 +78,15 @@
 	} from '$lib/utils/catalogWrite.js';
 	import ReferenceDatasheetForm from '$lib/components/ReferenceDatasheetForm.svelte';
 	import IsotopeRelationshipForm from '$lib/components/IsotopeRelationshipForm.svelte';
+	import InterferenceSetup from '$lib/components/InterferenceSetup.svelte';
+	import InterferenceReview from '$lib/components/InterferenceReview.svelte';
+	import {
+		computeInterferenceResults,
+		interferentErrors,
+		settingFor,
+		type InterferenceResult,
+		type InterferenceSetting
+	} from '$lib/utils/interferenceCorrection.js';
 	import {
 		resolveProxyMeasured,
 		applyProxyMeasured,
@@ -284,7 +293,8 @@
 			expandedIsotopes: Array.from(expandedIsotopes),
 			expandedReferences: Array.from(expandedReferences),
 			expandedUnknowns: Array.from(expandedUnknowns),
-			localIsotopeLinks
+			localIsotopeLinks,
+			interferenceSettings
 		};
 	}
 
@@ -353,6 +363,7 @@
 		);
 		isotopeReferenceMap = Array.isArray(saved.isotopeReferenceMap) ? saved.isotopeReferenceMap : [];
 		localIsotopeLinks = Array.isArray(saved.localIsotopeLinks) ? saved.localIsotopeLinks : [];
+		interferenceSettings = saved.interferenceSettings ?? [];
 
 		hydrateExpandedSet(expandedIsotopes, saved.expandedIsotopes ?? []);
 		hydrateExpandedSet(expandedReferences, saved.expandedReferences ?? []);
@@ -395,6 +406,7 @@
 		isotopeDup = {};
 		referenceDup = {};
 		localIsotopeLinks = [];
+		interferenceSettings = [];
 		relationshipFeedback = '';
 		relationshipConfirm = null;
 		relationshipPanelOpen = false;
@@ -465,6 +477,8 @@
 
 	// Proxy-measurement relationships ("A measures B") recorded this session.
 	let localIsotopeLinks = $state<LocalIsotopeLink[]>([]);
+	// Step 1 interference corrections, keyed by nuclide (see interferenceCorrection.ts).
+	let interferenceSettings = $state<InterferenceSetting[]>([]);
 	let relationshipPanelOpen = $state(false);
 	let relationshipFeedback = $state('');
 	let relationshipForm = $state<IsotopeRelationshipForm>();
@@ -1648,6 +1662,46 @@
 				})
 	);
 
+	// Interference-corrected results, keyed "<isotopeIndex>:<unknownIndex>". Only
+	// pairs whose isotope has an enabled interferent appear.
+	let interferenceResults = $derived(
+		materials.reference.length === 0
+			? new Map<string, InterferenceResult>()
+			: computeInterferenceResults({
+					isotopes: isotopeInfo,
+					references: materials.reference,
+					unknownCount: materials.unknown.length,
+					settings: interferenceSettings,
+					linkedReference: getLinkedReferenceIndex,
+					referenceCovers: referenceCoversIsotope,
+					results: everythingComp
+				})
+	);
+
+	/**
+	 * The value the results table and CSV show: the interference-corrected one
+	 * when a correction applies and is complete, otherwise the plain result.
+	 * `pending` = a correction applies but still needs an entered concentration.
+	 */
+	function displayedResult(isotopeIndex: number, unknownIndex: number) {
+		const plain = everythingComp[isotopeIndex][unknownIndex];
+		const interference = interferenceResults.get(`${isotopeIndex}:${unknownIndex}`);
+		if (interference && interference.corrected !== null) {
+			return {
+				value: interference.corrected,
+				uncertainty: interference.correctedUncertainty ?? 0,
+				corrected: true,
+				pending: false
+			};
+		}
+		return {
+			value: plain.unknownConcentration,
+			uncertainty: plain.unknownConcentrationUncertaintyAbsolute,
+			corrected: false,
+			pending: interference !== undefined
+		};
+	}
+
 	/** (unknown, linked-reference) pairs counted in different modes — surfaced on the Review step. */
 	let countingModeMismatches = $derived.by(() => {
 		const modeOf = (m?: { countingMode?: string }) =>
@@ -2302,6 +2356,14 @@
 		};
 		matRefs.unknown = matRefs.unknown.filter((_, index) => index !== unknownIndex);
 		remapExpandedAfterRemoval(expandedUnknowns, unknownIndex);
+		// Hand-entered interferent concentrations are per unknown index.
+		for (const setting of interferenceSettings) {
+			for (const interferent of setting.interferents) {
+				interferent.manualInUnknown = interferent.manualInUnknown.filter(
+					(_, index) => index !== unknownIndex
+				);
+			}
+		}
 	}
 
 	function getCoveringReferenceIndicesForIsotope(isotopeIndex: number): number[] {
@@ -2390,6 +2452,14 @@
 					expandIsotope(index);
 					const label = getIsotopeDisplayName(iso, index);
 					problems.push(...errors.map((error) => `${label}: ${error}`));
+				}
+				const label = getIsotopeDisplayName(iso, index);
+				for (const interferent of settingFor(interferenceSettings, iso)?.interferents ?? []) {
+					problems.push(
+						...interferentErrors(interferent).map(
+							(error) => `${label} interference correction: ${error}`
+						)
+					);
 				}
 			});
 
@@ -2569,10 +2639,8 @@
 			const row = [
 				escapeCSV(unknownLabel),
 				...isotopeInfo.flatMap((_, iIndex) => [
-					escapeCSV(roundResult(everythingComp[iIndex][uIndex].unknownConcentration)),
-					escapeCSV(
-						roundResult(everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute)
-					)
+					escapeCSV(roundResult(displayedResult(iIndex, uIndex).value)),
+					escapeCSV(roundResult(displayedResult(iIndex, uIndex).uncertainty))
 				])
 			];
 			csvRows.push(row.join(','));
@@ -2586,6 +2654,23 @@
 			];
 			csvRows.push(detectionLimitRow.join(','));
 		});
+
+		// Say which cells carry an interference correction (and which still don't).
+		const interferenceNotes = [...interferenceResults.values()].map((result) => {
+			const cell = `${getIsotopeDisplayName(isotopeInfo[result.isotopeIndex], result.isotopeIndex)} / ${
+				materials.unknown[result.unknownIndex]?.NETL_code || `Unknown ${result.unknownIndex + 1}`
+			}`;
+			const by = result.interferents.map((i) => `${i.element} (f = ${i.factor})`).join('; ');
+			return result.corrected === null
+				? `${cell}: NOT corrected for interference from ${by} — missing ${result.missing.join(', ')}`
+				: `${cell}: corrected for interference from ${by}; uncorrected ${roundResult(result.uncorrected)}`;
+		});
+		if (interferenceNotes.length > 0) {
+			csvRows.push('');
+			for (const note of interferenceNotes) {
+				csvRows.push(escapeCSV(note));
+			}
+		}
 
 		// Create CSV string
 		const csvContent = csvRows.join('\n');
@@ -2960,6 +3045,14 @@
 			</div>
 			<br />
 			<button type="button" onclick={addCustomIsotope}>Add custom isotope</button>
+
+			<div class="mt-8">
+				<InterferenceSetup
+					isotopes={isotopeInfo}
+					labels={isotopeInfo.map((iso, index) => getIsotopeDisplayName(iso, index))}
+					bind:settings={interferenceSettings}
+				/>
+			</div>
 
 			<div id="isotope-relationships" class="mt-8 scroll-mt-24">
 				<button
@@ -3564,10 +3657,13 @@
 								{unknownLabel}
 							</td>
 							{#each isotopeInfo as _, iIndex}
+								{@const shown = displayedResult(iIndex, uIndex)}
 								<td class="border border-surface-300-700 px-4 py-2">
-									{roundResult(everythingComp[iIndex][uIndex].unknownConcentration)} ± {roundResult(
-										everythingComp[iIndex][uIndex].unknownConcentrationUncertaintyAbsolute
-									)}
+									{roundResult(shown.value)} ± {roundResult(shown.uncertainty)}{shown.corrected
+										? ' †'
+										: shown.pending
+											? ' *'
+											: ''}
 								</td>
 							{/each}
 						</tr>
@@ -3584,11 +3680,27 @@
 					{/each}
 				</tbody>
 			</table>
+			{#if interferenceResults.size > 0}
+				<p class="mt-2 text-sm">
+					† corrected for interference · * interference correction not applied yet — enter the
+					missing concentrations below
+				</p>
+			{/if}
 			<br />
 			<button type="button" class="variant-filled-primary btn" onclick={downloadTableAsCSV}>
 				Download Table as CSV
 			</button>
 			<br /><br />
+			<InterferenceReview
+				results={interferenceResults}
+				isotopes={isotopeInfo}
+				labels={isotopeInfo.map((iso, index) => getIsotopeDisplayName(iso, index))}
+				unknownLabels={materials.unknown.map(
+					(unk, index) => unk.NETL_code || `Unknown ${index + 1}`
+				)}
+				bind:settings={interferenceSettings}
+			/>
+			<br />
 
 			{#if swaAuth.signInAvailable}
 				<section class="mt-4 space-y-2 rounded border border-primary-500 preset-tonal-primary p-4">
