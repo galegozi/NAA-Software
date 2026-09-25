@@ -5,7 +5,7 @@
  *   0 Welcome -> 1 Select Isotopes -> 2 Build Library -> 3 Unknown Materials -> 4 Review
  */
 
-export const APP_VERSION = '7.2 DEVELOPER PREVIEW';
+export const APP_VERSION = '8.0 ALPHA DEVELOPER PREVIEW';
 
 /**
  * Step type enumeration

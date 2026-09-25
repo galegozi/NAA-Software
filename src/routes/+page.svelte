@@ -3635,8 +3635,8 @@
 			</label>
 			<br />
 			<p>
-				This version is a beta release. Some things may not be perfect, but you should expect good
-				stability.
+				This version is an alpha developer preview. Features are still in progress and may change or
+				break without notice — do not rely on its results.
 			</p>
 			<br />
 			<p>Here is what is included in this software:</p>
@@ -3666,8 +3666,8 @@
 			<p>Note: This software has NOT gone through formal validation or verification processes.</p>
 			<br />
 			<p>
-				In this version (v{APP_VERSION}), the main focus is to implement fission correction and work
-				on more minor bug fixes and UI changes.
+				In this version (v{APP_VERSION}), the main focus is to implement interference correction on
+				top of fission correction.
 			</p>
 			<br />
 			<h2 class="text-2xl font-bold">Next planned releases</h2>
